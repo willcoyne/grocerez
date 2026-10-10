@@ -1,14 +1,24 @@
 import { prisma, type Db } from "../../db.js";
 import type { CreateItemBody, Item, ItemSearchResponse } from "../../contracts/items.js";
 import { badRequest, conflict, notFound } from "../../lib/errors.js";
-import { embed, embeddingModel, embeddingsConfigured, embedQuery, itemEmbeddingText, toVectorLiteral } from "../../lib/embeddings.js";
+import {
+  describeItems,
+  embed,
+  EMBED_BATCH_MAX,
+  embeddingModel,
+  embeddingsConfigured,
+  embedQuery,
+  itemEmbeddingText,
+  toVectorLiteral,
+} from "../../lib/embeddings.js";
 import { config } from "../../config.js";
 import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { itemsRepo, searchRowToItem, toItem } from "./repo.js";
 
-/** Akamai's embeddings endpoint accepts at most 16 inputs per request. */
-const EMBED_BATCH_MAX = 16;
+/** Background embeds in flight (tests await them with `waitForItemEmbeds`). */
+const pendingEmbeds = new Set<Promise<void>>();
+export const waitForItemEmbeds = () => Promise.all([...pendingEmbeds]);
 
 const emptyName = () => badRequest("Item name is empty after normalization", "VALIDATION_ERROR");
 
@@ -19,16 +29,23 @@ export const itemsService = {
     if (!n) throw emptyName();
     const rows = await itemsRepo.search(db, q);
     const results = rows.map(searchRowToItem);
-    const related = await this.related(n, results.map((r) => r.id), db);
+    // A spelling match (Oreos) has a description-based embedding that knows what it is ("chocolate sandwich
+    // cookies"), so its neighbours beat embedding the bare typed word. No match → embed what was typed.
+    const anchor = rows[0] && rows[0].match !== "none" ? rows[0].item_id : null;
+    const related = await this.related(q, results.map((r) => r.id), db, anchor);
     if (rows.length === 0) return { match: "none", results: [], related };
     return { match: rows[0].match, results, related };
   },
 
-  /** Semantic neighbours of a (normalized) query via Akamai embeddings. Never fails the search: errors → []. */
-  async related(normalizedQuery: string, excludeIds: string[], db: Db = prisma, limit = 5) {
+  /** Items closest to what was typed by cosine similarity (Akamai embeddings). Never fails the search: errors → []. */
+  async related(typed: string, excludeIds: string[], db: Db = prisma, anchorItemId: string | null = null, limit = 6) {
     if (!embeddingsConfigured()) return [];
     try {
-      const vector = await embedQuery(normalizedQuery);
+      if (anchorItemId) {
+        const rows = await itemsRepo.relatedToItem(db, anchorItemId, excludeIds, config.SEMANTIC_MAX_DISTANCE, limit);
+        if (rows.length > 0) return rows.map(searchRowToItem);
+      }
+      const vector = await embedQuery(typed);
       const rows = await itemsRepo.related(
         db, toVectorLiteral(vector), vector.length, embeddingModel(), excludeIds, config.SEMANTIC_MAX_DISTANCE, limit,
       );
@@ -39,14 +56,40 @@ export const itemsService = {
     }
   },
 
-  /** Embeds one item right after it's added. Best effort: the item exists either way, and startup backfills misses. */
+  /**
+   * Describes (Akamai chat) then embeds items, saving both. A failed description falls back to "name (category)";
+   * a failed embedding throws so callers can decide (startup backfill retries on the next start).
+   */
+  async describeAndEmbed(items: { id: string; name: string; category: string | null; description: string | null }[]) {
+    const undescribed = items.filter((i) => !i.description).map((i) => i.name);
+    const descriptions = await describeItems(undescribed).catch((err) => {
+      logger.warn({ err: String(err) }, "item descriptions failed; embedding names only");
+      return new Map<string, string>();
+    });
+    const withText = items.map((i) => ({ ...i, description: i.description ?? descriptions.get(i.name) ?? null }));
+    const vectors = await embed(withText.map(itemEmbeddingText));
+    for (const [k, item] of withText.entries()) {
+      await itemsRepo.setDescriptionAndEmbedding(
+        prisma, item.id, item.description, toVectorLiteral(vectors[k]), embeddingModel(),
+      );
+    }
+  },
+
+  /** Describes and embeds one item right after it's added. Best effort: the item exists either way. */
   async embedItem(item: { id: string; name: string; category: string | null }) {
     if (!embeddingsConfigured()) return;
     try {
-      const [vector] = await embed([itemEmbeddingText(item)]);
-      await itemsRepo.setEmbedding(prisma, item.id, toVectorLiteral(vector), embeddingModel());
+      await this.describeAndEmbed([{ ...item, description: null }]);
     } catch (err) {
       logger.warn({ err: String(err), itemId: item.id }, "item embedding failed");
+    }
+  },
+
+  /** Runs embedItem without making the caller wait (adding an item stays instant). */
+  embedItemInBackground(item: { id: string; name: string; category: string | null }) {
+    if (embeddingsConfigured()) {
+      const p: Promise<void> = this.embedItem(item).finally(() => pendingEmbeds.delete(p));
+      pendingEmbeds.add(p);
     }
   },
 
@@ -57,10 +100,7 @@ export const itemsService = {
     for (;;) {
       const batch = await itemsRepo.missingEmbeddings(prisma, embeddingModel(), batchSize);
       if (batch.length === 0) return total;
-      const vectors = await embed(batch.map(itemEmbeddingText));
-      for (const [i, item] of batch.entries()) {
-        await itemsRepo.setEmbedding(prisma, item.id, toVectorLiteral(vectors[i]), embeddingModel());
-      }
+      await this.describeAndEmbed(batch);
       total += batch.length;
     }
   },
@@ -90,7 +130,7 @@ export const itemsService = {
       return { item: toItem(item), created };
     });
     // Only brand-new items need an embedding (aliases point at an existing, already-embedded item).
-    if (result.created && !body.aliasOf) await this.embedItem(result.item);
+    if (result.created && !body.aliasOf) this.embedItemInBackground(result.item);
     return result;
   },
 
@@ -104,7 +144,7 @@ export const itemsService = {
     if (res.match !== "none" && res.results[0]) return { item: res.results[0], match: res.match };
     if (!opts.createIfMissing) return null;
     const { item, created } = await itemsRepo.createOrGet(prisma, name.trim().slice(0, 200), opts.category ?? "other", opts.createdBy ?? null);
-    if (created) await this.embedItem(item);
+    if (created) this.embedItemInBackground(item);
     return { item: toItem(item), match: "created" as const };
   },
 };

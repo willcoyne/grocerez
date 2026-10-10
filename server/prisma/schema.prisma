@@ -163,7 +163,9 @@ model Item {
   /// NULL = seeded.
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  /// Akamai embedding of the item (semantic search). Read/written with raw SQL only.
+  /// Short generic description from Akamai's chat model, e.g. "chocolate sandwich cookies".
+  description      String?
+  /// Akamai embedding of "name: description" (semantic search). Read/written with raw SQL only.
   embedding        Unsupported("vector")?
   embeddingModel   String?    @map("embedding_model")
   embeddedAt       DateTime?  @map("embedded_at") @db.Timestamptz(6)

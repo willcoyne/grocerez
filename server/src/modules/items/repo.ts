@@ -61,16 +61,17 @@ export const itemsRepo = {
     return { item: await db.item.findUniqueOrThrow({ where: { id: existing.id } }), created: false };
   },
 
-  /** Stores an item's embedding (vector literal from toVectorLiteral). */
-  setEmbedding: (db: Db, itemId: string, vector: string, model: string) =>
+  /** Stores an item's description and embedding (vector literal from toVectorLiteral). */
+  setDescriptionAndEmbedding: (db: Db, itemId: string, description: string | null, vector: string, model: string) =>
     db.$executeRaw`
-      UPDATE items SET embedding = ${vector}::vector, embedding_model = ${model}, embedded_at = now()
+      UPDATE items SET description = COALESCE(${description}, description),
+        embedding = ${vector}::vector, embedding_model = ${model}, embedded_at = now()
       WHERE id = ${itemId}::uuid`,
 
   /** Items with no embedding for `model` yet (new items, or the model changed). */
   missingEmbeddings: (db: Db, model: string, limit: number) =>
-    db.$queryRaw<{ id: string; name: string; category: string | null }[]>`
-      SELECT id, name, category FROM items
+    db.$queryRaw<{ id: string; name: string; category: string | null; description: string | null }[]>`
+      SELECT id, name, category, description FROM items
       WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM ${model}
       ORDER BY created_at, id LIMIT ${limit}::int`,
 
@@ -87,6 +88,19 @@ export const itemsRepo = {
         AND NOT (id = ANY(${excludeIds}::uuid[]))
         AND (embedding <=> ${vector}::vector) <= ${maxDistance}::float8
       ORDER BY embedding <=> ${vector}::vector
+      LIMIT ${limit}::int`,
+
+  /** Nearest items to another item's stored embedding (cosine), e.g. Oreos → Chips Ahoy, Cookies. */
+  relatedToItem: (db: Db, itemId: string, excludeIds: string[], maxDistance: number, limit: number) =>
+    db.$queryRaw<(Omit<SearchRow, "match" | "similarity"> & { distance: number })[]>`
+      SELECT b.id AS item_id, b.name, b.normalized_name, b.category, b.default_allergens::text[] AS default_allergens,
+             b.shelf_life_days, (b.embedding <=> a.embedding) AS distance
+      FROM items a JOIN items b
+        ON b.embedding_model = a.embedding_model AND vector_dims(b.embedding) = vector_dims(a.embedding)
+      WHERE a.id = ${itemId}::uuid AND a.embedding IS NOT NULL AND b.id <> a.id
+        AND NOT (b.id = ANY(${excludeIds}::uuid[]))
+        AND (b.embedding <=> a.embedding) <= ${maxDistance}::float8
+      ORDER BY b.embedding <=> a.embedding
       LIMIT ${limit}::int`,
 
   /** Adds alias → itemId. Returns the item id the alias points at (an existing alias wins). */

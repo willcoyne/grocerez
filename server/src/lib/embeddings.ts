@@ -3,50 +3,62 @@ import { AppError } from "./errors.js";
 import { http, USER_AGENT } from "./http.js";
 
 /**
- * Akamai embedding client (semantic item search). The endpoint is OpenAI-compatible:
- * POST {input: string[], model} → {data: [{index, embedding: number[]}]}.
+ * Akamai AI client for semantic item search. Both endpoints are OpenAI-compatible under AKAMAI_BASE_URL:
+ *   POST /embeddings        {model, input: string[]} → {data: [{index, embedding: number[]}]}
+ *   POST /chat/completions  {model, messages}        → {choices: [{message: {content}}]}
  */
-export const embeddingsConfigured = () => Boolean(config.AKAMAI_API_KEY && config.AKAMAI_EMBEDDING_URL);
+export const embeddingsConfigured = () => Boolean(config.AKAMAI_API_KEY && config.AKAMAI_BASE_URL);
 
 export const embeddingModel = () => config.AKAMAI_EMBEDDING_MODEL;
 
-/** Text embedded for a catalog item. Including the category gives the model context ("Oreos (snacks)"). */
-export const itemEmbeddingText = (item: { name: string; category: string | null }) =>
-  item.category ? `${item.name} (${item.category})` : item.name;
+/**
+ * Text embedded for a catalog item. The description says what the item *is* ("Oreos: chocolate sandwich
+ * cookies"), which a small embedding model can't infer from a brand name alone.
+ */
+export const itemEmbeddingText = (item: { name: string; category: string | null; description?: string | null }) =>
+  item.description ? `${item.name}: ${item.description}` : item.category ? `${item.name} (${item.category})` : item.name;
 
 /** pgvector literal, e.g. "[0.1,0.2]". */
 export const toVectorLiteral = (v: number[]) => `[${v.join(",")}]`;
 
-/**
- * Embeds up to 16 texts (Akamai's per-request limit). Rate limits (429) and 5xx are retried with backoff,
- * honoring Retry-After; search calls pass retries: 0 so typing never waits on a backoff.
- */
-export async function embed(texts: string[], opts: { retries?: number } = {}): Promise<number[][]> {
-  if (!embeddingsConfigured()) throw new AppError(503, "NOT_CONFIGURED", "Akamai embeddings are not configured");
-  if (texts.length === 0) return [];
-  const retries = opts.retries ?? 4;
-  let res: Response;
+/** POST to Akamai, retrying rate limits (429) and 5xx with backoff (honoring Retry-After). */
+async function akamaiPost(path: string, body: unknown, opts: { retries: number; timeoutMs: number }): Promise<Response> {
+  if (!embeddingsConfigured()) throw new AppError(503, "NOT_CONFIGURED", "Akamai AI is not configured");
+  const url = `${config.AKAMAI_BASE_URL!.replace(/\/+$/, "")}${path}`;
   for (let attempt = 0; ; attempt++) {
-    res = await http.fetch(config.AKAMAI_EMBEDDING_URL!, {
+    const res = await http.fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.AKAMAI_API_KEY}`,
         "Content-Type": "application/json",
         "User-Agent": USER_AGENT(),
       },
-      body: JSON.stringify({ model: embeddingModel(), input: texts }),
-      signal: AbortSignal.timeout(10_000),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(opts.timeoutMs),
     });
     const retryable = res.status === 429 || res.status >= 500;
-    if (!retryable || attempt >= retries) break;
+    if (res.ok || !retryable || attempt >= opts.retries) {
+      if (res.ok) return res;
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      throw new AppError(502, "UPSTREAM_ERROR", `Akamai ${path} returned ${res.status}${detail ? `: ${detail}` : ""}`);
+    }
     const retryAfter = Number(res.headers.get("retry-after"));
     const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** attempt;
     await new Promise((r) => setTimeout(r, Math.min(waitMs, 10_000)));
   }
-  if (!res.ok) {
-    const detail = (await res.text().catch(() => "")).slice(0, 200);
-    throw new AppError(502, "UPSTREAM_ERROR", `Akamai embeddings returned ${res.status}${detail ? `: ${detail}` : ""}`);
-  }
+}
+
+/** Akamai's embeddings endpoint accepts at most 16 inputs per request. */
+export const EMBED_BATCH_MAX = 16;
+
+/** Embeds up to 16 texts. Search calls pass retries: 0 so typing never waits on a backoff. */
+export async function embed(texts: string[], opts: { retries?: number } = {}): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  const res = await akamaiPost(
+    "/embeddings",
+    { model: embeddingModel(), input: texts },
+    { retries: opts.retries ?? 4, timeoutMs: 10_000 },
+  );
   const body = (await res.json()) as { data?: { index?: number; embedding?: unknown }[] };
   const data = [...(body.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   const vectors = data.map((d) => d.embedding);
@@ -56,6 +68,46 @@ export async function embed(texts: string[], opts: { retries?: number } = {}): P
     throw new AppError(502, "UPSTREAM_ERROR", "Akamai embeddings returned an unexpected response");
   }
   return vectors;
+}
+
+const DESCRIBE_PROMPT =
+  "You describe grocery catalog items for a search index. For each item, write a short plain description " +
+  "(at most 10 words) of what kind of product it is, using generic words a shopper might search for " +
+  '(e.g. Oreos -> chocolate sandwich cookies). Reply with only a JSON object mapping each item name exactly as given to its description.';
+
+/** Writes short generic descriptions for item names with Akamai's chat model. Missing/invalid entries are left out. */
+export async function describeItems(names: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (names.length === 0) return out;
+  const res = await akamaiPost(
+    "/chat/completions",
+    {
+      model: config.AKAMAI_CHAT_MODEL,
+      temperature: 0,
+      max_tokens: 60 * names.length + 100,
+      messages: [
+        { role: "system", content: DESCRIBE_PROMPT },
+        { role: "user", content: JSON.stringify(names) },
+      ],
+    },
+    { retries: 3, timeoutMs: 60_000 },
+  );
+  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  const content = body.choices?.[0]?.message?.content ?? "";
+  // The model may wrap the JSON in prose or a code fence; take the outermost {...}.
+  const json = content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return out;
+  }
+  if (!parsed || typeof parsed !== "object") return out;
+  for (const name of names) {
+    const d = (parsed as Record<string, unknown>)[name];
+    if (typeof d === "string" && d.trim()) out.set(name, d.trim().replace(/\s+/g, " ").slice(0, 120));
+  }
+  return out;
 }
 
 /**
@@ -69,15 +121,17 @@ const QUERY_INSTRUCTION =
 const queryCache = new Map<string, number[]>();
 const QUERY_CACHE_MAX = 500;
 
-export async function embedQuery(normalizedQuery: string): Promise<number[]> {
-  const key = `${embeddingModel()}:${normalizedQuery}`;
+/** Embeds what the user typed (trimmed, lower-cased; not the catalog-normalized form, which drops meaning). */
+export async function embedQuery(typed: string): Promise<number[]> {
+  const text = typed.trim().replace(/\s+/g, " ").toLowerCase();
+  const key = `${embeddingModel()}:${text}`;
   const hit = queryCache.get(key);
   if (hit) {
     queryCache.delete(key);
     queryCache.set(key, hit);
     return hit;
   }
-  const [vector] = await embed([QUERY_INSTRUCTION + normalizedQuery], { retries: 0 });
+  const [vector] = await embed([QUERY_INSTRUCTION + text], { retries: 0 });
   queryCache.set(key, vector);
   if (queryCache.size > QUERY_CACHE_MAX) queryCache.delete(queryCache.keys().next().value!);
   return vector;

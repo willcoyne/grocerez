@@ -259,3 +259,15 @@ not required by the contract.
 - **Akamai endpoint assumption:** OpenAI-compatible `POST {model, input: string[]}` → `{data: [{index, embedding}]}`
   with `Authorization: Bearer <AKAMAI_API_KEY>`, at `AKAMAI_EMBEDDING_URL`. Verify with one real call when the
   secrets arrive; only `server/src/lib/embeddings.ts` needs to change if the format differs.
+
+### 2026-10-11 update — descriptions + item-to-item similarity
+
+- Real model check: `hackathon-embedding` is `Qwen/Qwen3-Embedding-0.6B` (1024 dims). It doesn't know brands, so
+  "Oreos (snacks)" landed near Doritos, and Cookies ranked #42 for "oreos".
+- Fix: every item gets a short semantic description from Akamai's `hackathon-chat` (`items.description`, migration
+  `20261011000900_item_descriptions`), written when the item is created (in the background) and by the backfill.
+  Embeddings are built from "name: description" (e.g. "Oreos: Chocolate sandwich cookies").
+- Search: when the query has a spelling match, "related" = items most cosine-similar to *that item's* embedding
+  (Oreos → Chips Ahoy, M&M's, …, Cookies). With no match, the typed text is embedded with a Qwen-style instruction.
+- Config: `AKAMAI_BASE_URL` (…/v1) replaces `AKAMAI_EMBEDDING_URL`; `AKAMAI_CHAT_MODEL=hackathon-chat`.
+  Akamai limits: 16 inputs per embeddings request, and rate limiting (429) — the client batches and retries.

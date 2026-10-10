@@ -28,7 +28,7 @@ export default defineConfig({
       RESEND_API_KEY: "",
       // Never call the real Akamai API from tests (server/.env may hold a real key).
       AKAMAI_API_KEY: "",
-      AKAMAI_EMBEDDING_URL: "",
+      AKAMAI_BASE_URL: "",
     },
   },
 });
