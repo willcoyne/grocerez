@@ -147,11 +147,19 @@ describe("schema (database/02-users)", () => {
 });
 
 describe("POST /api/dev/login-as/:userId", () => {
-  it("returns a token for an existing user, 404 for unknown, 400 for non-uuid", async () => {
+  it("returns a token for a seeded user, 404 for real or unknown users, 400 for non-uuid", async () => {
+    const seeded = await prisma.user.create({
+      data: { googleSub: `seed-${randomUUID()}`, email: `seed-${randomUUID()}@example.com`, displayName: "Seed" },
+    });
+    try {
+      const res = await request(app).post(`/api/dev/login-as/${seeded.id}`);
+      expect(res.status).toBe(200);
+      expect(AuthResponse.parse(res.body).user.id).toBe(seeded.id);
+    } finally {
+      await prisma.user.delete({ where: { id: seeded.id } });
+    }
     const { user } = AuthResponse.parse((await login(identity())).body);
-    const res = await request(app).post(`/api/dev/login-as/${user.id}`);
-    expect(res.status).toBe(200);
-    expect(AuthResponse.parse(res.body).user.id).toBe(user.id);
+    expect((await request(app).post(`/api/dev/login-as/${user.id}`)).status).toBe(404);
     expect((await request(app).post(`/api/dev/login-as/${randomUUID()}`)).status).toBe(404);
     expect((await request(app).post("/api/dev/login-as/nope")).status).toBe(400);
   });

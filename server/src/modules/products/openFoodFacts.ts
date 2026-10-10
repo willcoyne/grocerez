@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
-import { FETCH_TIMEOUT_MS, USER_AGENT, mapAllergens, readCapped, upstreamError, type ProductData } from "./common.js";
+import { FETCH_TIMEOUT_MS, USER_AGENT, readCapped, safeImageUrl, upstreamError, type ProductData } from "./common.js";
+import { mapAllergens } from "../../lib/allergens.js";
 
 const FIELDS = [
   "code", "product_name", "brands", "serving_size", "nutriments", "ingredients_text", "allergens_tags", "traces_tags",
@@ -45,7 +46,7 @@ const NUTRIENTS: [string, string][] = [
 
 const num = (v: unknown) => {
   const n = typeof v === "string" ? parseFloat(v) : v;
-  return typeof n === "number" && Number.isFinite(n) ? n : null;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : null;
 };
 const blank = (s: string | null | undefined) => (s && s.trim() ? s.trim() : null);
 // "en:tree-nuts" -> "tree nuts"
@@ -75,7 +76,7 @@ export function mapOffProduct(p: OffProduct, gtin: string): ProductData | null {
     allergens: mapAllergens(tagText(p.allergens_tags)),
     mayContain: mapAllergens(tagText(p.traces_tags)),
     healthScore: /^[a-e]$/i.test(p.nutriscore_grade ?? "") ? p.nutriscore_grade!.toUpperCase() : null,
-    imageUrl: blank(p.image_front_url),
+    imageUrl: safeImageUrl(p.image_front_url),
     categoriesTags: p.categories_tags ?? [],
   };
 }

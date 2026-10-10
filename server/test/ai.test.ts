@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { findAllergens } from "../src/modules/ai/allergens.js";
+import { findAllergens, findDietConflicts } from "../src/lib/allergens.js";
 import type { AiClient } from "../src/modules/ai/client.js";
 import { buildRecipeContext, estimatePrices, suggestRecipes, type RecipeInput } from "../src/modules/ai/service.js";
 
@@ -65,6 +65,18 @@ describe("findAllergens", () => {
     expect(findAllergens(["dairy-free and nut free"], ["milk", "tree_nuts"])).toEqual([]);
     expect(findAllergens(["butternut squash", "coconut milk"], ["milk"])).toEqual([]);
     expect(findAllergens(["almond milk"], ["milk", "tree_nuts"])).toEqual(["tree_nuts"]);
+    expect(findAllergens(["Eggplant parmigiana", "crabapple"], ["eggs", "shellfish"])).toEqual([]);
+    expect(findAllergens(["Béchamel", "nut butter"], ["milk", "tree_nuts"])).toEqual(["milk", "tree_nuts"]);
+  });
+  it("does not flag gluten-free flours, cream of tartar, or coconut milk", () => {
+    expect(findAllergens(["rice flour", "corn tortillas", "cream of tartar", "coconut milk"])).toEqual([]);
+    expect(findAllergens(["almond flour"])).toEqual(["tree_nuts"]);
+    expect(findAllergens(["rice flour, wheat flour"])).toEqual(["wheat", "gluten"]);
+    expect(findAllergens(["heavy cream"])).toEqual(["milk"]);
+  });
+  it("checks meat/pork/honey keywords for the diets that forbid them", () => {
+    expect(findDietConflicts(["Pork buns", "honey"], ["halal", "keto", "vegan", "vegetarian"])).toEqual(["halal", "vegan", "vegetarian"]);
+    expect(findDietConflicts(["Mushroom risotto", "meatless", "hamachi-free"], ["vegan", "vegetarian"])).toEqual([]);
   });
 });
 

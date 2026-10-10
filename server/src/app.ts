@@ -13,6 +13,7 @@ import { itemsRouter } from "./modules/items/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
 import { cabinetRouter } from "./modules/cabinet/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
+import { productsRouter } from "./modules/products/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -27,7 +28,19 @@ if (config.TRUST_PROXY) app.set("trust proxy", config.TRUST_PROXY);
 app.use(helmet());
 app.use(cors({ origin: EXPO_DEV_ORIGINS }));
 app.use(express.json({ limit: "1mb" }));
-app.use(pinoHttp({ logger }));
+// Query strings are never logged: Socket.IO-style clients send `?token=`, and searches can be personal (GAPS #26).
+app.use(
+  pinoHttp({
+    logger,
+    serializers: {
+      req: (req) => {
+        req.url = String(req.url ?? "").split("?")[0];
+        delete req.query;
+        return req;
+      },
+    },
+  }),
+);
 
 // Public routes.
 app.use("/api", healthRouter);
@@ -45,6 +58,7 @@ app.use("/api", itemsRouter);
 app.use("/api", preferencesRouter);
 app.use("/api", cabinetRouter);
 app.use("/api", shoppingListRouter);
+app.use("/api", productsRouter);
 
 app.use(notFound);
 app.use(errorHandler);

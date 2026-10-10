@@ -1,7 +1,8 @@
 // Unit tests for the step-08 external clients. No network: fetch and DNS are stubbed.
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { mapAllergens, readCapped } from "../src/modules/products/common.js";
+import { mapAllergens } from "../src/lib/allergens.js";
+import { readCapped } from "../src/modules/products/common.js";
 import { lookupOpenFoodFacts } from "../src/modules/products/openFoodFacts.js";
 import {
   allowedSmartLabelUrl, fetchSmartLabelPage, isPrivateAddress, parseSmartLabel,

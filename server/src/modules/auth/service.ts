@@ -18,7 +18,8 @@ export async function loginWithGoogle(idToken: string): Promise<AuthResponse> {
 }
 
 export async function devLoginAs(userId: string): Promise<AuthResponse> {
-  const user = await usersRepo.find(userId);
-  if (!user) throw new AppError(404, "NOT_FOUND", "User not found");
+  // Only seeded demo users (plan 02 step 6), so the dev backdoor can't take over real accounts on a non-prod box.
+  const user = await usersRepo.findSeeded(userId);
+  if (!user) throw new AppError(404, "NOT_FOUND", "Demo user not found");
   return { token: signAppToken(user.id), user: await toUser(user) };
 }

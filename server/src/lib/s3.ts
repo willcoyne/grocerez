@@ -3,8 +3,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "../config.js";
 
 // Constructing the client makes no network calls; credentials come from config (AWS_* env vars).
+// WHEN_REQUIRED: otherwise SDK >= 3.729 signs a CRC32 of the (empty) presign-time body into PUT URLs, and S3
+// rejects every real upload with a checksum mismatch.
 export const s3 = new S3Client({
   region: config.AWS_REGION,
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
   credentials: { accessKeyId: config.AWS_ACCESS_KEY_ID, secretAccessKey: config.AWS_SECRET_ACCESS_KEY },
 });
 
@@ -21,5 +25,10 @@ export const presignPut: PresignPut = (key, contentType, expiresIn) =>
     signableHeaders: new Set(["content-type"]),
   });
 
-export const presignGet = (key: string) =>
+// Server-side upload (product images copied from Open Food Facts, backend/11 step 5).
+export const putObject = async (key: string, body: Uint8Array, contentType: string) => {
+  await s3.send(new PutObjectCommand({ Bucket: config.S3_BUCKET, Key: key, Body: body, ContentType: contentType }));
+};
+
+export const presignGet =(key: string) =>
   getSignedUrl(s3, new GetObjectCommand({ Bucket: config.S3_BUCKET, Key: key }), { expiresIn: GET_EXPIRY_SECONDS });
