@@ -3,12 +3,10 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import { api } from "@/api/client";
 import CabinetScreen from "@/app/(tabs)/cabinet";
-import { confirm } from "@/lib/confirm";
 import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
-jest.mock("@/lib/confirm", () => ({ confirm: jest.fn(async () => true) }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn() }), useFocusEffect: jest.fn() }));
 const apiMock = api as jest.Mock;
 
 const g = testGroup.id;
@@ -47,16 +45,18 @@ describe("Cabinet", () => {
     await renderWithProviders(<CabinetScreen />);
     await screen.findByText(/^Oreos/);
     expect(screen.getByLabelText("Exp Jan 1, estimated")).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText("Actions for Oreos"));
-    await fireEvent.press(screen.getByText("Ran out"));
-    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    await fireEvent.press(screen.getByLabelText("Oreos ran out"));
+    await screen.findByText("Nobody has Oreos in their preferences. Add it to the shopping list anyway?");
+    await fireEvent.press(screen.getByLabelText("Add Oreos to the shopping list"));
     await waitFor(() =>
       expect(apiMock).toHaveBeenCalledWith(`/groups/${g}/shopping-list`, { method: "POST", body: { itemId: oreos.itemId } }),
     );
-    await screen.findByText("Your cabinet is empty");
+    await screen.findByText(/^Your cabinet is empty/);
+    await screen.findByText("Oreos added to the shopping list");
+    expect(screen.queryByTestId("ranout-prompt")).toBeNull();
   });
 
-  it("running low keeps the item and shows the Low · on list chip", async () => {
+  it("running low keeps the item and swaps the In stock chip for Running low", async () => {
     let row = oreos;
     apiMock.mockImplementation(
       apiRoutes({
@@ -66,8 +66,9 @@ describe("Cabinet", () => {
       }),
     );
     await renderWithProviders(<CabinetScreen />);
-    await fireEvent.press(await screen.findByLabelText("Actions for Oreos"));
-    await fireEvent.press(screen.getByText("Running low"));
-    await screen.findByText("Low · on list");
+    expect(await screen.findByLabelText("Status: in stock")).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText("Oreos running low"));
+    await screen.findByLabelText("Status: running low");
+    expect(screen.getByLabelText("Oreos back in stock")).toBeTruthy();
   });
 });

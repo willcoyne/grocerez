@@ -10,7 +10,7 @@ import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
 jest.mock("expo-notifications", () => ({}));
-jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn() }) }));
+jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn() }), useFocusEffect: jest.fn() }));
 const apiMock = api as jest.Mock;
 const g = testGroup.id;
 

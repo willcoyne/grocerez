@@ -1,26 +1,23 @@
 import type { GroupDetail } from "@contracts/groups";
 import { Image } from "expo-image";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useRemoveMember } from "@/api/hooks/groups";
+import { AppText, Avatar, Button, Card, useToast } from "@/components/ui";
 import { confirm } from "@/lib/confirm";
-import { labelize } from "@/lib/format";
-import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
-import { useToast } from "@/components/ui";
-import { Button, Chip } from "./ui";
+import { size, space } from "@/theme";
 
 type Member = GroupDetail["members"][number];
 
-/** Allergens per member, if the API includes them (see DECISIONS "Needs backend change"). */
-function memberAllergens(m: Member): string[] {
+/** Allergens per member, when the API includes them (see DECISIONS "Needs backend change"). null = unknown. */
+function memberAllergens(m: Member): string[] | null {
   const value = (m as Member & { allergens?: unknown }).allergens;
-  return Array.isArray(value) ? value.filter((a): a is string => typeof a === "string") : [];
+  return Array.isArray(value) ? value.filter((a): a is string => typeof a === "string") : null;
 }
 
-export function GroupMembers({ group }: { group: GroupDetail }) {
-  const { user } = useAuth();
+/** Household tab → Members (DESIGN.md §4.8): one Card per member, plus Remove for the owner. */
+export function GroupMembers({ group, meId }: { group: GroupDetail; meId?: string }) {
   const remove = useRemoveMember(group.id);
   const { show: toast } = useToast();
   const isOwner = group.role === "owner";
@@ -29,43 +26,44 @@ export function GroupMembers({ group }: { group: GroupDetail }) {
     <View style={styles.list}>
       {group.members.map((m) => {
         const allergens = memberAllergens(m);
+        const me = m.id === meId;
         return (
-          <View key={m.id} style={styles.row} accessibilityLabel={`${m.displayName}, ${m.role}`}>
+          <Card key={m.id} style={styles.row} testID={`member-${m.id}`}>
             {m.avatarUrl ? (
               <Image source={{ uri: m.avatarUrl }} style={styles.avatar} accessibilityIgnoresInvertColors />
             ) : (
-              <View style={[styles.avatar, styles.initials]}>
-                <Text style={styles.initialsText}>{m.displayName.slice(0, 1).toUpperCase()}</Text>
-              </View>
+              <Avatar userId={m.id} name={m.displayName} />
             )}
             <View style={styles.flex}>
-              <Text style={styles.name}>
-                {m.displayName}
-                {m.id === user?.id ? " (you)" : ""}
-                {m.role === "owner" ? " · owner" : ""}
-              </Text>
-              <Text style={styles.muted}>{m.email}</Text>
-              {allergens.length > 0 ? (
-                <View style={styles.chips}>
-                  {allergens.map((a) => (
-                    <Chip key={a} tone="danger" label={`⚠ ${labelize(a)}`} accessibilityLabel={`${m.displayName} is allergic to ${labelize(a)}`} />
-                  ))}
-                </View>
+              <AppText variant="bodyL" weight="heavy">
+                {me ? `${m.displayName} (you)` : m.displayName}
+              </AppText>
+              <AppText variant="caption" color="muted" numberOfLines={1}>
+                {allergens === null
+                  ? m.email
+                  : allergens.length > 0
+                    ? `Allergic to ${allergens.map((a) => a.replace(/_/g, " ")).join(", ")}`
+                    : "No allergies set"}
+              </AppText>
+            </View>
+            <View style={styles.right}>
+              <AppText variant="micro" weight="bold" color="ink2">
+                {m.role === "owner" ? "Owner" : "Member"}
+              </AppText>
+              {isOwner && !me ? (
+                <Button
+                  label="Remove"
+                  variant="danger-secondary"
+                  size="sm"
+                  accessibilityLabel={`Remove ${m.displayName} from the household`}
+                  onPress={async () => {
+                    if (!(await confirm("Remove member?", `${m.displayName} will lose access to ${group.name}.`, "Remove", true))) return;
+                    remove.mutate(m.id, { onError: (e) => toast(errorMessage(e), { tone: "error" }) });
+                  }}
+                />
               ) : null}
             </View>
-            {isOwner && m.id !== user?.id ? (
-              <Button
-                title="Remove"
-                variant="ghost"
-                compact
-                accessibilityLabel={`Remove ${m.displayName} from the household`}
-                onPress={async () => {
-                  if (!(await confirm("Remove member?", `${m.displayName} will lose access to ${group.name}.`, "Remove", true))) return;
-                  remove.mutate(m.id, { onError: (e) => toast(errorMessage(e), { tone: "error" }) });
-                }}
-              />
-            ) : null}
-          </View>
+          </Card>
         );
       })}
     </View>
@@ -73,13 +71,9 @@ export function GroupMembers({ group }: { group: GroupDetail }) {
 }
 
 const styles = StyleSheet.create({
-  list: { gap: spacing.md },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  list: { gap: space.sm },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md },
   flex: { flex: 1, gap: 2 },
-  avatar: { width: 40, height: 40, borderRadius: 20 },
-  initials: { backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
-  initialsText: { color: colors.primaryDark, fontWeight: "700", fontSize: fontSize.md },
-  name: { fontSize: fontSize.md, fontWeight: "600", color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.xs },
+  right: { alignItems: "flex-end", gap: space.xs },
+  avatar: { width: size.avatar, height: size.avatar, borderRadius: size.avatar / 2 },
 });

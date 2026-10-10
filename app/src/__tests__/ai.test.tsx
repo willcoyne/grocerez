@@ -87,7 +87,7 @@ describe("Prices", () => {
     await renderWithProviders(<PricesScreen />);
     await screen.findByText("$34–$41");
     expect(screen.getByText(/Cheerios · \$3\.50–\$4\.99/)).toBeTruthy();
-    expect(screen.getByText("✨ AI estimate from web search")).toBeTruthy();
+    expect(screen.getByText("AI estimate from web search")).toBeTruthy();
   });
 
   it("asks for a ZIP code first when the profile has none", async () => {

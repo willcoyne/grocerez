@@ -81,7 +81,7 @@
       "^lucide-react-native$": "<rootDir>/node_modules/lucide-react-native/dist/cjs/lucide-react-native.js"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-native-google-signin|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|@tanstack/.*|socket\\.io-client|engine\\.io-client|date-fns))"
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-native-google-signin|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|standard-navigation|@sentry/react-native|native-base|react-native-svg|@tanstack/.*|socket\\.io-client|engine\\.io-client|date-fns))"
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",

@@ -1,6 +1,7 @@
 import type { Recipe } from "@contracts/ai";
 import { useState } from "react";
-import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Clock, TriangleAlert } from "lucide-react-native";
+import { ScrollView, StyleSheet, Switch, View } from "react-native";
 
 import { api, ApiError, errorMessage } from "@/api/client";
 import { useSuggestRecipes } from "@/api/hooks/ai";
@@ -8,11 +9,10 @@ import { useDietary } from "@/api/hooks/me";
 import { useHouseholdAllergens } from "@/api/hooks/products";
 import { useAddListItem } from "@/api/hooks/shoppingList";
 import type { Item } from "@contracts/items";
-import { useToast } from "@/components/ui";
-import { AiLabel, Button, Card, Chip } from "@/components/ui";
+import { AiLabel, AppText, Button, Card, DashedEmpty, SectionLabel, StatusChip, useToast } from "@/components/ui";
 import { labelize } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
-import { colors, fontSize, radius, spacing } from "@/theme";
+import { color, radius, space } from "@/theme";
 
 function recipeError(e: unknown): string {
   if (e instanceof ApiError && e.code === "CABINET_EMPTY") return "Add some items to your cabinet first, then try again.";
@@ -38,33 +38,49 @@ export default function RecipesScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <AiLabel text="AI recipe ideas" />
-      <View style={styles.toggle}>
-        <Text style={styles.body}>Use expiring items first</Text>
-        <Switch value={useExpiring} onValueChange={setUseExpiring} accessibilityLabel="Use expiring items first" />
-      </View>
-      {safeFor.length > 0 ? <Text style={styles.muted}>Safe for: {safeFor.join(" · ")}</Text> : null}
+      <Card style={styles.toggle}>
+        <AppText weight="semi" style={styles.flex}>
+          Use expiring items first
+        </AppText>
+        <Switch
+          value={useExpiring}
+          onValueChange={setUseExpiring}
+          accessibilityLabel="Use expiring items first"
+          trackColor={{ true: color.primary, false: color.borderStrong }}
+          thumbColor={color.surface}
+        />
+      </Card>
+      {safeFor.length > 0 ? (
+        <AppText variant="caption" color="muted">{`Safe for: ${safeFor.join(" · ")}`}</AppText>
+      ) : null}
       <Button
-        title={suggest.data ? "Suggest again" : "Find recipes"}
+        label={suggest.data ? "Suggest again" : "Find recipes"}
+        size="lg"
+        fullWidth
         loading={suggest.isPending}
         onPress={() => suggest.mutate({ mustUseExpiring: useExpiring, maxRecipes: 3 })}
       />
 
       {suggest.isPending ? (
         <View style={styles.gap} accessibilityLabel="Looking through your cabinet">
-          <Text style={styles.muted}>Looking through your cabinet… (this can take 10–20 seconds)</Text>
+          <AppText variant="caption" color="muted">
+            Looking through your cabinet. This can take 10 to 20 seconds.
+          </AppText>
           {[0, 1, 2].map((i) => (
             <View key={i} style={styles.skeleton} />
           ))}
         </View>
       ) : null}
       {suggest.isError ? (
-        <Card>
-          <Text style={styles.error} accessibilityRole="alert">
+        <DashedEmpty>
+          <AppText color="dangerFg" weight="bold" center accessibilityRole="alert">
             {recipeError(suggest.error)}
-          </Text>
-        </Card>
+          </AppText>
+        </DashedEmpty>
       ) : null}
-      {suggest.data?.length === 0 ? <Text style={styles.muted}>No safe recipes found. Try turning off “Use expiring items first”.</Text> : null}
+      {suggest.data?.length === 0 ? (
+        <DashedEmpty>{`No safe recipes found. Try turning off "Use expiring items first".`}</DashedEmpty>
+      ) : null}
       {suggest.data?.map((r) => <RecipeCard key={r.title} recipe={r} groupId={groupId} />)}
     </ScrollView>
   );
@@ -96,66 +112,77 @@ function RecipeCard({ recipe, groupId }: { recipe: Recipe; groupId: string }) {
   }
 
   return (
-    <Card>
+    <Card style={styles.card}>
       <View style={styles.rowBetween}>
-        <Text style={styles.title}>{recipe.title}</Text>
+        <AppText variant="bodyL" weight="heavy" style={styles.flex}>
+          {recipe.title}
+        </AppText>
         <AiLabel text="AI" />
       </View>
-      <Text style={styles.muted}>
-        {recipe.minutes} min · serves {recipe.servings}
-      </Text>
-      <Text style={styles.body}>{recipe.summary}</Text>
+      <AppText variant="caption" color="muted">
+        {`${recipe.minutes} min · serves ${recipe.servings}`}
+      </AppText>
+      <AppText color="ink2">{recipe.summary}</AppText>
+      <SectionLabel>Uses</SectionLabel>
       <View style={styles.chips}>
-        <Text style={styles.label}>Uses:</Text>
-        {recipe.usesCabinetItems.map((u) => (
-          <Chip key={u} label={expiring.has(u.toLowerCase()) ? `⏰ ${u}` : u} tone={expiring.has(u.toLowerCase()) ? "warning" : "success"} accessibilityLabel={expiring.has(u.toLowerCase()) ? `${u}, expiring soon` : u} />
-        ))}
+        {recipe.usesCabinetItems.map((u) => {
+          const soon = expiring.has(u.toLowerCase());
+          return (
+            <StatusChip
+              key={u}
+              label={u}
+              tone={soon ? "warn" : "ok"}
+              icon={soon ? Clock : undefined}
+              accessibilityLabel={soon ? `${u}, expiring soon` : u}
+            />
+          );
+        })}
       </View>
       {recipe.missingItems.length > 0 ? (
-        <Text style={styles.body}>
-          <Text style={styles.label}>Missing: </Text>
+        <AppText variant="bodyS" color="ink2">
+          <AppText variant="bodyS" weight="bold">
+            {"Missing: "}
+          </AppText>
           {recipe.missingItems.map((m) => m.itemName ?? m.name).join(", ")}
-        </Text>
+        </AppText>
       ) : null}
       {recipe.allergenWarnings.map((w) => (
-        <Text key={w} style={styles.error}>
-          ⚠ {w}
-        </Text>
+        <View key={w} style={styles.warning}>
+          <TriangleAlert size={16} color={color.dangerFg} />
+          <AppText variant="bodyS" weight="bold" color="dangerFg" style={styles.flex}>
+            {w}
+          </AppText>
+        </View>
       ))}
-      <Button title={open ? "Hide steps" : "Show steps"} variant="ghost" compact onPress={() => setOpen(!open)} />
+      <Button label={open ? "Hide steps" : "Show steps"} variant="ghost" size="sm" onPress={() => setOpen(!open)} style={styles.start} />
       {open ? (
         <View style={styles.gap}>
-          <Text style={styles.label}>Ingredients</Text>
+          <SectionLabel>Ingredients</SectionLabel>
           {recipe.ingredients.map((i) => (
-            <Text key={i} style={styles.body}>
-              • {i}
-            </Text>
+            <AppText key={i}>{`· ${i}`}</AppText>
           ))}
-          <Text style={styles.label}>Steps</Text>
+          <SectionLabel>Steps</SectionLabel>
           {recipe.steps.map((s, idx) => (
-            <Text key={idx} style={styles.body}>
-              {idx + 1}. {s}
-            </Text>
+            <AppText key={idx}>{`${idx + 1}. ${s}`}</AppText>
           ))}
         </View>
       ) : null}
       {recipe.missingItems.length > 0 ? (
-        <Button title="Add missing to list" variant="secondary" loading={adding} onPress={() => void addMissing()} />
+        <Button label="Add missing to list" variant="secondary" fullWidth loading={adding} onPress={() => void addMissing()} />
       ) : null}
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  toggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
-  gap: { gap: spacing.sm },
-  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, alignItems: "center" },
-  title: { fontSize: fontSize.lg, fontWeight: "800", color: colors.text, flex: 1 },
-  label: { fontSize: fontSize.sm, fontWeight: "700", color: colors.text },
-  body: { fontSize: fontSize.md, color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  error: { fontSize: fontSize.md, color: colors.danger },
-  skeleton: { height: 120, borderRadius: radius.lg, backgroundColor: colors.border },
+  container: { padding: space.screenX, gap: space.md, paddingBottom: space.xxl * 2 },
+  toggle: { flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 56 },
+  card: { gap: space.sm },
+  gap: { gap: space.sm },
+  flex: { flex: 1 },
+  start: { alignSelf: "flex-start" },
+  rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.sm },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  warning: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  skeleton: { height: 120, borderRadius: radius.card, backgroundColor: color.segment },
 });

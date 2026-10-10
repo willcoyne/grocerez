@@ -1,29 +1,42 @@
-import type { ShoppingListItem } from "@contracts/shoppingList";
 import { useMutationState } from "@tanstack/react-query";
 import { useIsFocused, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
+import { type LayoutChangeEvent, RefreshControl, SectionList, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { errorMessage } from "@/api/client";
 import { usePrices } from "@/api/hooks/ai";
+import { useCabinet } from "@/api/hooks/cabinet";
 import { useGroupDetail } from "@/api/hooks/groups";
 import { useAddListItem, useCheckItem, useCompleteTrip, useDeleteListItem, useShoppingList } from "@/api/hooks/shoppingList";
 import { RecallBanner } from "@/components/AlertsSection";
-import { AllergenBadge } from "@/components/Badges";
+import { TabHeader } from "@/components/GroupSwitcher";
 import { InviteBanner } from "@/components/InviteBanner";
 import { ItemPicker } from "@/components/ItemPicker";
-import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/ui";
-import { Button, Chip, IconButton } from "@/components/ui";
+import {
+  AiLabel,
+  AppText,
+  Button,
+  DashedEmpty,
+  ErrorState,
+  InlineAdd,
+  LoadingState,
+  SectionLabel,
+  TAB_BAR_HEIGHT,
+  useToast,
+  useToastBottomInset,
+} from "@/components/ui";
+import { ListRow } from "@/features/list/ListRow";
 import { confirm } from "@/lib/confirm";
-import { formatCentsRange } from "@/lib/format";
+import { formatCentsRange, plural } from "@/lib/format";
 import { toSections } from "@/lib/listSections";
 import { maybeAskNotificationPermission } from "@/notifications/expirations";
 import { useSocketConnected } from "@/realtime/SocketProvider";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, radius, spacing, TAP_TARGET } from "@/theme";
+import { color, space } from "@/theme";
 
+/** List tab (DESIGN.md §4.5): rows in aisle sections, optimistic check-off, add field, Finish bar. */
 export default function ListScreen() {
   const groupId = useRequiredGroupId();
   const connected = useSocketConnected();
@@ -31,6 +44,7 @@ export default function ListScreen() {
   // Live sync comes from the socket; while it's down, poll every 5 s on this screen.
   const list = useShoppingList(groupId, { refetchInterval: !connected && focused ? 5000 : false });
   const detail = useGroupDetail(groupId);
+  const cabinet = useCabinet(groupId);
   const check = useCheckItem(groupId);
   const add = useAddListItem(groupId);
   const del = useDeleteListItem(groupId);
@@ -38,7 +52,11 @@ export default function ListScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const { show: toast } = useToast();
+  const insets = useSafeAreaInsets();
+  const [addText, setAddText] = useState("");
   const [picking, setPicking] = useState(false);
+  const [barHeight, setBarHeight] = useState(0);
+  useToastBottomInset(TAB_BAR_HEIGHT + insets.bottom + barHeight);
 
   const syncing = useMutationState({
     filters: { mutationKey: ["check", groupId], status: "pending" },
@@ -49,28 +67,30 @@ export default function ListScreen() {
   const names = useMemo(() => {
     const m = new Map<string, string>();
     for (const mem of detail.data?.members ?? []) m.set(mem.id, mem.displayName);
-    if (user) m.set(user.id, "you");
     return m;
-  }, [detail.data, user]);
+  }, [detail.data]);
+
+  const lowItemIds = useMemo(
+    () => new Set((cabinet.data ?? []).filter((c) => c.status === "running_low").map((c) => c.itemId)),
+    [cabinet.data],
+  );
 
   const sections = useMemo(() => toSections(list.data ?? []), [list.data]);
   // Read-only view of the cached estimate (fetched from the Prices modal).
   const prices = usePrices(groupId, { enabled: false }).data;
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 
-  if (list.isPending) return <LoadingState message="Loading the list…" />;
-  if (list.isError) return <ErrorState error={list.error} onRetry={() => list.refetch()} />;
-
-  const total = list.data.length;
-  const checkedRows = list.data.filter((r) => r.checked);
+  const rows = list.data ?? [];
+  const checkedRows = rows.filter((r) => r.checked);
+  const toBuy = rows.length - checkedRows.length;
 
   async function finishTrip() {
     const n = checkedRows.length;
-    if (!(await confirm("Finish trip?", `Move ${n} checked item${n === 1 ? "" : "s"} to the cabinet?`, "Finish trip"))) return;
+    if (!(await confirm("Finish trip?", `Move ${plural(n, "checked item")} to the cabinet?`, "Finish trip"))) return;
     const itemIds = checkedRows.map((r) => r.itemId);
     complete.mutate(undefined, {
       onSuccess: ({ movedToCabinet }) => {
-        toast(`${movedToCabinet} item${movedToCabinet === 1 ? "" : "s"} added to cabinet`);
+        toast(`${plural(movedToCabinet, "item")} moved to the cabinet`);
         void maybeAskNotificationPermission();
         if (movedToCabinet > 0) router.push(`/expiration-check?itemIds=${itemIds.join(",")}`);
       },
@@ -78,186 +98,154 @@ export default function ListScreen() {
     });
   }
 
-  return (
-    <View style={styles.flex}>
-      <InviteBanner />
-      <RecallBanner groupId={groupId} />
+  function openPicker() {
+    setPicking(true);
+  }
+
+  let body: React.ReactNode;
+  if (list.isPending) body = <LoadingState />;
+  else if (list.isError)
+    body = (
+      <View style={styles.pad}>
+        <ErrorState message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
+      </View>
+    );
+  else
+    body = (
       <SectionList
         sections={sections}
         keyExtractor={(r) => r.id}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={total === 0 ? styles.grow : styles.listPad}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={list.isRefetching} onRefresh={() => void list.refetch()} />}
         ListHeaderComponent={
-          <View style={styles.header}>
-            <Text style={styles.count} accessibilityRole="header">
-              {total} items · {checkedRows.length} checked
-            </Text>
-            <View style={styles.headerActions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={prices ? `Estimated total ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}. Open prices` : "Estimate prices"}
-                onPress={() => router.push("/prices")}
-                style={styles.priceChip}
-              >
-                <Text style={styles.priceText}>
-                  ✨ {prices ? `Est. ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}` : "Est. price"}
-                </Text>
-              </Pressable>
-              <IconButton label="Add an item to the list" onPress={() => setPicking(true)}>
-                <Text style={styles.plus}>＋</Text>
-              </IconButton>
-            </View>
-            {!connected ? <Text style={styles.muted}>Live updates paused · refreshing every 5 s</Text> : null}
+          <View style={styles.headerBlock}>
+            <InviteBanner />
+            <RecallBanner groupId={groupId} />
+            {rows.length > 0 ? (
+              <AppText variant="bodyS" weight="semi" color="ink2">
+                {`${toBuy} to buy · ${checkedRows.length} in the cart`}
+              </AppText>
+            ) : (
+              <DashedEmpty>Nothing to buy. Everything you all want is already in the cabinet.</DashedEmpty>
+            )}
+            {rows.length > 0 ? (
+              <View style={styles.priceRow}>
+                <Button
+                  label={prices ? `Est. ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}` : "Estimate prices"}
+                  accessibilityLabel={
+                    prices
+                      ? `Estimated total ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}. Open prices`
+                      : "Estimate prices"
+                  }
+                  variant="secondary"
+                  size="sm"
+                  onPress={() => router.push("/prices")}
+                />
+                <AiLabel text="AI estimate" />
+              </View>
+            ) : null}
+            {!connected ? (
+              <AppText variant="caption" color="muted">
+                Live updates paused · refreshing every 5 s
+              </AppText>
+            ) : null}
           </View>
         }
-        ListEmptyComponent={
-          <EmptyState title="Nothing to buy 🎉" message="Everything you all want is in the cabinet." />
-        }
-        renderSectionHeader={({ section }) => <Text style={styles.section}>{section.title}</Text>}
+        renderSectionHeader={({ section }) => <SectionLabel style={styles.section}>{section.title}</SectionLabel>}
         renderItem={({ item: row }) => (
           <ListRow
             row={row}
+            meId={user?.id}
+            names={names}
+            runningLow={lowItemIds.has(row.itemId)}
             syncing={syncingIds.has(row.id)}
-            checkedByName={row.checkedBy ? (names.get(row.checkedBy) ?? "someone") : null}
-            addedByName={row.addedBy ? (names.get(row.addedBy) ?? "someone") : null}
-            onToggle={() => check.mutate({ id: row.id, checked: !row.checked }, { onError })}
-            onScan={() => router.push(`/scanner?mode=match-list-item&listItemId=${row.id}`)}
-            onDelete={() => del.mutate(row.id, { onError })}
+            onToggle={(r) => check.mutate({ id: r.id, checked: !r.checked }, { onError })}
+            onScan={(r) => router.push(`/scanner?mode=match-list-item&listItemId=${r.id}`)}
+            onDelete={(r) => del.mutate(r.id, { onError })}
           />
         )}
+        ItemSeparatorComponent={Gap}
+        ListFooterComponent={
+          <View style={styles.footer}>
+            <InlineAdd
+              label="Out of something? Add it to the list"
+              placeholder="e.g. paper towels"
+              value={addText}
+              onChangeText={setAddText}
+              onSubmit={openPicker}
+              testID="list-add"
+            />
+          </View>
+        }
       />
-      {total > 0 ? (
-        <View style={styles.footer}>
+    );
+
+  return (
+    <View style={styles.flex} testID="tab-list">
+      <TabHeader title="Shopping list" />
+      <View style={styles.flex}>{body}</View>
+      {rows.length > 0 ? (
+        <View style={styles.finishBar} onLayout={(e: LayoutChangeEvent) => setBarHeight(e.nativeEvent.layout.height)}>
           <Button
-            title={complete.isPending ? "Finishing…" : `Finish trip${checkedRows.length ? ` (${checkedRows.length})` : ""}`}
+            size="lg"
+            fullWidth
+            variant="primary"
+            label={
+              complete.isPending
+                ? "Finishing…"
+                : checkedRows.length === 0
+                  ? "Check items off as you shop"
+                  : `Finish trip · move ${checkedRows.length} to the cabinet`
+            }
             disabled={checkedRows.length === 0 || complete.isPending}
-            loading={complete.isPending}
             onPress={finishTrip}
+            testID="finish-trip"
           />
         </View>
       ) : null}
       <ItemPicker
         visible={picking}
-        title="We're out of…"
+        title="Add to the list"
+        initialText={addText.trim()}
         onClose={() => setPicking(false)}
-        onPick={(item) => add.mutate({ itemId: item.id }, { onSuccess: () => toast(`${item.name} added`), onError })}
+        onPick={(item) =>
+          add.mutate(
+            { itemId: item.id },
+            {
+              onSuccess: () => {
+                setAddText("");
+                toast(`Added ${item.name} to the shopping list`);
+              },
+              onError,
+            },
+          )
+        }
       />
     </View>
   );
 }
 
-function ListRow({
-  row,
-  syncing,
-  checkedByName,
-  addedByName,
-  onToggle,
-  onScan,
-  onDelete,
-}: {
-  row: ShoppingListItem;
-  syncing: boolean;
-  checkedByName: string | null;
-  addedByName: string | null;
-  onToggle: () => void;
-  onScan: () => void;
-  onDelete: () => void;
-}) {
-  const wanted = row.wantedBy.map((w) => w.displayName).join(", ");
-  return (
-    <View style={[styles.row, row.checked && styles.rowChecked]}>
-      <Pressable
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: row.checked }}
-        accessibilityLabel={`${row.item.name}${row.quantityText ? `, ${row.quantityText}` : ""}`}
-        onPress={onToggle}
-        style={styles.checkArea}
-      >
-        <View style={[styles.box, row.checked && styles.boxChecked]}>{row.checked ? <Text style={styles.tick}>✓</Text> : null}</View>
-        <View style={styles.flex}>
-          <Text style={[styles.name, row.checked && styles.struck]}>
-            {row.item.name}
-            {row.quantityText ? <Text style={styles.muted}> · {row.quantityText}</Text> : null}
-            {syncing ? <Text style={styles.syncing} accessibilityLabel="syncing"> ●</Text> : null}
-          </Text>
-          {wanted ? <Text style={styles.muted}>for {wanted}</Text> : null}
-          {row.checked && checkedByName ? <Text style={styles.muted}>✓ by {checkedByName}</Text> : null}
-          {row.reason === "manual" && addedByName ? <Chip label={`added by ${addedByName}`} /> : null}
-          {row.allergenFlags.length > 0 ? (
-            <View style={styles.badges}>
-              {row.allergenFlags.map((f) => (
-                <AllergenBadge key={`${f.userId}-${f.allergen}`} flag={f} />
-              ))}
-            </View>
-          ) : null}
-        </View>
-      </Pressable>
-      <IconButton label={`Scan a product for ${row.item.name}`} onPress={onScan}>
-        <Text style={styles.icon}>⌗</Text>
-      </IconButton>
-      {row.reason === "manual" ? (
-        <IconButton label={`Delete ${row.item.name} from the list`} onPress={onDelete}>
-          <Text style={styles.icon}>✕</Text>
-        </IconButton>
-      ) : null}
-    </View>
-  );
+function Gap() {
+  return <View style={styles.gap} />;
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  grow: { flexGrow: 1 },
-  listPad: { paddingBottom: 96 },
-  header: { padding: spacing.lg, gap: spacing.sm },
-  headerActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  count: { fontSize: fontSize.lg, fontWeight: "700", color: colors.text },
-  priceChip: {
-    minHeight: TAP_TARGET,
-    justifyContent: "center",
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.aiLight,
-  },
-  priceText: { color: colors.ai, fontWeight: "700", fontSize: fontSize.sm },
-  plus: { fontSize: fontSize.xxl, color: colors.primary },
-  section: { fontSize: fontSize.md, fontWeight: "800", color: colors.textMuted, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  rowChecked: { backgroundColor: colors.background },
-  checkArea: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.md, minHeight: TAP_TARGET + 8 },
-  box: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  boxChecked: { backgroundColor: colors.primary },
-  tick: { color: colors.onPrimary, fontSize: fontSize.lg, fontWeight: "800" },
-  name: { fontSize: fontSize.lg, fontWeight: "600", color: colors.text },
-  struck: { textDecorationLine: "line-through", color: colors.textMuted },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: "400", textDecorationLine: "none" },
-  syncing: { color: colors.warning, fontSize: fontSize.sm },
-  badges: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.xs },
-  icon: { fontSize: fontSize.xl, color: colors.textMuted },
-  footer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: spacing.md,
-    backgroundColor: colors.background,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+  pad: { padding: space.screenX },
+  content: { paddingHorizontal: space.screenX, paddingTop: space.lg, paddingBottom: space.xxl },
+  headerBlock: { gap: space.md, marginBottom: space.xs },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  section: { paddingTop: space.lg, paddingBottom: space.sm },
+  gap: { height: space.sm },
+  footer: { marginTop: space.xl },
+  finishBar: {
+    paddingTop: 10,
+    paddingHorizontal: space.screenX,
+    paddingBottom: space.md,
+    borderTopWidth: 1,
+    borderTopColor: color.border,
+    backgroundColor: color.bg,
   },
 });

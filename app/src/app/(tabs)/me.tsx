@@ -1,35 +1,37 @@
 import type { Dietary } from "@contracts/dietary";
 import { Image } from "expo-image";
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useDietary, useUpdateDietary, useUpdateMe } from "@/api/hooks/me";
 import { pickAndUploadImage } from "@/api/hooks/uploads";
+import { TabHeader } from "@/components/GroupSwitcher";
 import { DietaryPicker } from "@/components/DietaryPicker";
 import { InviteBanner } from "@/components/InviteBanner";
 import { MyPreferences } from "@/components/MyPreferences";
-import { ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/ui";
-import { Button, Card, Input, SectionHeader } from "@/components/ui";
+import { AppText, Avatar, Button, Card, ErrorState, LoadingState, SectionLabel, TextField, useToast } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
+import { size, space } from "@/theme";
 
-/** Personal dashboard: my preferences for this household, my diets/allergens, profile, sign out. */
+/** Me tab (DESIGN.md §4.7): my preferences, diet and allergies, plus profile (photo, ZIP) and sign out. */
 export default function MeScreen() {
   const { activeGroupId } = useActiveGroup();
   const { signOut } = useAuth();
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <InviteBanner />
-      <View style={styles.inner}>
-        <Profile />
+    <View style={styles.screen} testID="tab-me">
+      <TabHeader title="My preferences" />
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <InviteBanner />
+        <SectionLabel>What I want from the store</SectionLabel>
         {activeGroupId ? <MyPreferences groupId={activeGroupId} /> : null}
         <DietarySection />
-        <Button title="Sign out" variant="secondary" style={styles.signOut} onPress={() => void signOut()} />
-      </View>
-    </ScrollView>
+        <SectionLabel style={styles.gapTop}>Profile</SectionLabel>
+        <Profile />
+        <Button label="Sign out" variant="secondary" fullWidth onPress={() => void signOut()} />
+      </ScrollView>
+    </View>
   );
 }
 
@@ -41,6 +43,7 @@ function Profile() {
   const [uploading, setUploading] = useState(false);
   if (!user) return null;
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
+  const zipValid = zip === "" || /^\d{5}$/.test(zip);
 
   async function changeAvatar() {
     setUploading(true);
@@ -60,33 +63,36 @@ function Profile() {
         {user.avatarUrl ? (
           <Image source={{ uri: user.avatarUrl }} style={styles.avatar} accessibilityLabel="Your avatar" />
         ) : (
-          <View style={[styles.avatar, styles.initials]}>
-            <Text style={styles.initialsText}>{user.displayName.slice(0, 1).toUpperCase()}</Text>
-          </View>
+          <Avatar userId={user.id} name={user.displayName} large />
         )}
         <View style={styles.flex}>
-          <Text style={styles.name}>{user.displayName}</Text>
-          <Text style={styles.muted}>{user.email}</Text>
+          <AppText variant="bodyL" weight="heavy">
+            {user.displayName}
+          </AppText>
+          <AppText variant="caption" color="muted" numberOfLines={1}>
+            {user.email}
+          </AppText>
         </View>
+        <Button label="Change photo" variant="ghost" size="sm" loading={uploading} onPress={changeAvatar} />
       </View>
-      <Button title="Change photo" variant="ghost" compact loading={uploading} onPress={changeAvatar} />
-      <View style={styles.row}>
+      <View style={styles.zipRow}>
         <View style={styles.flex}>
-          <Input
+          <TextField
             label="ZIP code (for price estimates)"
             value={zip}
             onChangeText={(t) => setZip(t.replace(/\D/g, "").slice(0, 5))}
             keyboardType="number-pad"
-            maxLength={5}
+            placeholder="64105"
+            error={zipValid ? null : "Enter a 5-digit ZIP code"}
           />
         </View>
         <Button
-          title="Save"
-          compact
-          style={styles.saveZip}
-          disabled={!(zip === "" || /^\d{5}$/.test(zip)) || zip === (user.zipCode ?? "")}
+          label="Save"
+          variant="secondary"
+          disabled={!zipValid || zip === (user.zipCode ?? "")}
           loading={update.isPending}
           onPress={() => update.mutate({ zipCode: zip || null }, { onSuccess: () => toast("ZIP saved"), onError })}
+          style={styles.saveZip}
         />
       </View>
     </Card>
@@ -97,39 +103,30 @@ function DietarySection() {
   const dietary = useDietary();
   const update = useUpdateDietary();
   const { show: toast } = useToast();
+  if (dietary.isPending) return <LoadingState />;
+  if (dietary.isError) return <ErrorState message={errorMessage(dietary.error)} onRetry={() => void dietary.refetch()} />;
   return (
-    <View>
-      <SectionHeader title="Dietary" />
-      <Card>
-        {dietary.isPending ? (
-          <LoadingState />
-        ) : dietary.isError ? (
-          <ErrorState error={dietary.error} onRetry={() => dietary.refetch()} />
-        ) : (
-          <>
-            <DietaryPicker
-              value={dietary.data}
-              onChange={(v: Dietary) => update.mutate(v, { onError: (e) => toast(errorMessage(e), { tone: "error" }) })}
-            />
-            <Text style={styles.muted}>Your allergens are flagged on your household&apos;s shopping list.</Text>
-          </>
-        )}
-      </Card>
+    <View style={styles.dietary}>
+      <DietaryPicker
+        value={dietary.data}
+        onChange={(v: Dietary) => update.mutate(v, { onError: (e) => toast(errorMessage(e), { tone: "error" }) })}
+      />
+      <AppText variant="caption" color="muted">
+        Your allergies are flagged on the household&apos;s shopping list, with your name.
+      </AppText>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { paddingBottom: spacing.xxl },
-  inner: { padding: spacing.lg, gap: spacing.sm },
-  profile: { gap: spacing.sm },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  screen: { flex: 1 },
+  content: { padding: space.screenX, gap: space.md, paddingBottom: space.xxl * 2 },
+  gapTop: { marginTop: space.sm },
+  dietary: { gap: space.sm, marginTop: space.sm },
+  profile: { gap: space.md },
+  row: { flexDirection: "row", alignItems: "center", gap: space.md },
+  zipRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },
   flex: { flex: 1 },
-  avatar: { width: 56, height: 56, borderRadius: 28 },
-  initials: { backgroundColor: colors.primaryLight, alignItems: "center", justifyContent: "center" },
-  initialsText: { color: colors.primaryDark, fontWeight: "800", fontSize: fontSize.xl },
-  name: { fontSize: fontSize.lg, fontWeight: "700", color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  saveZip: { alignSelf: "flex-end" },
-  signOut: { marginTop: spacing.xl },
+  avatar: { width: size.avatarLg, height: size.avatarLg, borderRadius: size.avatarLg / 2 },
+  saveZip: { marginTop: 25 },
 });

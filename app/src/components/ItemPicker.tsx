@@ -1,15 +1,15 @@
 import { CATEGORIES, type Category } from "@contracts/common";
 import type { Item } from "@contracts/items";
+import { Check, X } from "lucide-react-native";
 import { type ReactNode, useEffect, useState } from "react";
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Modal, Pressable, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { errorMessage } from "@/api/client";
 import { useCreateItem, useItemSearch } from "@/api/hooks/items";
+import { AppText, Button, ErrorState, IconButton, SectionLabel, SuggestBanner, TextField, ToggleChip } from "@/components/ui";
 import { labelize } from "@/lib/format";
-import { colors, fontSize, spacing, TAP_TARGET } from "@/theme";
-import { ErrorState } from "./States";
-import { Button, Chip, IconButton, Input } from "./ui";
+import { color, pressedOpacity, radius, size, space } from "@/theme";
 
 export interface ItemPickerProps {
   visible: boolean;
@@ -43,11 +43,11 @@ export function ItemPicker({ visible, title = "Add an item", onClose, onPick, ke
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.safe}>
         <View style={styles.topBar}>
-          <Text style={styles.title} accessibilityRole="header">
+          <AppText variant="tabTitle" accessibilityRole="header" style={styles.flex}>
             {title}
-          </Text>
+          </AppText>
           <IconButton label="Close" onPress={onClose}>
-            <Text style={styles.close}>✕</Text>
+            <X size={22} color={color.ink2} />
           </IconButton>
         </View>
         {visible ? (
@@ -91,37 +91,55 @@ export function ItemPickerBody({
   const suggestion = data?.match === "suggested" ? data.results[0] : null;
   const rows = data ? (data.match === "suggested" ? data.results.slice(1) : data.results) : [];
   const fresh = q === text.trim();
+  const typed = text.trim();
 
   return (
     <View style={styles.body}>
-      <Input
-        placeholder="Search: milk, cheerios, eggs…"
-        accessibilityLabel="Search items"
+      <TextField
+        label="Search items"
+        placeholder="e.g. milk, cheerios, eggs"
         value={text}
         onChangeText={(t) => {
           setText(t);
           setCreating(false);
         }}
         autoFocus
-        autoCorrect={false}
+        autoCapitalize="none"
         returnKeyType="search"
       />
       {header}
-      {keepOpen && lastAdded ? <Text style={styles.muted}>Added {lastAdded} ✓</Text> : null}
-      {create.isError ? <Text style={styles.error}>{errorMessage(create.error)}</Text> : null}
+      {keepOpen && lastAdded ? (
+        <View style={styles.added}>
+          <Check size={16} color={color.okFg} strokeWidth={3} />
+          <AppText variant="caption" weight="bold" color="okFg">{`Added ${lastAdded}`}</AppText>
+        </View>
+      ) : null}
+      {create.isError ? (
+        <AppText variant="caption" weight="bold" color="dangerFg" accessibilityRole="alert">
+          {errorMessage(create.error)}
+        </AppText>
+      ) : null}
 
-      {search.isError ? <ErrorState error={search.error} onRetry={() => search.refetch()} /> : null}
-      {search.isFetching && !data ? <Text style={styles.muted}>Searching…</Text> : null}
+      {search.isError ? <ErrorState message={errorMessage(search.error)} onRetry={() => void search.refetch()} /> : null}
+      {search.isFetching && !data ? (
+        <AppText variant="caption" color="muted">
+          Searching…
+        </AppText>
+      ) : null}
 
       {creating ? (
         <View style={styles.gap}>
-          <Text style={styles.label}>Pick a category for “{text.trim()}”</Text>
+          <AppText variant="body" weight="bold">{`Pick a category for "${typed}"`}</AppText>
           <View style={styles.chips}>
             {CATEGORIES.map((c) => (
-              <Chip key={c} label={labelize(c)} onPress={() => createNew(c)} />
+              <ToggleChip key={c} label={labelize(c)} selected={false} onPress={() => createNew(c)} />
             ))}
           </View>
-          {create.isPending ? <Text style={styles.muted}>Creating…</Text> : null}
+          {create.isPending ? (
+            <AppText variant="caption" color="muted">
+              Creating…
+            </AppText>
+          ) : null}
         </View>
       ) : null}
 
@@ -130,38 +148,40 @@ export function ItemPickerBody({
           keyboardShouldPersistTaps="handled"
           data={rows}
           keyExtractor={(i) => i.id}
+          contentContainerStyle={styles.results}
           ListHeaderComponent={
             suggestion ? (
-              <View style={styles.suggest} accessibilityRole="alert">
-                <Text style={styles.suggestText}>
-                  Did you mean <Text style={styles.bold}>{suggestion.name}</Text>?
-                </Text>
-                <View style={styles.row}>
-                  <Button
-                    title="Yes"
-                    compact
-                    accessibilityLabel={`Yes, ${suggestion.name}`}
-                    loading={create.isPending}
-                    onPress={() => create.mutate({ name: text.trim(), aliasOf: suggestion.id }, { onSuccess: pick })}
-                  />
-                  <Button title={`No, add “${text.trim()}” as new`} variant="secondary" compact onPress={() => setCreating(true)} />
-                </View>
-              </View>
+              <SuggestBanner
+                itemName={suggestion.name}
+                typed={typed}
+                busy={create.isPending}
+                onYes={() => create.mutate({ name: typed, aliasOf: suggestion.id }, { onSuccess: pick })}
+                onNo={() => setCreating(true)}
+              />
             ) : data.match === "none" && rows.length > 0 ? (
-              <Text style={styles.muted}>Similar items</Text>
+              <SectionLabel>Similar items</SectionLabel>
             ) : null
           }
           renderItem={({ item }) => (
-            <Pressable accessibilityRole="button" accessibilityLabel={`Add ${item.name}`} style={styles.result} onPress={() => pick(item)}>
-              <Text style={styles.resultText}>{item.name}</Text>
-              {item.category ? <Text style={styles.muted}>{labelize(item.category)}</Text> : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${item.name}`}
+              style={({ pressed }) => [styles.result, pressed && { opacity: pressedOpacity }]}
+              onPress={() => pick(item)}
+            >
+              <AppText variant="bodyL" weight="heavy" style={styles.flex}>
+                {item.name}
+              </AppText>
+              {item.category ? (
+                <AppText variant="caption" color="muted">
+                  {labelize(item.category)}
+                </AppText>
+              ) : null}
             </Pressable>
           )}
           ListFooterComponent={
             data.match === "none" ? (
-              <Pressable accessibilityRole="button" style={styles.result} onPress={() => setCreating(true)}>
-                <Text style={[styles.resultText, styles.createText]}>＋ Create “{text.trim()}”</Text>
-              </Pressable>
+              <Button label={`Create "${typed}"`} variant="secondary" fullWidth onPress={() => setCreating(true)} />
             ) : null
           }
         />
@@ -171,29 +191,33 @@ export function ItemPickerBody({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg },
-  title: { fontSize: fontSize.xl, fontWeight: "800", color: colors.text },
-  close: { fontSize: fontSize.xl, color: colors.textMuted },
-  body: { flex: 1, padding: spacing.lg, gap: spacing.md },
-  gap: { gap: spacing.sm },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  label: { fontSize: fontSize.md, fontWeight: "600", color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  error: { fontSize: fontSize.sm, color: colors.danger },
-  suggest: { backgroundColor: colors.warningLight, padding: spacing.md, borderRadius: 10, gap: spacing.sm, marginBottom: spacing.sm },
-  suggestText: { fontSize: fontSize.md, color: colors.text },
-  bold: { fontWeight: "700" },
-  result: {
-    minHeight: TAP_TARGET,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+  safe: { flex: 1, backgroundColor: color.bg },
+  flex: { flex: 1 },
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: space.sm,
+    paddingLeft: space.screenX,
+    paddingRight: space.sm,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: color.border,
   },
-  resultText: { fontSize: fontSize.md, color: colors.text },
-  createText: { color: colors.primary, fontWeight: "700" },
+  body: { flex: 1, padding: space.screenX, gap: space.md },
+  gap: { gap: space.sm },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  added: { flexDirection: "row", alignItems: "center", gap: space.xs },
+  results: { gap: space.sm },
+  result: {
+    minHeight: size.hit,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.md,
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.card,
+  },
 });

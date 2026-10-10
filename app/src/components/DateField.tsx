@@ -2,9 +2,9 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 
+import { Button, TextField } from "@/components/ui";
 import { parseCalendarDate, toCalendarDate } from "@/lib/format";
-import { spacing } from "@/theme";
-import { Button, Input } from "./ui";
+import { space } from "@/theme";
 
 /** "Edit date" → native date picker (a YYYY-MM-DD text field on web). Calls onChange with "YYYY-MM-DD". */
 export function DateField({
@@ -25,16 +25,16 @@ export function DateField({
     return (
       <View style={styles.row}>
         <View style={styles.flex}>
-          <Input label="Expiration (YYYY-MM-DD)" value={text} onChangeText={setText} placeholder="2026-10-14" />
+          <TextField label="Expiration (YYYY-MM-DD)" value={text} onChangeText={setText} placeholder="2026-10-14" />
         </View>
-        <Button title="Save" compact disabled={disabled || !/^\d{4}-\d{2}-\d{2}$/.test(text)} onPress={() => onChange(text)} />
+        <Button label="Save" disabled={disabled || !/^\d{4}-\d{2}-\d{2}$/.test(text)} onPress={() => onChange(text)} />
       </View>
     );
   }
 
   return (
     <View>
-      <Button title={label} variant="secondary" compact disabled={disabled} onPress={() => setOpen(true)} />
+      <Button label={label} variant="secondary" size="sm" disabled={disabled} onPress={() => setOpen(true)} style={styles.start} />
       {open ? (
         <DateTimePicker
           value={value ? parseCalendarDate(value) : new Date()}
@@ -55,6 +55,7 @@ export function DateField({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
+  row: { flexDirection: "row", alignItems: "flex-end", gap: space.sm },
   flex: { flex: 1 },
+  start: { alignSelf: "flex-start" },
 });

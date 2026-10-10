@@ -1,9 +1,9 @@
 import { type Allergen, ALLERGENS, type Diet, DIETS } from "@contracts/dietary";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
+import { SectionLabel, ToggleChip } from "@/components/ui";
 import { labelize } from "@/lib/format";
-import { colors, fontSize, spacing } from "@/theme";
-import { Chip } from "./ui";
+import { space } from "@/theme";
 
 export interface DietaryValue {
   diets: Diet[];
@@ -14,35 +14,31 @@ function toggle<T>(list: T[], v: T): T[] {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 }
 
-/** Chip multi-selects for diets and allergens. Values come from the server contract (@contracts/dietary). */
+/** ToggleChips for diets and allergies (DESIGN.md §4.7). Values come from the server contract (@contracts/dietary). */
 export function DietaryPicker({ value, onChange }: { value: DietaryValue; onChange: (v: DietaryValue) => void }) {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label} accessibilityRole="header">
-        Diets
-      </Text>
+      <SectionLabel>Diet</SectionLabel>
       <View style={styles.chips}>
         {DIETS.map((d) => (
-          <Chip
+          <ToggleChip
             key={d}
             label={labelize(d)}
             selected={value.diets.includes(d)}
             onPress={() => onChange({ ...value, diets: toggle(value.diets, d) })}
+            testID={`diet-${d}`}
           />
         ))}
       </View>
-      <Text style={styles.label} accessibilityRole="header">
-        Allergens
-      </Text>
+      <SectionLabel style={styles.gapTop}>Allergies</SectionLabel>
       <View style={styles.chips}>
         {ALLERGENS.map((a) => (
-          <Chip
+          <ToggleChip
             key={a}
             label={labelize(a)}
-            tone={value.allergens.includes(a) ? "danger" : "neutral"}
             selected={value.allergens.includes(a)}
-            accessibilityLabel={`Allergic to ${labelize(a)}`}
             onPress={() => onChange({ ...value, allergens: toggle(value.allergens, a) })}
+            testID={`allergen-${a}`}
           />
         ))}
       </View>
@@ -51,7 +47,7 @@ export function DietaryPicker({ value, onChange }: { value: DietaryValue; onChan
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: spacing.sm },
-  label: { fontSize: fontSize.md, fontWeight: "700", color: colors.text, marginTop: spacing.sm },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  wrap: { gap: space.sm },
+  gapTop: { marginTop: space.sm },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
 });
