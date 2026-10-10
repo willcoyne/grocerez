@@ -39,12 +39,13 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  allergens      UserAllergen[]
-  diets          UserDiet[]
-  groupsCreated  Group[]        @relation("GroupCreatedBy")
-  memberships    GroupMember[]
-  invitesSent    GroupInvite[]  @relation("InviteInvitedBy")
-  itemsCreated   Item[]
+  allergens     UserAllergen[]
+  diets         UserDiet[]
+  groupsCreated Group[]        @relation("GroupCreatedBy")
+  memberships   GroupMember[]
+  invitesSent   GroupInvite[]  @relation("InviteInvitedBy")
+  itemsCreated  Item[]
+  preferences   Preference[]
 
   @@map("users")
 }
@@ -94,9 +95,10 @@ model Group {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  creator User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  members GroupMember[]
-  invites GroupInvite[]
+  creator     User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  members     GroupMember[]
+  invites     GroupInvite[]
+  preferences Preference[]
 
   @@map("groups")
 }
@@ -107,8 +109,9 @@ model GroupMember {
   role     GroupRole @default(member)
   joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
 
-  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferences Preference[]
 
   @@id([groupId, userId])
   @@index([userId])
@@ -151,8 +154,9 @@ model Item {
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  creator User?       @relation(fields: [createdBy], references: [id], onDelete: SetNull)
-  aliases ItemAlias[]
+  creator     User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases     ItemAlias[]
+  preferences Preference[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -169,4 +173,39 @@ model ItemAlias {
   @@index([itemId])
   @@index([aliasNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "item_aliases_trgm")
   @@map("item_aliases")
+}
+
+// ─── 05 Preferences ────────────────────────────────────────────────────────────
+
+enum Recurrence {
+  /// Always keep in stock; comes back on the list every time it runs out.
+  staple
+  /// Wanted this week only; deleted from preferences when bought.
+  one_time
+
+  @@map("recurrence")
+}
+
+/// One member's "want" for a group. The group's preference set is the union of all rows for the group.
+/// (group_id, user_id) references group_members, so leaving/being removed from a group deletes that member's preferences.
+model Preference {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId      String     @map("group_id") @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  itemId       String     @map("item_id") @db.Uuid
+  quantityText String?    @map("quantity_text")
+  recurrence   Recurrence @default(staple)
+  note         String?
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group  Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  member GroupMember @relation(fields: [groupId, userId], references: [groupId, userId], onDelete: Cascade)
+  item   Item        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, userId, itemId])
+  @@index([groupId, itemId])
+  @@index([userId])
+  @@map("preferences")
 }

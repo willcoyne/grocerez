@@ -99,3 +99,17 @@ Format: date · folder · what the plan said · what was done · why.
   (the `package.json` `"prisma": {"seed": ...}` key from the plan is no longer used).
 - `npm run db:check:normalize` checks the SQL function against the fixture.
 
+### 2026-10-10 · 05 · Preferences reference the membership row
+- **Plan said:** step 4, "When a member leaves the group, delete their preferences in that group (backend transaction, not a cascade,
+  because the user row still exists)."
+- **Did:** added a composite FK `preferences (group_id, user_id) → group_members (group_id, user_id) ON DELETE CASCADE`
+  (in addition to the plain FKs to `groups` and `users`). Deleting the **membership** row cascades that member's preferences in
+  that group only; the user row is untouched. It also makes it impossible to store a preference for a non-member.
+- **Backend impact:** none required. The leave/remove transaction can still run its explicit `deleteMany` (it will find nothing),
+  but it must still regenerate the shopping list afterwards. Insert members before their preferences.
+- **Why:** "constraints carry the rules": a preference from someone outside the group should be an impossible state.
+
+### 2026-10-10 · 05 · `preferences.item_id` on item delete
+- **Did:** `ON DELETE RESTRICT` (catalog items in use can't be deleted). Same for `cabinet_items`, `shopping_list_items` (06, 07).
+  Added an index on `preferences(user_id)` so user-delete cascades don't seq-scan.
+
