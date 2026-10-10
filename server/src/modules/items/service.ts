@@ -7,6 +7,9 @@ import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { itemsRepo, searchRowToItem, toItem } from "./repo.js";
 
+/** Akamai's embeddings endpoint accepts at most 16 inputs per request. */
+const EMBED_BATCH_MAX = 16;
+
 const emptyName = () => badRequest("Item name is empty after normalization", "VALIDATION_ERROR");
 
 export const itemsService = {
@@ -48,7 +51,7 @@ export const itemsService = {
   },
 
   /** Embeds every item that has no embedding for the current model, in batches. Returns how many were embedded. */
-  async embedMissing(batchSize = 64): Promise<number> {
+  async embedMissing(batchSize = EMBED_BATCH_MAX): Promise<number> {
     if (!embeddingsConfigured()) return 0;
     let total = 0;
     for (;;) {

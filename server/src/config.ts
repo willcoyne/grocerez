@@ -43,7 +43,7 @@ const schema = z.object({
   AKAMAI_EMBEDDING_URL: optional,
   AKAMAI_EMBEDDING_MODEL: z.string().trim().min(1).default("hackathon-embedding"),
   /** Cosine distance cutoff for "related" items (0 = identical, 2 = opposite). */
-  SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.6),
+  SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.35),
   CONTACT_EMAIL: z.string().default("team@grocerez.app"),
   /** If set in production, /api/dev/login-as is mounted and requires header `x-demo-key: <DEMO_KEY>`. */
   DEMO_KEY: optional,
