@@ -200,6 +200,12 @@ Format: date · folder · what the plan said · what was done · why.
   restore test. A local `pg_dump -Fc` → `pg_restore` into a scratch database was tested. Group scoping (step 3) and
   "never log tokens or emails" (step 5) are backend rules. Row-level security (stretch) was not done.
 
+### 2026-10-10 · 01 (follow-up) · Compose project name
+- **Did:** added `name: grocerez` to `server/docker-compose.yml`. Without it the compose project (and the volume) is named after the
+  folder, `server`, which collides with any other repo that has a `server/` folder. The volume is now `grocerez_pgdata`.
+  Anyone who ran the database before this commit has an orphaned `server_pgdata` volume. Re-run migrate + seed, then
+  `docker volume rm server_pgdata` when it's no longer needed.
+
 ## Needs team sign-off
 
 None. No API contract change was needed. The SQL helpers (`search_items`, `generate_shopping_list`) are offered to the backend,
