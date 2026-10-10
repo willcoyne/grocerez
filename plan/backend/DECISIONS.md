@@ -227,3 +227,28 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
   their personal `user:<id>` room so their group list refreshes. `invites:changed` has an empty payload `{}`.
 - **Member objects go through `toUser` in `users/service.ts`** (the single DB-row to public-User mapping that backend/11 extends with presigned avatar URLs), then are narrowed to `{id, displayName, email, avatarUrl, role}`.
 - **Skipped:** redis adapter (07 step 7, single instance). The polling fallback (07 step 6) needs no API work.
+
+## 12 (partial, parallel)
+
+Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud resources created.
+
+**Done**
+- `server/Dockerfile` (multi-stage, `node:22-slim`, OpenSSL installed for Prisma, `prisma generate` + `tsc` in the build
+  stage, runs as the non-root `node` user) and `server/.dockerignore`. Verified locally: image builds and serves
+  `/api/health` against the local Postgres.
+- **Migrations run on container start** (`npx prisma migrate deploy && exec node dist/index.js`), as the plan's step 1
+  says, instead of a separate release step. Safe because the service runs as exactly 1 instance (step 3).
+- **The runtime image keeps dev dependencies**, because the `prisma` CLI is a devDependency and moving it would churn
+  `package-lock.json`. Upgrade path: move `prisma` to `dependencies`, then `npm prune --omit=dev` in the build stage.
+- **`TRUST_PROXY`** (new optional env, integer hop count, default `0` = off) sets `app.set("trust proxy", n)`, closing
+  02-auth item 6. Set `TRUST_PROXY=1` on Railway / Cloud Run. Added to `.env.example`; config test covers it.
+- `server/DEPLOY.md`: image usage, env var table, Railway steps, Cloud Run + Cloud SQL alternative (min = max = 1
+  instance, no CPU throttling, session affinity for Socket.IO), seeding, monitoring, and the demo checklist (all unchecked).
+
+**Remaining**
+- Step 2/5: the actual Railway (or Cloud Run) deploy, public URL into `EXPO_PUBLIC_API_URL`, host health check config.
+- Step 4: `npx prisma db seed` against prod. No seed script exists on this branch yet (owned by `plan/database`).
+  A `DEMO_KEY`-guarded `/dev/login-as` for production is not built; it stays unmounted when `NODE_ENV=production`.
+- Step 6 (optional CI workflow): not added. Needs a Postgres service container since tests hit a real DB.
+- Step 7 demo checklist and "Done when": every item depends on M2 (04-06), finishing 08/09/10, and a real deploy.
+- CORS still only allows `http://localhost:8081`; a deployed Expo **web** build would need its origin added (native apps are unaffected).
