@@ -8,7 +8,7 @@ import { useDietary } from "@/api/hooks/me";
 import { useHouseholdAllergens } from "@/api/hooks/products";
 import { useAddListItem } from "@/api/hooks/shoppingList";
 import type { Item } from "@contracts/items";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { AiLabel, Button, Card, Chip } from "@/components/ui";
 import { labelize } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
@@ -74,7 +74,7 @@ function RecipeCard({ recipe, groupId }: { recipe: Recipe; groupId: string }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const addList = useAddListItem(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const expiring = new Set(recipe.usesExpiring.map((s) => s.toLowerCase()));
 
   /** Add missing to list: catalog matches directly; unmatched names are created first (POST /items) then added. */

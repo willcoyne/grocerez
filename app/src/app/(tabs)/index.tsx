@@ -13,7 +13,7 @@ import { AllergenBadge } from "@/components/Badges";
 import { InviteBanner } from "@/components/InviteBanner";
 import { ItemPicker } from "@/components/ItemPicker";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Chip, IconButton } from "@/components/ui";
 import { confirm } from "@/lib/confirm";
 import { formatCentsRange } from "@/lib/format";
@@ -37,7 +37,7 @@ export default function ListScreen() {
   const complete = useCompleteTrip(groupId);
   const { user } = useAuth();
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [picking, setPicking] = useState(false);
 
   const syncing = useMutationState({

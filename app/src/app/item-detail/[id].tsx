@@ -9,7 +9,7 @@ import { pickAndUploadImage } from "@/api/hooks/uploads";
 import { ExpirationPill, StatusChip } from "@/components/Badges";
 import { DateField } from "@/components/DateField";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Chip, SectionHeader } from "@/components/ui";
 import { useCabinetActions } from "@/components/useCabinetActions";
 import { expirationText, labelize } from "@/lib/format";
@@ -26,7 +26,7 @@ export default function ItemDetailScreen() {
   const update = useUpdateCabinetItem(groupId);
   const actions = useCabinetActions(groupId);
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [uploading, setUploading] = useState(false);
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 

@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useCreateGroup } from "@/api/hooks/groups";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Input } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
@@ -17,7 +17,7 @@ export default function CreateGroupScreen() {
   const { setActiveGroupId } = useActiveGroup();
   const { finishOnboarding } = useAuth();
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
 
   function submit() {
     const trimmed = name.trim();

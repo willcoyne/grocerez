@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react-native";
 import type { ReactElement } from "react";
 
-import { ToastProvider } from "@/components/Toast";
+import { ToastProvider } from "@/components/ui";
 import { ActiveGroupContextForTests, type ActiveGroupValue } from "@/state/ActiveGroupContext";
 import { AuthContextForTests, type AuthContextValue } from "@/state/AuthContext";
 

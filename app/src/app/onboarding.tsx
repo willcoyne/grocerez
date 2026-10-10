@@ -8,7 +8,7 @@ import { errorMessage } from "@/api/client";
 import { useUpdateDietary, useUpdateMe } from "@/api/hooks/me";
 import { DietaryPicker } from "@/components/DietaryPicker";
 import { MyInvitesList } from "@/components/MyInvitesList";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Input } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
@@ -21,7 +21,7 @@ export default function OnboardingScreen() {
   const { user, finishOnboarding } = useAuth();
   const { groups } = useActiveGroup();
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [step, setStep] = useState(0);
   const [name, setName] = useState(user?.displayName ?? "");
   const [zip, setZip] = useState(user?.zipCode ?? "");

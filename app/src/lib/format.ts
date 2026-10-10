@@ -51,3 +51,26 @@ export function expirationText(row: Pick<CabinetItem, "expiresAt" | "expirationS
   if (!row.expiresAt) return "No expiration date";
   return `Expires ${shortDate(row.expiresAt)} (${row.expirationSource === "manual" ? "you set this" : "estimated"})`;
 }
+
+/** "you" for the current user, otherwise the display name. */
+export function nameFor(userId: string, meId: string | undefined, members: { id: string; displayName: string }[]): string {
+  if (userId === meId) return "you";
+  return members.find((m) => m.id === userId)?.displayName ?? "someone";
+}
+
+/** "1 item" / "3 items". */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** Stable small hash for avatar colors. */
+export function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function isEmail(value: string): boolean {
+  return EMAIL_RE.test(value.trim());
+}

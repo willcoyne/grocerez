@@ -4,7 +4,7 @@ import { errorMessage } from "@/api/client";
 import { useAddCabinetItem, useDeleteCabinetItem, useRanOut, useUpdateCabinetItem } from "@/api/hooks/cabinet";
 import { useAddListItem } from "@/api/hooks/shoppingList";
 import { confirm } from "@/lib/confirm";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 
 /** Running low / back in stock / ran out (+ Undo, + "add anyway?") / remove. Shared by the Cabinet tab and ItemDetail. */
 export function useCabinetActions(groupId: string) {
@@ -13,7 +13,7 @@ export function useCabinetActions(groupId: string) {
   const remove = useDeleteCabinetItem(groupId);
   const add = useAddCabinetItem(groupId);
   const addToList = useAddListItem(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 
   /** Undo = POST cabinet with the same item (keeps a manual date; estimated dates are re-estimated by the server). */

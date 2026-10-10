@@ -6,7 +6,7 @@ import { usePrices } from "@/api/hooks/ai";
 import { useUpdateMe } from "@/api/hooks/me";
 import { useShoppingList } from "@/api/hooks/shoppingList";
 import { LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { AiLabel, Button, Card, Input } from "@/components/ui";
 import { formatCentsRange, timeAgo } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
@@ -86,7 +86,7 @@ export default function PricesScreen() {
 
 function ZipPrompt() {
   const update = useUpdateMe();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [zip, setZip] = useState("");
   return (
     <Card>

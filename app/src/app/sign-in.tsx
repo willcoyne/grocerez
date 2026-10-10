@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { errorMessage } from "@/api/client";
 import { DEMO_USERS } from "@/auth/demoUsers";
 import { HealthBadge } from "@/components/HealthBadge";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card } from "@/components/ui";
 import { config, missingConfig } from "@/config";
 import { useAuth } from "@/state/AuthContext";
@@ -13,7 +13,7 @@ import { colors, fontSize, spacing } from "@/theme";
 
 export default function SignInScreen() {
   const { signInWithGoogle, signInAsDemo } = useAuth();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const showDemo = __DEV__ || !!config.demoKey;
   const missing = missingConfig();

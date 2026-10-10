@@ -10,7 +10,7 @@ import { useHouseholdAllergens, useScanProduct } from "@/api/hooks/products";
 import { useAddListItem, useCheckItem } from "@/api/hooks/shoppingList";
 import { ItemPicker } from "@/components/ItemPicker";
 import { conflicts, ProductCard } from "@/components/ProductCard";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Input } from "@/components/ui";
 import { confirm } from "@/lib/confirm";
 import { labelize } from "@/lib/format";
@@ -26,7 +26,7 @@ export default function ScannerScreen() {
   const mode: Mode = params.mode === "match-list-item" || params.mode === "add-to-cabinet" ? params.mode : "lookup";
   const groupId = useRequiredGroupId();
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [permission, requestPermission] = useCameraPermissions();
   const scan = useScanProduct();
   const household = useHouseholdAllergens(groupId);

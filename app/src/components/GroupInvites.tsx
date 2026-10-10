@@ -7,7 +7,7 @@ import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
 import { colors, fontSize, spacing } from "@/theme";
 import { ErrorState } from "./States";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 import { Button } from "./ui";
 
 /** Pending invites of the active group: email, "invited by Ian · 2h ago", and Revoke (owner or the inviter only). */
@@ -17,7 +17,7 @@ export function GroupInvites() {
   const groupId = activeGroup?.id ?? "";
   const invites = useGroupInvites(groupId);
   const revoke = useRevokeInvite(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
 
   if (invites.isPending) return <Text style={styles.muted}>Loading invites…</Text>;
   if (invites.isError) return <ErrorState error={invites.error} onRetry={() => invites.refetch()} />;

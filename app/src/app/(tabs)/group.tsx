@@ -10,7 +10,7 @@ import { GroupInvites } from "@/components/GroupInvites";
 import { GroupMembers } from "@/components/GroupMembers";
 import { InviteBanner } from "@/components/InviteBanner";
 import { ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Input, SectionHeader } from "@/components/ui";
 import { confirm } from "@/lib/confirm";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
@@ -64,7 +64,7 @@ function GroupSettings({ groupId, name, isOwner }: { groupId: string; name: stri
   const rename = useRenameGroup(groupId);
   const leave = useLeaveGroup(groupId);
   const del = useDeleteGroup(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [newName, setNewName] = useState(name);
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });

@@ -10,7 +10,7 @@ import { DietaryPicker } from "@/components/DietaryPicker";
 import { InviteBanner } from "@/components/InviteBanner";
 import { MyPreferences } from "@/components/MyPreferences";
 import { ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Input, SectionHeader } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
@@ -36,7 +36,7 @@ export default function MeScreen() {
 function Profile() {
   const { user } = useAuth();
   const update = useUpdateMe();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [zip, setZip] = useState(user?.zipCode ?? "");
   const [uploading, setUploading] = useState(false);
   if (!user) return null;
@@ -96,7 +96,7 @@ function Profile() {
 function DietarySection() {
   const dietary = useDietary();
   const update = useUpdateDietary();
-  const toast = useToast();
+  const { show: toast } = useToast();
   return (
     <View>
       <SectionHeader title="Dietary" />

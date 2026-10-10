@@ -7,13 +7,13 @@ import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
 import { colors, fontSize, spacing } from "@/theme";
 import { ErrorState, LoadingState } from "./States";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card } from "./ui";
 
 /** "Waiting to join someone? Ask them to invite you@gmail.com" with a copy button. */
 export function WaitingForInvite() {
   const { user } = useAuth();
-  const toast = useToast();
+  const { show: toast } = useToast();
   if (!user) return null;
   return (
     <Card>
@@ -43,7 +43,7 @@ export function MyInvitesList({ onAccepted, showWaiting = true }: { onAccepted?:
   const accept = useAcceptInvite();
   const decline = useDeclineInvite();
   const { setActiveGroupId } = useActiveGroup();
-  const toast = useToast();
+  const { show: toast } = useToast();
 
   if (invites.isPending) return <LoadingState message="Checking for invites…" />;
   if (invites.isError) return <ErrorState error={invites.error} onRetry={() => invites.refetch()} />;

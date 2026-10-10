@@ -6,7 +6,7 @@ import { errorMessage } from "@/api/client";
 import { useCabinet, useUpdateCabinetItem } from "@/api/hooks/cabinet";
 import { DateField } from "@/components/DateField";
 import { ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card } from "@/components/ui";
 import { expirationText } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
@@ -19,7 +19,7 @@ export default function ExpirationCheckScreen() {
   const cabinet = useCabinet(groupId);
   const update = useUpdateCabinetItem(groupId);
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const ids = useMemo(() => new Set(itemIds.split(",").filter(Boolean)), [itemIds]);
 
   if (cabinet.isPending) return <LoadingState />;

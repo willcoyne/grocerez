@@ -4,7 +4,7 @@ import { ScrollView, Share, StyleSheet, Text } from "react-native";
 import { ApiError, errorMessage } from "@/api/client";
 import { useCreateInvite } from "@/api/hooks/groups";
 import { GroupInvites } from "@/components/GroupInvites";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Input, SectionHeader } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { colors, fontSize, spacing } from "@/theme";
@@ -13,7 +13,7 @@ import { colors, fontSize, spacing } from "@/theme";
 export default function InviteSheet() {
   const { activeGroup } = useActiveGroup();
   const create = useCreateInvite(activeGroup?.id ?? "");
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [email, setEmail] = useState("");
   const [lastInvited, setLastInvited] = useState<string | null>(null);
   const valid = /^\S+@\S+\.\S+$/.test(email.trim());

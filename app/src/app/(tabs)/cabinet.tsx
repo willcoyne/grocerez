@@ -10,7 +10,7 @@ import { ExpirationPill, StatusChip } from "@/components/Badges";
 import { InviteBanner } from "@/components/InviteBanner";
 import { ItemPicker } from "@/components/ItemPicker";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Chip, IconButton } from "@/components/ui";
 import { useCabinetActions } from "@/components/useCabinetActions";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
@@ -176,7 +176,7 @@ function RowMenu({
 /** "Map out cabinet": ItemPicker in quick-add-many mode with a location selector. */
 function MapOutPicker({ groupId, visible, onClose }: { groupId: string; visible: boolean; onClose: () => void }) {
   const add = useAddCabinetItem(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const router = useRouter();
   const [location, setLocation] = useState<Location>("pantry");
   return (

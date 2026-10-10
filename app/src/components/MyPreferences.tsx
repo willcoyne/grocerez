@@ -9,7 +9,7 @@ import { useShoppingList } from "@/api/hooks/shoppingList";
 import { colors, fontSize, radius, spacing, TAP_TARGET } from "@/theme";
 import { ItemPicker } from "./ItemPicker";
 import { ErrorState, LoadingState } from "./States";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, Chip, Input, SectionHeader } from "./ui";
 
 type Recurrence = Preference["recurrence"];
@@ -21,7 +21,7 @@ export function MyPreferences({ groupId }: { groupId: string }) {
   const list = useShoppingList(groupId);
   const add = useAddPreference(groupId);
   const del = useDeletePreference(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [segment, setSegment] = useState<Recurrence>("staple");
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState<Preference | null>(null);
@@ -105,7 +105,7 @@ export function MyPreferences({ groupId }: { groupId: string }) {
 
 function EditPreference({ groupId, pref, onClose }: { groupId: string; pref: Preference; onClose: () => void }) {
   const update = useUpdatePreference(groupId);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [quantity, setQuantity] = useState(pref.quantityText ?? "");
   const [note, setNote] = useState(pref.note ?? "");
   const [recurrence, setRecurrence] = useState<Recurrence>(pref.recurrence);

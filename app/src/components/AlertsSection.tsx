@@ -7,7 +7,7 @@ import { expirationText, shortDate } from "@/lib/format";
 import { colors, fontSize, spacing, TAP_TARGET } from "@/theme";
 import { ExpirationPill } from "./Badges";
 import { ErrorState } from "./States";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 import { Button, Card, SectionHeader } from "./ui";
 
 /** Group tab → Alerts: expiring soon (tap → ItemDetail, "Find recipes") and possible recalls (Dismiss). */
@@ -15,7 +15,7 @@ export function AlertsSection({ groupId }: { groupId: string }) {
   const alerts = useAlerts(groupId);
   const dismiss = useDismissRecall(groupId);
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
 
   const count = (alerts.data?.expiring.length ?? 0) + (alerts.data?.recalls.length ?? 0);
   return (

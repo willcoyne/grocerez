@@ -8,7 +8,7 @@ import { confirm } from "@/lib/confirm";
 import { labelize } from "@/lib/format";
 import { useAuth } from "@/state/AuthContext";
 import { colors, fontSize, spacing } from "@/theme";
-import { useToast } from "./Toast";
+import { useToast } from "@/components/ui";
 import { Button, Chip } from "./ui";
 
 type Member = GroupDetail["members"][number];
@@ -22,7 +22,7 @@ function memberAllergens(m: Member): string[] {
 export function GroupMembers({ group }: { group: GroupDetail }) {
   const { user } = useAuth();
   const remove = useRemoveMember(group.id);
-  const toast = useToast();
+  const { show: toast } = useToast();
   const isOwner = group.role === "owner";
 
   return (
