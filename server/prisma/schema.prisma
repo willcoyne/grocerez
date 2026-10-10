@@ -98,12 +98,13 @@ model Group {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  creator      User?              @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  members      GroupMember[]
-  invites      GroupInvite[]
-  preferences  Preference[]
-  cabinetItems CabinetItem[]
-  listItems    ShoppingListItem[]
+  creator       User?              @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  members       GroupMember[]
+  invites       GroupInvite[]
+  preferences   Preference[]
+  cabinetItems  CabinetItem[]
+  listItems     ShoppingListItem[]
+  recallMatches RecallMatch[]
 
   @@map("groups")
 }
@@ -159,12 +160,13 @@ model Item {
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  creator      User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
-  aliases      ItemAlias[]
-  preferences  Preference[]
-  cabinetItems CabinetItem[]
-  listItems    ShoppingListItem[]
-  products     Product[]
+  creator        User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases        ItemAlias[]
+  preferences    Preference[]
+  cabinetItems   CabinetItem[]
+  listItems      ShoppingListItem[]
+  products       Product[]
+  priceEstimates PriceEstimate[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -260,7 +262,11 @@ model CabinetItem {
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
   adder   User?    @relation(fields: [addedBy], references: [id], onDelete: SetNull)
 
+  recallMatches RecallMatch[]
+
   @@unique([groupId, itemId])
+  /// Target of recall_matches' composite FK (keeps a match's group equal to its cabinet item's group).
+  @@unique([id, groupId])
   @@index([groupId, expiresAt])
   @@map("cabinet_items")
 }
@@ -353,4 +359,71 @@ model Product {
 
   @@index([itemId])
   @@map("products")
+}
+
+// ─── 09 Recalls & price cache ──────────────────────────────────────────────────
+
+/// Global food recalls, imported daily from openFDA (food enforcement). Re-import upserts on external_id.
+model Recall {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// 'openfda'
+  source             String
+  /// openFDA recall_number.
+  externalId         String    @unique @map("external_id")
+  productDescription String    @map("product_description")
+  reason             String?
+  /// Class I / II / III
+  classification     String?
+  firm               String?
+  /// States / nationwide.
+  distribution       String?
+  reportDate         DateTime? @map("report_date") @db.Date
+  /// Ongoing / Terminated
+  status             String?
+  raw                Json?
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  matches RecallMatch[]
+
+  @@index([productDescription(ops: raw("gin_trgm_ops"))], type: Gin, map: "recalls_product_description_trgm")
+  @@map("recalls")
+}
+
+/// A recall that fuzzy-matches a group's cabinet item. A suggestion for a person to check, never applied automatically.
+/// Alerts show rows with dismissed_at IS NULL (partial index). score is 0..1.
+model RecallMatch {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recallId      String    @map("recall_id") @db.Uuid
+  groupId       String    @map("group_id") @db.Uuid
+  cabinetItemId String    @map("cabinet_item_id") @db.Uuid
+  score         Float     @db.Real
+  dismissedAt   DateTime? @map("dismissed_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recall      Recall      @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  cabinetItem CabinetItem @relation(fields: [cabinetItemId, groupId], references: [id, groupId], onDelete: Cascade)
+
+  @@unique([recallId, cabinetItemId])
+  @@index([cabinetItemId])
+  @@map("recall_matches")
+}
+
+/// Cache for the agentic price lookup, one row per (item, zip code). Rows older than 24 hours are stale.
+model PriceEstimate {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId       String   @map("item_id") @db.Uuid
+  zipCode      String   @map("zip_code")
+  lowCents     Int      @map("low_cents")
+  highCents    Int      @map("high_cents")
+  typicalCents Int?     @map("typical_cents")
+  unit         String?
+  sources      Json?
+  model        String?
+  fetchedAt    DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, zipCode])
+  @@map("price_estimates")
 }

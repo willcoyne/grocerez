@@ -151,3 +151,18 @@ Format: date · folder · what the plan said · what was done · why.
   `allergens ∪ may_contain` of the list row's `scanned_product_id`, else the group's `cabinet_items.product_id` for that item,
   else `items.default_allergens`. Scanning is a cache upsert: `prisma.product.upsert({ where: { gtin } ... })` (or `smartlabelUrl`).
 
+### 2026-10-10 · 09 · Recalls and price cache
+- **Did:**
+  - `recall_matches (cabinet_item_id, group_id) → cabinet_items (id, group_id) ON DELETE CASCADE` (composite FK, backed by a new
+    `UNIQUE (id, group_id)` on `cabinet_items`), so a match can never point at another group's cabinet item.
+  - Partial index `recall_matches_active_idx ON recall_matches (group_id) WHERE dismissed_at IS NULL` for the alerts query
+    (`... WHERE group_id = $1 AND dismissed_at IS NULL`). Dismiss = `UPDATE ... SET dismissed_at = now()`.
+  - CHECKs: `score` in 0..1; `recalls.source IN ('openfda','demo')` (`demo` marks the seeded offline recall in 10);
+    `price_estimates`: `0 <= low_cents <= high_cents`, `typical_cents` between them, `zip_code ~ '^[0-9]{5}$'`.
+  - `recalls.created_at` added (not in the plan) for "new since" queries. `price_estimates.fetched_at` defaults to `now()`
+    and `item_id` cascades on item delete (it's a cache).
+  - openFDA import must upsert: `ON CONFLICT (external_id) DO UPDATE` (or `prisma.recall.upsert({ where: { externalId } })`).
+- **Tooling note:** `prisma migrate dev` refuses to create a migration that adds a unique constraint in a non-interactive shell.
+  This migration was generated with `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
+  into a new timestamped folder, then applied with `npx prisma migrate dev`.
+
