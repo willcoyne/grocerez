@@ -7,14 +7,14 @@ import { emitGroup, emitUser, evictFromGroupRoom } from "../../lib/realtime.js";
 import { lockGroup, regenerate } from "../shopping-list/engine.js";
 import { groupsRepo } from "./repo.js";
 
-type GroupRow = { id: string; name: string; createdAt: Date; _count: { members: number } };
+type GroupRow = { id: string; name: string; timeZone: string; createdAt: Date; _count: { members: number } };
 type InviteRow = {
   id: string; groupId: string; email: string; status: Invite["status"]; createdAt: Date; respondedAt: Date | null;
   inviter: { id: string; displayName: string } | null;
 };
 
 const toGroup = (g: GroupRow, role: Group["role"]): Group => ({
-  id: g.id, name: g.name, role, memberCount: g._count.members, createdAt: g.createdAt.toISOString(),
+  id: g.id, name: g.name, role, memberCount: g._count.members, timeZone: g.timeZone, createdAt: g.createdAt.toISOString(),
 });
 
 const toInvite = (i: InviteRow): Invite => ({
@@ -47,8 +47,8 @@ async function afterMemberGone(groupId: string, userId: string, by: string, grou
 }
 
 export const groupsService = {
-  async create(userId: string, name: string): Promise<Group> {
-    const g = await prisma.$transaction((tx) => groupsRepo.create(tx, name, userId));
+  async create(userId: string, name: string, timeZone?: string): Promise<Group> {
+    const g = await prisma.$transaction((tx) => groupsRepo.create(tx, name, userId, timeZone));
     return toGroup(g, "owner");
   },
 
@@ -75,8 +75,9 @@ export const groupsService = {
     };
   },
 
-  async rename(groupId: string, name: string, by: string): Promise<Group> {
-    const g = await groupsRepo.rename(prisma, groupId, name);
+  /** PATCH /groups/:groupId {name?, timeZone?} (owner only). */
+  async rename(groupId: string, data: { name?: string; timeZone?: string }, by: string): Promise<Group> {
+    const g = await groupsRepo.rename(prisma, groupId, data);
     emitGroup(groupId, "group:changed", by);
     return toGroup(g, "owner");
   },

@@ -2,7 +2,7 @@ import { prisma, type Db } from "../../db.js";
 import { CATEGORIES } from "../../contracts/common.js";
 import type { AddListItemBody, AllergenFlag, CheckListItemBody, ShoppingListItem } from "../../contracts/shoppingList.js";
 import { conflict, notFound } from "../../lib/errors.js";
-import { estimateExpiration } from "../../lib/expiration.js";
+import { estimateExpiration, groupTimeZone } from "../../lib/expiration.js";
 import { emitGroup } from "../../lib/realtime.js";
 import { cabinetHooks } from "../cabinet/service.js";
 import { lockGroup, regenerate, withRegeneration } from "./engine.js";
@@ -111,10 +111,11 @@ export const shoppingListService = {
     const now = new Date();
     const { moved, cabinetIds, prefsDeleted } = await prisma.$transaction(async (tx) => {
       await lockGroup(tx, groupId);
+      const timeZone = await groupTimeZone(tx, groupId);
       const rows = await shoppingListRepo.checkedRows(tx, groupId);
       const cabinetIds: string[] = [];
       for (const r of rows) {
-        const expiresAt = estimateExpiration(r.item, now);
+        const expiresAt = estimateExpiration(r.item, now, timeZone);
         const expiry = expiresAt
           ? { expiresAt, expirationSource: "estimated" as const }
           : { expiresAt: null, expirationSource: null };

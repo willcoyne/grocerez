@@ -97,6 +97,8 @@ model Group {
   name      String
   /// Nullable so deleting the creator's account doesn't delete or block the household.
   createdBy String?  @map("created_by") @db.Uuid
+  /// IANA time zone of the household (CHECK: is_valid_time_zone). "Today" and expiry estimates use it (DB-08).
+  timeZone  String   @default("America/Chicago") @map("time_zone")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

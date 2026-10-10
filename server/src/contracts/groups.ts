@@ -1,11 +1,18 @@
 import { z } from "zod";
+import { isValidTimeZone } from "../lib/expiration.js";
 
 export const GroupRole = z.enum(["owner", "member"]);
 export const InviteStatus = z.enum(["pending", "accepted", "declined", "revoked"]);
 
-export const CreateGroupBody = z.object({ name: z.string().trim().min(1).max(80) });
-export const UpdateGroupBody = CreateGroupBody;
+/** IANA time zone name of the household ("America/Chicago"); defines "today" for expiry alerts and estimates (DB-08). */
+export const TimeZone = z.string().trim().max(64).refine(isValidTimeZone, "must be an IANA time zone, e.g. America/Chicago");
+
+export const CreateGroupBody = z.object({ name: z.string().trim().min(1).max(80), timeZone: TimeZone.optional() });
+export const UpdateGroupBody = z
+  .object({ name: z.string().trim().min(1).max(80).optional(), timeZone: TimeZone.optional() })
+  .refine((b) => b.name !== undefined || b.timeZone !== undefined, { message: "Send name and/or timeZone" });
 export type CreateGroupBody = z.infer<typeof CreateGroupBody>;
+export type UpdateGroupBody = z.infer<typeof UpdateGroupBody>;
 
 export const Group = z.object({
   id: z.uuid(),
@@ -13,6 +20,8 @@ export const Group = z.object({
   /** The caller's role in this group. */
   role: GroupRole,
   memberCount: z.number().int(),
+  /** IANA time zone of the household (default America/Chicago). */
+  timeZone: z.string(),
   createdAt: z.string(),
 });
 export type Group = z.infer<typeof Group>;

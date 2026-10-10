@@ -4,7 +4,7 @@ import type { Allergen, Diet } from "../../contracts/dietary.js";
 import { CLAUDE_MODEL, structured } from "../../lib/anthropic.js";
 import { conflicts } from "../../lib/diets.js";
 import { badRequest } from "../../lib/errors.js";
-import { toCalendarDate } from "../../lib/expiration.js";
+import { groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
 import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { itemsService } from "../items/service.js";
@@ -36,8 +36,7 @@ export const aiService = {
   async suggestRecipes(groupId: string, body: SuggestRecipesBody): Promise<Recipe[]> {
     const ctx = await aiRepo.recipeContext(groupId);
     if (ctx.cabinet.length === 0) throw badRequest("Add some items to the cabinet first", "CABINET_EMPTY");
-    const today = new Date();
-    const horizon = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + EXPIRING_DAYS));
+    const horizon = householdToday(await groupTimeZone(prisma, groupId), EXPIRING_DAYS);
     const expiring = ctx.cabinet.filter((c) => c.expiresAt && c.expiresAt <= horizon);
     const others = ctx.cabinet.filter((c) => !expiring.includes(c));
     const diets = [...new Set(ctx.diets)] as Diet[];
