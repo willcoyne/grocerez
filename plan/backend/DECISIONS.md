@@ -289,3 +289,39 @@ Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud reso
 - Step 6 (optional CI workflow): not added. Needs a Postgres service container since tests hit a real DB.
 - Step 7 demo checklist and "Done when": every item depends on M2 (04-06), finishing 08/09/10, and a real deploy.
 - CORS still only allows `http://localhost:8081`; a deployed Expo **web** build would need its origin added (native apps are unaffected).
+
+## 05-cabinet
+
+- **Schema:** new migration `20261011010000_cabinet` per `database/06` (`stock_status`, `expiration_source`, `cabinet_items`,
+  `UNIQUE (group_id, item_id)`, index `(group_id, expires_at)`), plus a `location` CHECK (`fridge|freezer|pantry|other`) and
+  the backend/11 column `photo_s3_key`. `product_id` is a plain nullable uuid with **no FK yet**: `products` doesn't exist on
+  this branch. database/08 must add `FOREIGN KEY (product_id) REFERENCES products(id)` (suggest `ON DELETE SET NULL`).
+  `item_id` is `ON DELETE RESTRICT`, `added_by` is nullable `ON DELETE SET NULL`. Applied with `prisma migrate deploy`;
+  `migrate diff` DB vs schema is empty. `database/06` boxes are left for the database builder (the EXPLAIN check wasn't run).
+- **`CabinetItem`** (`contracts/cabinet.ts`) = `{id, groupId, item: Item, productId, status, quantityText, location,
+  purchasedAt, expiresAt ("YYYY-MM-DD"), expirationSource, photoUrl, addedBy, createdAt, updatedAt}`. Step 1's product join
+  (brand, image) is **left to 08**: it should add `product: {brand, imageUrl} | null` in `toCabinetItem`.
+- **POST** is an upsert returning **200** (like preferences). Unknown `itemId` is `404 ITEM_NOT_FOUND`. Re-adding an existing
+  row sets `status` back to `in_stock` and only overwrites location / quantity / expiry when they're sent, so a hand-set date
+  isn't replaced by an estimate. Without `expiresAt`, a new row gets `estimateExpiration(item, now)` with
+  `expiration_source='estimated'` (household/other → `null`/`null`). `expiresAt: null` means "no date". `purchased_at` stays
+  null for manual adds (it's set by 06's finish trip).
+- **PATCH:** `expiresAt` sets `expiration_source='manual'`; `null` clears both. `photoKey` must match exactly
+  `^item-photo/<caller's userId>/<uuid>.(jpg|png|webp)$` (else `400 VALIDATION_ERROR`); `null` removes it. Responses give a
+  presigned GET in `photoUrl` (1 h), never the key. Unknown id or one from another group is `404 CABINET_ITEM_NOT_FOUND`.
+- **Regeneration hook:** `generate()` doesn't exist yet, so `regenerate(groupId, tx)` at the top of
+  `modules/cabinet/service.ts` is a marked no-op. **06 replaces its body with `generate(groupId, tx)`.** It already runs inside
+  the write's transaction on: POST (adding changes "have"), PATCH with `status`, and ran-out when the item is wanted.
+  `shopping-list:changed` is emitted after commit in those cases, `cabinet:changed` on every write. `cabinetRepo.haveItemIds`
+  is the `database/06` step 4 "have" query for 06 to use.
+- **Ran out** deletes the row and returns `{requeued: true}` if any member of the group has a preference for the item, all in
+  one transaction. A concurrent second ran-out gets 404.
+- **DELETE `/cabinet/:id`** (step 5) returns 204 and does not regenerate. Note for 06: since the list is
+  `preferences − have`, the next regeneration triggered by anything else will still list a deleted item that someone wants.
+- **Not ticked:** the "Done when" loop (ran out → list → bought → cabinet) needs 06's list and finish trip. The cabinet half is
+  tested (`test/cabinet.test.ts`: ran out + wanted → requeued and out of "have"; re-add → back in "have"; running low → still
+  in the cabinet and out of "have").
+- **Skipped from 09:** re-running recall matching on cabinet add (09 step 3 of recalls) waits for the recalls tables.
+- **Frontend must update:** `DELETE /groups/:groupId/cabinet/:id` (204) added to the contract table (it was in 05's README
+  but missing from the table). `PATCH cabinet` accepts `photoKey` (from `POST /uploads/presign {purpose: "item-photo"}`, or
+  `null`), and `CabinetItem` has `photoUrl`, which expires after 1 hour.

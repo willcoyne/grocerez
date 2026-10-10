@@ -11,6 +11,7 @@ import { groupsRouter } from "./modules/groups/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
 import { itemsRouter } from "./modules/items/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
+import { cabinetRouter } from "./modules/cabinet/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -41,6 +42,7 @@ app.use("/api", groupsRouter);
 app.use("/api", uploadsRouter);
 app.use("/api", itemsRouter);
 app.use("/api", preferencesRouter);
+app.use("/api", cabinetRouter);
 
 app.use(notFound);
 app.use(errorHandler);

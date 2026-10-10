@@ -42,6 +42,7 @@ model User {
   memberships   GroupMember[]
   invitesSent   GroupInvite[]
   itemsCreated  Item[]
+  cabinetAdded  CabinetItem[]
 
   @@map("users")
 }
@@ -91,6 +92,7 @@ model Group {
   creator   User?         @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: SetNull)
   members   GroupMember[]
   invites   GroupInvite[]
+  cabinet   CabinetItem[]
 
   @@map("groups")
 }
@@ -128,17 +130,18 @@ model GroupInvite {
 
 // database/04-item-catalog-fuzzy-matching. normalize_item_name() and the category CHECK live in the migration SQL.
 model Item {
-  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name             String
-  normalizedName   String       @unique @map("normalized_name")
+  normalizedName   String        @unique @map("normalized_name")
   category         String?
-  defaultAllergens Allergen[]   @default([]) @map("default_allergens")
-  shelfLifeDays    Int?         @map("shelf_life_days")
-  createdBy        String?      @map("created_by") @db.Uuid
-  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  creator          User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  defaultAllergens Allergen[]    @default([]) @map("default_allergens")
+  shelfLifeDays    Int?          @map("shelf_life_days")
+  createdBy        String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  creator          User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   aliases          ItemAlias[]
   preferences      Preference[]
+  cabinetItems     CabinetItem[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], map: "items_name_trgm", type: Gin)
   @@map("items")
@@ -179,4 +182,43 @@ model Preference {
   @@unique([groupId, userId, itemId])
   @@index([groupId, itemId])
   @@map("preferences")
+}
+
+// database/06-cabinet. location is CHECK-constrained in SQL; product_id gets its FK in database/08.
+enum StockStatus {
+  in_stock
+  running_low
+
+  @@map("stock_status")
+}
+
+enum ExpirationSource {
+  manual
+  estimated
+
+  @@map("expiration_source")
+}
+
+model CabinetItem {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String            @map("group_id") @db.Uuid
+  itemId           String            @map("item_id") @db.Uuid
+  productId        String?           @map("product_id") @db.Uuid
+  status           StockStatus       @default(in_stock)
+  quantityText     String?           @map("quantity_text")
+  location         String?
+  purchasedAt      DateTime?         @map("purchased_at") @db.Timestamptz
+  expiresAt        DateTime?         @map("expires_at") @db.Date
+  expirationSource ExpirationSource? @map("expiration_source")
+  photoKey         String?           @map("photo_s3_key") // backend/11; presigned into the API's photoUrl
+  addedBy          String?           @map("added_by") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  group            Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item             Item              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  adder            User?             @relation(fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, itemId])
+  @@index([groupId, expiresAt])
+  @@map("cabinet_items")
 }
