@@ -1,3 +1,4 @@
+import type { CabinetItem } from "@contracts/cabinet";
 import { differenceInCalendarDays, format, formatDistanceToNowStrict, parseISO } from "date-fns";
 
 /** "tree_nuts" → "Tree nuts", "one_time" → "One time". */
@@ -43,4 +44,10 @@ export function daysUntil(ymd: string, now = new Date()): number {
 /** "Oct 14" */
 export function shortDate(ymd: string): string {
   return format(parseCalendarDate(ymd), "MMM d");
+}
+
+/** "Expires Oct 14 (estimated)" / "(you set this)". */
+export function expirationText(row: Pick<CabinetItem, "expiresAt" | "expirationSource">): string {
+  if (!row.expiresAt) return "No expiration date";
+  return `Expires ${shortDate(row.expiresAt)} (${row.expirationSource === "manual" ? "you set this" : "estimated"})`;
 }

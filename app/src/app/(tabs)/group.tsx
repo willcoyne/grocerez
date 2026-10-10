@@ -4,6 +4,7 @@ import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useDeleteGroup, useGroupDetail, useLeaveGroup, useRenameGroup } from "@/api/hooks/groups";
+import { AlertsSection } from "@/components/AlertsSection";
 import { EveryonesWants } from "@/components/EveryonesWants";
 import { GroupInvites } from "@/components/GroupInvites";
 import { GroupMembers } from "@/components/GroupMembers";
@@ -31,6 +32,8 @@ export default function GroupScreen() {
     >
       <InviteBanner />
       <View style={styles.inner}>
+        <AlertsSection groupId={group.id} />
+
         <SectionHeader
           title={`Members (${group.members.length})`}
           right={<Button title="Invite" compact onPress={() => router.push("/invite")} />}

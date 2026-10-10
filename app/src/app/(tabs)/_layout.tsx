@@ -2,7 +2,10 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs } from "expo-router/js-tabs";
 import type { ColorValue } from "react-native";
 
+import { useAlertCount } from "@/components/AlertsSection";
 import { GroupSwitcher } from "@/components/GroupSwitcher";
+import { useExpirationReminders } from "@/notifications/useExpirationReminders";
+import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 
 import { colors } from "@/theme";
 
@@ -16,6 +19,9 @@ function icon(name: IconName) {
 }
 
 export default function TabsLayout() {
+  const groupId = useRequiredGroupId();
+  const alertCount = useAlertCount(groupId);
+  useExpirationReminders(groupId);
   return (
     <Tabs
       screenOptions={{
@@ -29,7 +35,12 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ title: "List", tabBarIcon: icon("checkbox-outline") }} />
       <Tabs.Screen name="cabinet" options={{ title: "Cabinet", tabBarIcon: icon("file-tray-stacked-outline") }} />
       <Tabs.Screen name="me" options={{ title: "Me", tabBarIcon: icon("person-circle-outline") }} />
-      <Tabs.Screen name="group" options={{ title: "Group", tabBarIcon: icon("people-outline") }} />
+      <Tabs.Screen name="group" options={{
+          title: "Group",
+          tabBarIcon: icon("people-outline"),
+          tabBarBadge: alertCount > 0 ? alertCount : undefined,
+          tabBarAccessibilityLabel: alertCount > 0 ? `Group, ${alertCount} alerts` : "Group",
+        }} />
     </Tabs>
   );
 }

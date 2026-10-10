@@ -8,6 +8,7 @@ import { errorMessage } from "@/api/client";
 import { usePrices } from "@/api/hooks/ai";
 import { useGroupDetail } from "@/api/hooks/groups";
 import { useAddListItem, useCheckItem, useCompleteTrip, useDeleteListItem, useShoppingList } from "@/api/hooks/shoppingList";
+import { RecallBanner } from "@/components/AlertsSection";
 import { AllergenBadge } from "@/components/Badges";
 import { InviteBanner } from "@/components/InviteBanner";
 import { ItemPicker } from "@/components/ItemPicker";
@@ -80,6 +81,7 @@ export default function ListScreen() {
   return (
     <View style={styles.flex}>
       <InviteBanner />
+      <RecallBanner groupId={groupId} />
       <SectionList
         sections={sections}
         keyExtractor={(r) => r.id}

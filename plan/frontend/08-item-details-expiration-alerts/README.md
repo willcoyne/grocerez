@@ -26,6 +26,13 @@
 
 ## Done when
 
-- [ ] Every cabinet item shows an expiration pill and can be edited
-- [ ] The seeded recall shows in Alerts and can be dismissed
-- [ ] A test item expiring tomorrow produces a local notification
+- [x] Every cabinet item shows an expiration pill and can be edited (pill on every dated row; ItemDetail "Edit date" → `PATCH {expiresAt}`; native picker **needs device check**)
+- [x] The seeded recall shows in Alerts and can be dismissed — Jest with the seeded recall's shape; live data **needs live check**
+- [ ] A test item expiring tomorrow produces a local notification — scheduling plan (9am day before, future only, max 20) Jest-tested; delivery **needs device check**
+
+## Status (2026-10-10)
+
+`item-detail/[id]` (expiration with "(estimated)"/"(you set this)", Edit date, location chips, purchased date, photo upload via `photoKey`/`photoUrl`,
+Running low / Ran out / Remove), `expiration-check` sheet after Finish trip, Alerts section on the Group tab with a badge count on the tab icon,
+recall cards ("may match … Check the package.", reason/class/firm/date, View FDA notice when `url` is set, Dismiss), recall banner on the List tab,
+local reminders rescheduled whenever the cabinet query changes; permission asked after the first finished trip.

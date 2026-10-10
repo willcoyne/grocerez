@@ -77,6 +77,13 @@ Format: date · folder · what the plan said · what was done · why.
 - Adding a scanned product to the cabinet sends only `itemId` (`POST cabinet` has no `productId`), so the cabinet row isn't linked to the product.
 - In `match-list-item` mode, "Add manually" checks the row off without a product.
 
+### 2026-10-10 · 08 · Item detail and alerts
+- ItemDetail shows the cabinet row's `product` ref (brand, name, image). There is no `GET /products/:id`, so full nutrition/allergens of a
+  cabinet item's product can't be shown; the full `ProductCard` appears in the scanner only.
+- Alerts live as a section at the top of the Group tab (no separate screen); "Find recipes" opens the Recipes modal.
+- On web, the date picker is a `YYYY-MM-DD` text field and notifications are skipped.
+- Recall "banner when a new match appears" = a red banner on the List tab while any undismissed recall match exists.
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no
