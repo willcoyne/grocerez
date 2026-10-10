@@ -84,6 +84,12 @@ Format: date · folder · what the plan said · what was done · why.
 - On web, the date picker is a `YYYY-MM-DD` text field and notifications are skipped.
 - Recall "banner when a new match appears" = a red banner on the List tab while any undismissed recall match exists.
 
+### 2026-10-10 · 09 · AI screens
+- Recipes run on an explicit "Find recipes" tap (not on open) because each call takes 10–20 s and is limited to 10/hour per group.
+- "Safe for" line = my diets + the household allergens the app can see (see member allergens under Needs backend change), e.g. "Vegetarian · no peanuts".
+- Prices is a TanStack query (`POST …/prices`, no auto-retry, 10 min stale time) shared with the List header chip; the server caches 24 h, so Refresh is cheap.
+- `missingItemIds` are shown by name using the list query.
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no

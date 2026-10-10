@@ -33,6 +33,7 @@ export default function GroupScreen() {
       <InviteBanner />
       <View style={styles.inner}>
         <AlertsSection groupId={group.id} />
+        <Button title="✨ What can we cook?" variant="secondary" style={styles.cook} onPress={() => router.push("/recipes")} />
 
         <SectionHeader
           title={`Members (${group.members.length})`}
@@ -112,4 +113,5 @@ const styles = StyleSheet.create({
   container: { paddingBottom: spacing.xxl },
   inner: { paddingHorizontal: spacing.lg },
   gap: { gap: spacing.sm },
+  cook: { marginTop: spacing.md },
 });
