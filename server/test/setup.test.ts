@@ -41,6 +41,13 @@ describe("config", () => {
     expect(loadConfig({ ...process.env, GOOGLE_CLIENT_IDS: "a, b," }).GOOGLE_CLIENT_IDS).toEqual(["a", "b"]);
   });
 
+  it("TRUST_PROXY defaults to 0 (off) and parses a hop count", () => {
+    expect(loadConfig({ ...process.env, TRUST_PROXY: undefined }).TRUST_PROXY).toBe(0);
+    expect(loadConfig({ ...process.env, TRUST_PROXY: "" }).TRUST_PROXY).toBe(0);
+    expect(loadConfig({ ...process.env, TRUST_PROXY: "1" }).TRUST_PROXY).toBe(1);
+    expect(() => loadConfig({ ...process.env, TRUST_PROXY: "yes" })).toThrow(/TRUST_PROXY/);
+  });
+
   it("server refuses to start with a missing variable", () => {
     const { JWT_SECRET: _omit, ...env } = process.env;
     const out = spawnSync(process.execPath, ["--import", "tsx", "src/index.ts"], {

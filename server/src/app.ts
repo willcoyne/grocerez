@@ -19,6 +19,8 @@ import { config } from "./config.js";
 export const EXPO_DEV_ORIGINS = ["http://localhost:8081"];
 
 export const app = express();
+// Behind a host proxy, req.ip (used by the rate limiters) must come from X-Forwarded-For.
+if (config.TRUST_PROXY) app.set("trust proxy", config.TRUST_PROXY);
 
 app.use(helmet());
 app.use(cors({ origin: EXPO_DEV_ORIGINS }));

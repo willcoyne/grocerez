@@ -17,6 +17,8 @@ const schema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().min(1),
   APP_LINK_BASE: z.string().min(1),
   RESEND_API_KEY: z.string().optional().transform((s) => s || undefined),
+  // Number of reverse proxies in front of the server (Railway / Cloud Run: 1). 0 or unset = trust none.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 
 export type Config = z.infer<typeof schema>;
