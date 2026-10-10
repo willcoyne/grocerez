@@ -83,6 +83,7 @@ export function RootNavigator() {
 
       <Stack.Protected guard={inApp}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="scanner" options={{ presentation: "fullScreenModal", title: "Scan" }} />
       </Stack.Protected>
 
       {/* Available whenever signed in (used from onboarding / no-group too). */}

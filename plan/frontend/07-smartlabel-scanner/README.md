@@ -26,6 +26,13 @@
 
 ## Done when
 
-- [ ] Scanning a cereal box QR shows calories + allergens in under 3 seconds
-- [ ] Scanning a plain barcode works
-- [ ] A household member's allergen is highlighted in red with their name
+- [ ] Scanning a cereal box QR shows calories + allergens in under 3 seconds — **needs device check** (camera)
+- [ ] Scanning a plain barcode works — request mapping Jest-tested; **needs device check**
+- [x] A household member's allergen is highlighted in red with their name — `conflicts()` Jest-tested; chips read "⚠ Peanuts — User 4" (red + icon + words)
+
+## Status (2026-10-10)
+
+`src/app/scanner.tsx` (full-screen modal, `?mode=lookup|match-list-item|add-to-cabinet&listItemId=`): permission flow with Open Settings +
+manual barcode entry, viewfinder, 2 s repeat debounce + paused while a request is in flight, result sheet (`ProductCard`, reused by ItemDetail),
+mode actions, allergen warning before checking off, "We couldn't find this product" → Add manually (ItemPicker). Messages for non-SmartLabel QR,
+bad barcode (`400`, e.g. check digit) and `409 PRODUCT_ITEM_MISMATCH`.

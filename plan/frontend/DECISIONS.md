@@ -70,8 +70,17 @@ Format: date · folder · what the plan said · what was done · why.
 - Swipe-to-delete for manual rows is a "✕" icon button. Finish trip is not retried automatically (it's a one-shot transaction).
 - The price chip reads the cached `POST …/prices` result (a TanStack query shared with the Prices modal); before an estimate exists it says "Est. price".
 
+### 2026-10-10 · 07 · Scanner
+- Household allergens for the red chips come from (a) `member.allergens` if the API adds it, (b) the allergen flags already on the shopping list,
+  and (c) my own `GET /me/dietary`. Until (a) exists, a member whose allergen isn't on any list item won't be highlighted (see Needs backend change).
+- "Add manually … with the barcode attached": the API has no way to attach a GTIN to a catalog item, so manual add just picks the item.
+- Adding a scanned product to the cabinet sends only `itemId` (`POST cabinet` has no `productId`), so the cabinet row isn't linked to the product.
+- In `match-list-item` mode, "Add manually" checks the row off without a product.
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no
   endpoint returns other members' dietary profiles. Proposal: add `allergens: Allergen[]` and `diets: Diet[]` to `Member` in
-  `contracts/groups.ts`. The app already renders `member.allergens` chips if the field appears.
+  `contracts/groups.ts`. The app already renders `member.allergens` chips if the field appears (Group tab, scanner highlights).
+- **Link scanned products to cabinet rows:** `POST /groups/:groupId/cabinet` could accept an optional `productId` so a product scanned
+  in lookup / map-out mode keeps its brand and nutrition on the cabinet row (finish trip already does this via `scannedProductId`).
