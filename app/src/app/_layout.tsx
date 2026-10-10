@@ -1,16 +1,19 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { SplashScreen, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { makeQueryClient, setupReactQueryNative } from "@/api/queryClient";
+import { ErrorState, LoadingState } from "@/components/States";
 import { ToastProvider } from "@/components/Toast";
 import { SocketProvider } from "@/realtime/SocketProvider";
-import { ActiveGroupProvider } from "@/state/ActiveGroupContext";
-import { AuthProvider } from "@/state/AuthContext";
+import { ActiveGroupProvider, useActiveGroup } from "@/state/ActiveGroupContext";
+import { AuthProvider, useAuth } from "@/state/AuthContext";
 import { colors } from "@/theme";
+
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const [queryClient] = useState(makeQueryClient);
@@ -25,12 +28,7 @@ export default function RootLayout() {
               <SocketProvider>
                 <ToastProvider>
                   <StatusBar style="dark" />
-                  <Stack
-                    screenOptions={{
-                      headerTintColor: colors.primary,
-                      contentStyle: { backgroundColor: colors.background },
-                    }}
-                  />
+                  <RootNavigator />
                 </ToastProvider>
               </SocketProvider>
             </ActiveGroupProvider>
@@ -38,5 +36,60 @@ export default function RootLayout() {
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+/**
+ * Route guard (plan 02 step 4):
+ * no token → sign-in · brand-new account → onboarding · signed in without a group → no-group · otherwise → tabs.
+ */
+export function RootNavigator() {
+  const { status, needsOnboarding } = useAuth();
+  const { groups, groupsLoading, groupsError, refetchGroups } = useActiveGroup();
+  const signedIn = status === "signedIn";
+  const booting = status === "loading" || (signedIn && groupsLoading);
+
+  useEffect(() => {
+    if (!booting) void SplashScreen.hideAsync().catch(() => {});
+  }, [booting]);
+
+  if (booting) return <LoadingState message="Opening GrocerEZ…" />;
+  if (signedIn && groupsError && groups.length === 0) {
+    return <ErrorState error={groupsError} onRetry={refetchGroups} title="Couldn't load your households" />;
+  }
+
+  const hasGroup = groups.length > 0;
+  const inApp = signedIn && !needsOnboarding && hasGroup;
+
+  return (
+    <Stack
+      screenOptions={{
+        headerTintColor: colors.primary,
+        contentStyle: { backgroundColor: colors.background },
+        headerBackButtonDisplayMode: "minimal",
+      }}
+    >
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={signedIn && needsOnboarding}>
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={signedIn && !needsOnboarding && !hasGroup}>
+        <Stack.Screen name="no-group" options={{ title: "GrocerEZ" }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={inApp}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      </Stack.Protected>
+
+      {/* Available whenever signed in (used from onboarding / no-group too). */}
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="create-group" options={{ presentation: "modal", title: "Create a household" }} />
+        <Stack.Screen name="invites" options={{ presentation: "modal", title: "My invites" }} />
+      </Stack.Protected>
+    </Stack>
   );
 }

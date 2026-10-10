@@ -29,6 +29,15 @@ Format: date · folder · what the plan said · what was done · why.
   network errors/5xx (never on 4xx or `503 NOT_CONFIGURED`) and **pause while offline**, resuming when the phone reconnects. Queries retry twice.
 - `expo-secure-store` has no web implementation, so `src/state/storage.ts` uses `localStorage` on web (web is only a demo target).
 
+### 2026-10-10 · 02 · Auth details
+- "New user" = `user.createdAt` within the last minute at sign-in (no `isNew` in the response). The flag lives in memory only, so
+  killing the app mid-onboarding lands a user with no group on NoGroup (which offers the same invites/create choices).
+- Route guard uses Expo Router `Stack.Protected`: sign-in · onboarding · no-group · (tabs). `create-group` and `invites` are available
+  whenever signed in so onboarding/NoGroup can open them.
+- On launch, a network error on `GET /me` keeps the cached user from secure storage (shopping in a store with no signal); only a 401 signs out.
+- Demo users list shows in `__DEV__`, or when `EXPO_PUBLIC_DEMO_KEY` is set (sent as `x-demo-key`, backend/12).
+- Google sign-in config plugin is added in `app.config.ts` using `EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME`, so no client IDs are committed.
+
 ## Needs backend change
 
 _None yet._
