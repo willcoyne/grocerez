@@ -8,9 +8,10 @@ import { recallsRepo } from "../modules/recalls/repo.js";
 
 const JOB = "import-recalls";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const OVERLAP_DAYS = 14;
 
 /**
- * backend/09: import openFDA food recalls reported since the last successful import (first run: 30 days back),
+ * backend/09: import openFDA food recalls reported since the last successful import minus a 14-day overlap (first run: 30 days back),
  * upsert by recall_number, then match every recall reported in the last 30 days against all cabinets.
  * Groups that got a new possible match receive cabinet:changed (by: "system").
  */
@@ -19,13 +20,17 @@ export async function importRecalls(opts: { now?: Date; fetch?: typeof fetch; jo
   const now = opts.now ?? new Date();
   const job = opts.job ?? JOB;
   const last = await prisma.jobRun.findUnique({ where: { name: job } });
-  const since = last?.lastSuccessAt ?? new Date(now.getTime() - 30 * DAY_MS);
+  // openFDA publishes weekly, often with a report_date days in the past, so re-query an overlap window (M3-08).
+  // The upsert by recall_number and ON CONFLICT on matches make the overlap idempotent.
+  const since = last
+    ? new Date(last.lastSuccessAt.getTime() - OVERLAP_DAYS * DAY_MS)
+    : new Date(now.getTime() - 30 * DAY_MS);
   const recalls = await fetchRecalls({ since, until: now, apiKey: config.OPENFDA_API_KEY, fetch: opts.fetch });
-  await recallsRepo.upsert(recalls);
+  const failed = await recallsRepo.upsert(recalls);
   await prisma.jobRun.upsert({ where: { name: job }, create: { name: job, lastSuccessAt: now }, update: { lastSuccessAt: now } });
   const groups = await recallsRepo.match({ recallsSince: new Date(now.getTime() - 30 * DAY_MS) });
   for (const g of groups) emitGroup(g, "cabinet:changed", "system");
-  return { imported: recalls.length, groupsWithNewMatches: groups.length };
+  return { imported: recalls.length - failed, failed, groupsWithNewMatches: groups.length };
 }
 
 const run = () =>

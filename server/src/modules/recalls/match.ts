@@ -4,7 +4,19 @@ export const MATCH_THRESHOLD = 0.35;
 /** Name words that never count toward the all-words gate (with words under 3 chars, like "oz"). */
 export const STOP_WORDS = ["and", "the", "with", "for"];
 
-const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+/**
+ * Case-, accent- and apostrophe-insensitive form applied to both sides of every comparison ("Häagen-Dazs" ~
+ * "HAAGEN-DAZS", "Trader Joe's" ~ "TRADER JOES"). Same as the SQL function match_norm() (unaccent + lower + drop ' ’ ʼ `).
+ */
+export const matchNorm = (s: string) =>
+  s.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/['’ʼ`]/g, "");
+
+const words = (s: string) => matchNorm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+/** Whole word, allowing one trailing "s" either way ("cracker" ~ "crackers", "kelloggs" ~ "kellogg"). */
+const hasWord = (desc: Set<string>, w: string) => {
+  const stem = w.replace(/s$/, "");
+  return desc.has(stem) || desc.has(`${stem}s`);
+};
 
 function trigrams(ws: string[]): Set<string> {
   const set = new Set<string>();
@@ -36,10 +48,15 @@ export function strictWordSimilarity(needle: string, haystack: string): number {
   return best;
 }
 
-/** Brand appears in the description as whole words (case/punctuation-insensitive). */
+/**
+ * Brand appears in the description (normalized, whole words, optional trailing "s"): every brand word, or the first
+ * brand word when it has 4+ letters, so a parent brand still matches its sub-brand ("Kraft Heinz" ~ "Kraft ...").
+ * Same rule as the SQL in recalls/repo.ts.
+ */
 export function brandAppears(brand: string, description: string): boolean {
-  const b = words(brand).join(" ");
-  return b.length > 0 && ` ${words(description).join(" ")} `.includes(` ${b} `);
+  const b = words(brand);
+  const desc = new Set(words(description));
+  return b.length > 0 && (b.every((w) => hasWord(desc, w)) || (b[0].length >= 4 && hasWord(desc, b[0])));
 }
 
 /**
@@ -52,10 +69,7 @@ export function allWordsAppear(name: string, description: string): boolean {
   const desc = new Set(words(description));
   return words(name)
     .filter((w) => w.length >= 3 && !STOP_WORDS.includes(w))
-    .every((w) => {
-      const stem = w.replace(/s$/, "");
-      return desc.has(stem) || desc.has(`${stem}s`);
-    });
+    .every((w) => hasWord(desc, w));
 }
 
 /** A brand gates matching only if it has at least one letter or digit. */

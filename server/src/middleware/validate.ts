@@ -5,10 +5,10 @@ import { AppError } from "../lib/errors.js";
 type Schemas = { body?: ZodType; query?: ZodType; params?: ZodType };
 
 // C0 control characters other than tab/newline/CR. Postgres rejects NUL in text (500), the rest is never valid input.
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+export const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 
 // Walks a parsed (schema-shaped, so bounded-depth) value for strings with control characters.
-const hasControlChars = (v: unknown): boolean =>
+export const hasControlChars =(v: unknown): boolean =>
   typeof v === "string"
     ? CONTROL_CHARS.test(v)
     : v !== null && typeof v === "object" && Object.values(v).some(hasControlChars);

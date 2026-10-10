@@ -612,3 +612,52 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
   `import-recalls-<tag>`. Its recall descriptions now include the test's item tag, since item names carry it and the
   all-words gate requires it.
 - No API contract change.
+
+## M3 break fixes: recalls and AI (test-reports/backend-m3m4.md)
+
+- **Schema:** new migration `20261012010000_match_norm_item_trust` adds the `unaccent` extension, an IMMUTABLE
+  `match_norm(text)` (`unaccent` + `lower` + drop the apostrophe characters `'`, `’`, `ʼ` and the backtick), and
+  `items.user_created boolean NOT NULL DEFAULT false`, backfilled from `created_by IS NOT NULL` and set by a
+  `BEFORE INSERT` trigger. It's a column, not `created_by IS NOT NULL` at read time, because `created_by` is
+  `ON DELETE SET NULL`: deleting an account would otherwise make that user's items look like seed items.
+  `schema.prisma` has the column and the extension. The seed needs nothing extra (seed rows have no `created_by`, so
+  they're trusted).
+- **M3-07 openFDA rows:** control characters are stripped from every string in a row (keys included), and `report_date`
+  must be a real calendar day (round-trips through `Date`), otherwise the row is skipped and counted in one warn log.
+  `recallsRepo.upsert` runs row by row (was one transaction), so a row the DB still rejects is logged and skipped. The job
+  returns `{imported, failed, groupsWithNewMatches}`.
+- **M3-08 late recalls (plan-09 gap):** the plan says `since` = the last import date. openFDA publishes weekly with
+  `report_date`s days in the past, so `since = last success − 14 days` (first run is still 30 days back). Re-fetching is
+  idempotent (upsert by `recall_number`, `ON CONFLICT DO NOTHING` on matches, so dismissed stays dismissed).
+- **M3-09 brand spelling:** both sides of every recall comparison (item names, aliases, brand + product name, the
+  description) go through `matchNorm` in JS and `match_norm()` in SQL. The brand gate passes when every brand word
+  appears, or the first brand word has 4+ letters (parent/sub-brand: "Kraft Heinz" ~ "Kraft ..."), whole words with an
+  optional trailing "s" ("Kellogg's" ~ "Kellogg"). Known ceiling: a generic first word passes the gate ("Great Value" ~
+  "Great Lakes ..."), but only after the item name already matched with all its words. Measured on the break test's
+  24 items × 15 recalls (unbranded, all-words rule): 12 true, 10 false, 0 missed (precision 55%, was 44% before the
+  all-words gate, recall 100%). The remaining false alarms are one-word items inside compound products ("Butter" ~
+  "Peanut Butter", "Milk" ~ "Whole milk chocolate"), which the "possible match, check your package" wording covers.
+- **M3-12 model output:** the structured-output schema is unchanged (refinements would leak into the JSON schema). After
+  parsing, an estimate whose `unit` has control characters or is over 40 chars is rejected (goes to `unpricedItemIds`).
+  Source URLs must be http(s), at most 2048 chars, and free of control characters, and at most 10 are kept.
+- **M3-13 price cache poisoning:** the global `(item, zip)` cache is read and written only for items with
+  `user_created = false`. Those are priced in one call whose prompt holds only such names plus a validated 5-digit ZIP
+  (body regex, or the profile ZIP, which is validated on write). The group's user-created items are priced in a second
+  call that is never cached and never shares a prompt with cacheable items, so a household's own names can only steer
+  its own uncached estimates. The break test now creates its injected item with `created_by` (every API-created item has
+  one) and queues the second call. The assertion is unchanged.
+- **M3-15 price rate limit (plan gap):** 10 Claude-backed price requests per group per hour → `429 RATE_LIMITED`.
+  Counted in the service only when there's something to price: cache-only answers, `ZIP_REQUIRED`/validation 400s and
+  calls that fail with 503 don't count. It's an in-memory fixed window keyed by the lower-cased group id, like the
+  recipe limiter (`ponytail:` single instance).
+- **M3-16 recipe allergens:** `aiRepo.cabinet` returns each item's `default_allergens ∪ product.allergens ∪
+  may_contain`. Items that hit the group's forbidden set (member allergens ∪ diet exclusions, `forbiddenAllergens()`) are
+  left out of the prompt. A recipe is dropped if it names any such cabinet item (in uses or missing) or if a missing item
+  *exactly* matches a catalog item carrying a forbidden allergen.
+- **M3-17 fuzzy matches:** a "suggested" (non-exact) `missingItemMatches` entry whose item carries a forbidden allergen
+  returns `item: null`. The name stays, so the user can still search for it.
+- **M3-06, M3-14:** already fixed by M2-06 (canonical group id).
+- **Frontend must update:** `POST /groups/:groupId/shopping-list/prices` can now return `429 RATE_LIMITED` (show "try
+  again later", same as recipes). `missingItemMatches[].item` can be `null` even when a similar catalog item exists
+  (allergen-unsafe near-miss), so fall back to "add as new". Recipes come back with fewer than `maxRecipes` more often
+  (unsafe ones are dropped after the model). No path or body changes.
