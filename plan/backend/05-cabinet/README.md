@@ -27,4 +27,4 @@
 
 ## Done when
 
-- [ ] The board's loop works: ran out → back on the list → bought → back in the cabinet
+- [x] The board's loop works: ran out → back on the list → bought → back in the cabinet

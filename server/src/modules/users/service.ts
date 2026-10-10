@@ -4,7 +4,7 @@ import { AppError, notFound } from "../../lib/errors.js";
 import { google } from "../../lib/google.js";
 import { signAppToken } from "../../lib/jwt.js";
 import { emitGroup, getIo, userRoom } from "../../lib/realtime.js";
-import { regenerate } from "../shopping-list/engine.js";
+import { lockGroups, regenerate } from "../shopping-list/engine.js";
 import { toUser, usersRepo } from "./repo.js";
 
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -58,6 +58,7 @@ export const usersService = {
   async deleteMe(userId: string): Promise<void> {
     const remaining = await prisma.$transaction(async (tx) => {
       const groupIds = await usersRepo.groupIds(tx, userId);
+      await lockGroups(tx, groupIds);
       await tx.user.delete({ where: { id: userId } });
       await tx.group.deleteMany({ where: { id: { in: groupIds }, members: { none: {} } } });
       const left = (await tx.group.findMany({ where: { id: { in: groupIds } }, select: { id: true } })).map((g) => g.id);

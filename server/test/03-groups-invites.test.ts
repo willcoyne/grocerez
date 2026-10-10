@@ -162,7 +162,7 @@ describe("03 leave and remove", () => {
     const a = await makeUser();
     const b = await makeUser();
     const g = await makeGroup(owner, [a]);
-    await prisma.groupMember.create({ data: { groupId: g.id, userId: b.id } });
+    await prisma.groupMember.create({ data: { groupId: g.id, userId: b.id, joinedAt: new Date(Date.now() + 60_000) } });
     await prisma.preference.create({ data: { groupId: g.id, userId: owner.id, itemId: await itemId("Milk") } });
 
     expect((await api().post(`/api/groups/${g.id}/leave`).set(owner.auth)).status).toBe(204);

@@ -3,7 +3,7 @@ import type { Group, GroupDetail, Invite, MyInvite } from "../../contracts/group
 import { sendInviteEmail } from "../../lib/email.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { emitGroup, emitUser, evictFromGroupRoom } from "../../lib/realtime.js";
-import { regenerate } from "../shopping-list/engine.js";
+import { lockGroup, regenerate } from "../shopping-list/engine.js";
 import { groupsRepo } from "./repo.js";
 
 type GroupRow = { id: string; name: string; createdAt: Date; _count: { members: number } };
@@ -138,6 +138,7 @@ export const groupsService = {
     const group = await prisma.$transaction(async (tx) => {
       const invite = await groupsRepo.findInvite(tx, inviteId);
       if (!invite || invite.status !== "pending" || invite.email !== email) throw inviteNotFound();
+      await lockGroup(tx, invite.groupId);
       await groupsRepo.addMember(tx, invite.groupId, userId);
       if (!(await groupsRepo.respondIfPending(tx, inviteId, "accepted"))) throw inviteNotFound();
       // The new member's allergens change the list's allergen flags.
@@ -169,6 +170,7 @@ export const groupsService = {
    */
   async leave(groupId: string, userId: string): Promise<void> {
     const deleted = await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
       await groupsRepo.removeMember(tx, groupId, userId);
       const gone = await groupsRepo.deleteIfEmpty(tx, groupId);
       if (!gone) await regenerate(tx, groupId);
@@ -181,6 +183,7 @@ export const groupsService = {
   async removeMember(groupId: string, ownerId: string, targetId: string): Promise<void> {
     if (targetId === ownerId) throw badRequest("Use leave to remove yourself", "CANNOT_REMOVE_SELF");
     await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
       const target = await tx.groupMember.findUnique({
         where: { groupId_userId: { groupId, userId: targetId } },
         include: { user: { select: { email: true } } },

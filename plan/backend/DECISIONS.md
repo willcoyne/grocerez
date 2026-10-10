@@ -95,3 +95,32 @@ Format: date · folder · what the plan said · what was done · why.
 - **`DELETE /cabinet/:id` (thrown away) does not regenerate**, as the plan says. Note: because the list is `preferences − cabinet`, the next
   regeneration triggered by anything else will add the item back if someone still has it as a preference. That is the set rule, not a bug.
 - `cabinetHooks.afterAdd` is the hook where 09 runs recall matching for a newly added item.
+
+### 2026-10-10 · 06 · `generate()` reuses the SQL `generate_shopping_list()`
+- Verified the database function against backend/06 step 1: (1.1) reads preferences, in-stock cabinet, member allergens and current rows in
+  one transaction; (1.2) upserts needed rows with `reason='preference'`, `wanted_by`, combined `quantity_text` and never touches `checked`;
+  (1.3) flags = linked product `allergens ∪ may_contain` (scanned product, else the cabinet's product) else `items.default_allergens`, for
+  **all** members; (1.4) deletes unchecked `preference` rows no longer needed; (1.5) keeps manual and checked rows (only their
+  `wanted_by`/flags are refreshed). It returns a row count, not the list, so the service wraps it: `src/modules/shopping-list/engine.ts`
+  `regenerate(tx, groupId)` is the single generation step used by every write; `withRegeneration()` runs a write + regenerate in one
+  transaction and emits after commit; `shoppingListService.generate()` returns the sorted list (step 1.6).
+- **Concurrency fix:** `generate_shopping_list()` takes a per-group advisory lock, but a transaction that first updates a list row and then
+  regenerates could deadlock with another doing the same (its `INSERT … ON CONFLICT` locks conflicting rows). Every regenerating transaction
+  now takes the same advisory lock **first** (`lockGroup`, sorted order for several groups). Tested with 6 concurrent check-offs from two
+  users and two concurrent finish-trip calls (items move exactly once).
+
+### 2026-10-10 · 06 · List response and rules
+- `ShoppingListItem = {id, groupId, itemId, item:{id,name,category}, reason, wantedBy:[{userId, displayName}], quantityText,
+  allergenFlags:[{userId, displayName, allergen}], checked, checkedBy, checkedAt, scannedProductId, addedBy, createdAt, updatedAt}`.
+  The DB stores `wanted_by` as ids; the API adds display names (a former member shows as "Former member").
+- `GET` sorts by aisle order (produce, bakery, meat, seafood, dairy, frozen, pantry, snacks, beverages, household, other; NULL = other), then name.
+- Manual add: upsert with `reason='manual'` (an existing preference row becomes manual so it survives), 201 created / 200 updated, then
+  regenerates so `wanted_by`/flags are filled. Unknown item → 404.
+- `PATCH {checked, scannedProductId?}`: the backend sets `checked`/`checked_by`; the DB trigger stamps/clears `checked_at`. Linking a product
+  regenerates (its allergens can change the flags). Unknown product → 404.
+- `DELETE` a preference row → `409 PREFERENCE_ROW`. Deleting a manual row regenerates, so if someone still wants the item it reappears as a preference row.
+- Finish trip: cabinet upsert sets `status in_stock`, `purchased_at now()`, `product_id` = scanned product (kept if none scanned),
+  the row's `quantity_text`, and an estimated expiration (household/unknown: none). One-time preferences for the bought items are deleted
+  for **all** members of the group. Then the checked rows are deleted and the list regenerated, all in one transaction under the group lock.
+- The seeded demo list is Bread, Lay's, Milk, Oreos, Peanut Butter, Tostitos (the board items Tostitos, Lay's, Oreos plus the
+  seed's staples; database/10), with Milk flagged for User 3 and Peanut Butter for User 4.

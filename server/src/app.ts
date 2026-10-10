@@ -13,6 +13,7 @@ import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
 import { itemsRouter } from "./modules/items/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
 import { healthRouter } from "./modules/health/router.js";
+import { shoppingListRouter } from "./modules/shopping-list/router.js";
 import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
 /** Builds the Express app (no network listener; index.ts adds the HTTP server and Socket.IO). */
@@ -56,6 +57,7 @@ export function createApp() {
   group.use(groupScopedRouter);
   group.use(preferencesRouter);
   group.use(cabinetRouter);
+  group.use(shoppingListRouter);
   api.use("/groups/:groupId", requireGroupMember, group);
 
   app.use("/api", api);
