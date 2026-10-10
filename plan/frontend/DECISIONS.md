@@ -57,6 +57,12 @@ Format: date · folder · what the plan said · what was done · why.
 - `POST /products/scan` `400` for a bad barcode check digit → scanner shows "Couldn't read that barcode, try again" (07).
 - Item search: only `results[0]` can be `suggested`, which is how the ItemPicker already reads it.
 
+### 2026-10-10 · 05 · Cabinet UI
+- Row actions use long-press or a "⋯" button opening an action sheet (no swipe; accessible and web-friendly).
+- "Expiring soon" filter uses the ids in `GET /alerts → expiring` so the "≤ 3 days" rule stays on the server. The pill colors
+  (green/amber/red) are a display-only reading of `expiresAt`.
+- Undo after ran-out/remove = `POST cabinet` with the same item, location and quantity; a manual date is re-sent, an estimated one is re-estimated.
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no
