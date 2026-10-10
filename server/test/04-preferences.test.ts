@@ -53,7 +53,7 @@ describe("04 item search and create", () => {
   it("nothing similar → none with no results; empty query → 400", async () => {
     const u = await makeUser();
     const res = await api().get("/api/items/search").query({ q: "zzqxw" }).set(u.auth);
-    expect(res.body).toEqual({ match: "none", results: [] });
+    expect(res.body).toEqual({ match: "none", results: [], related: [] });
     expect((await api().get("/api/items/search").query({ q: "!!!" }).set(u.auth)).status).toBe(400);
     expect((await api().get("/api/items/search").set(u.auth)).status).toBe(400);
   });

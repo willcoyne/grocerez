@@ -24,7 +24,7 @@ export const toItem = (i: ItemRow): Item => ({
   shelfLifeDays: i.shelfLifeDays,
 });
 
-export const searchRowToItem = (r: SearchRow): Item => ({
+export const searchRowToItem = (r: Omit<SearchRow, "match" | "similarity">): Item => ({
   id: r.item_id,
   name: r.name,
   normalizedName: r.normalized_name,
@@ -60,6 +60,34 @@ export const itemsRepo = {
       SELECT id FROM items WHERE normalized_name = normalize_item_name(${name})`;
     return { item: await db.item.findUniqueOrThrow({ where: { id: existing.id } }), created: false };
   },
+
+  /** Stores an item's embedding (vector literal from toVectorLiteral). */
+  setEmbedding: (db: Db, itemId: string, vector: string, model: string) =>
+    db.$executeRaw`
+      UPDATE items SET embedding = ${vector}::vector, embedding_model = ${model}, embedded_at = now()
+      WHERE id = ${itemId}::uuid`,
+
+  /** Items with no embedding for `model` yet (new items, or the model changed). */
+  missingEmbeddings: (db: Db, model: string, limit: number) =>
+    db.$queryRaw<{ id: string; name: string; category: string | null }[]>`
+      SELECT id, name, category FROM items
+      WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM ${model}
+      ORDER BY created_at, id LIMIT ${limit}::int`,
+
+  /**
+   * Nearest items by cosine distance to a query embedding. Only rows from the same model and dimension are
+   * compared; exact scan (fine for a few thousand items).
+   */
+  related: (db: Db, vector: string, dims: number, model: string, excludeIds: string[], maxDistance: number, limit: number) =>
+    db.$queryRaw<(Omit<SearchRow, "match" | "similarity"> & { distance: number })[]>`
+      SELECT id AS item_id, name, normalized_name, category, default_allergens::text[] AS default_allergens,
+             shelf_life_days, (embedding <=> ${vector}::vector) AS distance
+      FROM items
+      WHERE embedding_model = ${model} AND vector_dims(embedding) = ${dims}::int
+        AND NOT (id = ANY(${excludeIds}::uuid[]))
+        AND (embedding <=> ${vector}::vector) <= ${maxDistance}::float8
+      ORDER BY embedding <=> ${vector}::vector
+      LIMIT ${limit}::int`,
 
   /** Adds alias → itemId. Returns the item id the alias points at (an existing alias wins). */
   addAlias: async (db: Db, aliasText: string, itemId: string) => {

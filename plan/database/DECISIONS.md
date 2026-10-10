@@ -240,3 +240,22 @@ Format: date · folder · what the plan said · what was done · why.
 
 None. No API contract change was needed. The SQL helpers (`search_items`, `generate_shopping_list`) are offered to the backend,
 not required by the contract.
+
+## 2026-10-11 — Semantic item search with Akamai embeddings
+
+- **What:** every catalog item stores an embedding from Akamai's embedding model (`AKAMAI_EMBEDDING_MODEL`,
+  default `hackathon-embedding`) so search finds items that *mean* something close: "oreo" → Cookies, Chips Ahoy.
+- **Database:** migration `20261011000800_item_embeddings` enables `pgvector` and adds `items.embedding vector`,
+  `embedding_model`, `embedded_at` (all set together, CHECK-enforced). The vector has no fixed size because the
+  model is configured at runtime; queries only compare rows with the same model and dimension. Exact scan is fine
+  for the catalog's size. Add an HNSW index on `(embedding::vector(N))` once the dimension is fixed.
+- **Postgres image:** `pgvector/pgvector:pg16-trixie` (both compose files). Use the *trixie* tag: the plain
+  `pg16` tag is Debian bookworm and causes a collation-version mismatch with databases created by `postgres:16`.
+- **When embeddings are made:** right after an item is added (`POST /items`, scans, recipe missing items), and in a
+  background backfill on server start for items missing one (or embedded with another model).
+  `npm run embeddings:backfill` does the same by hand. Failures never block adding or searching.
+- **API:** `GET /items/search` returns a new `related: Item[]` (never repeats `results`; `[]` when not configured
+  or Akamai fails). Cutoff: `SEMANTIC_MAX_DISTANCE` (cosine distance, default 0.6).
+- **Akamai endpoint assumption:** OpenAI-compatible `POST {model, input: string[]}` → `{data: [{index, embedding}]}`
+  with `Authorization: Bearer <AKAMAI_API_KEY>`, at `AKAMAI_EMBEDDING_URL`. Verify with one real call when the
+  secrets arrive; only `server/src/lib/embeddings.ts` needs to change if the format differs.

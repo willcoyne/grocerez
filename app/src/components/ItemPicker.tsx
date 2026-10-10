@@ -7,7 +7,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { errorMessage } from "@/api/client";
 import { useCreateItem, useItemSearch } from "@/api/hooks/items";
-import { AppText, Button, ErrorState, IconButton, SectionLabel, SuggestBanner, TextField, ToggleChip } from "@/components/ui";
+import {
+  AppText,
+  Button,
+  ErrorState,
+  IconButton,
+  SectionLabel,
+  SuggestBanner,
+  TextField,
+  ToggleChip,
+} from "@/components/ui";
 import { labelize } from "@/lib/format";
 import { color, pressedOpacity, radius, size, space } from "@/theme";
 
@@ -38,12 +47,29 @@ export function useDebounced<T>(value: T, ms = 250): T {
  * Search the shared catalog (GET /items/search). exact → tap to add; suggested → "Did you mean X?" [Yes] saves the typed
  * text as an alias, [No] creates a new item; none → similar items + "Create 'X'".
  */
-export function ItemPicker({ visible, title = "Add an item", onClose, onPick, keepOpen, header, initialText = "" }: ItemPickerProps) {
+export function ItemPicker({
+  visible,
+  title = "Add an item",
+  onClose,
+  onPick,
+  keepOpen,
+  header,
+  initialText = "",
+}: ItemPickerProps) {
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <SafeAreaView style={styles.safe}>
         <View style={styles.topBar}>
-          <AppText variant="tabTitle" accessibilityRole="header" style={styles.flex}>
+          <AppText
+            variant="tabTitle"
+            accessibilityRole="header"
+            style={styles.flex}
+          >
             {title}
           </AppText>
           <IconButton label="Close" onPress={onClose}>
@@ -51,7 +77,13 @@ export function ItemPicker({ visible, title = "Add an item", onClose, onPick, ke
           </IconButton>
         </View>
         {visible ? (
-          <ItemPickerBody onPick={onPick} onClose={onClose} keepOpen={keepOpen} header={header} initialText={initialText} />
+          <ItemPickerBody
+            onPick={onPick}
+            onClose={onClose}
+            keepOpen={keepOpen}
+            header={header}
+            initialText={initialText}
+          />
         ) : null}
       </SafeAreaView>
     </Modal>
@@ -64,7 +96,10 @@ export function ItemPickerBody({
   keepOpen,
   header,
   initialText = "",
-}: Pick<ItemPickerProps, "onPick" | "onClose" | "keepOpen" | "header" | "initialText">) {
+}: Pick<
+  ItemPickerProps,
+  "onPick" | "onClose" | "keepOpen" | "header" | "initialText"
+>) {
   const [text, setText] = useState(initialText);
   const [creating, setCreating] = useState(false);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
@@ -89,7 +124,20 @@ export function ItemPickerBody({
 
   const data = search.data;
   const suggestion = data?.match === "suggested" ? data.results[0] : null;
-  const rows = data ? (data.match === "suggested" ? data.results.slice(1) : data.results) : [];
+  const rows = data
+    ? data.match === "suggested"
+      ? data.results.slice(1)
+      : data.results
+    : [];
+  // Items that mean something close (Akamai embeddings), e.g. "oreo" → Cookies. Older servers omit the field.
+  const related = data?.related ?? [];
+  const listRows: PickerRow[] = [
+    ...rows.map((item) => ({ key: item.id, item })),
+    ...(related.length > 0
+      ? [{ key: "related-label", label: "Related items" }]
+      : []),
+    ...related.map((item) => ({ key: `related-${item.id}`, item })),
+  ];
   const fresh = q === text.trim();
   const typed = text.trim();
 
@@ -111,16 +159,30 @@ export function ItemPickerBody({
       {keepOpen && lastAdded ? (
         <View style={styles.added}>
           <Check size={16} color={color.okFg} strokeWidth={3} />
-          <AppText variant="caption" weight="bold" color="okFg">{`Added ${lastAdded}`}</AppText>
+          <AppText
+            variant="caption"
+            weight="bold"
+            color="okFg"
+          >{`Added ${lastAdded}`}</AppText>
         </View>
       ) : null}
       {create.isError ? (
-        <AppText variant="caption" weight="bold" color="dangerFg" accessibilityRole="alert">
+        <AppText
+          variant="caption"
+          weight="bold"
+          color="dangerFg"
+          accessibilityRole="alert"
+        >
           {errorMessage(create.error)}
         </AppText>
       ) : null}
 
-      {search.isError ? <ErrorState message={errorMessage(search.error)} onRetry={() => void search.refetch()} /> : null}
+      {search.isError ? (
+        <ErrorState
+          message={errorMessage(search.error)}
+          onRetry={() => void search.refetch()}
+        />
+      ) : null}
       {search.isFetching && !data ? (
         <AppText variant="caption" color="muted">
           Searching…
@@ -129,10 +191,18 @@ export function ItemPickerBody({
 
       {creating ? (
         <View style={styles.gap}>
-          <AppText variant="body" weight="bold">{`Pick a category for "${typed}"`}</AppText>
+          <AppText
+            variant="body"
+            weight="bold"
+          >{`Pick a category for "${typed}"`}</AppText>
           <View style={styles.chips}>
             {CATEGORIES.map((c) => (
-              <ToggleChip key={c} label={labelize(c)} selected={false} onPress={() => createNew(c)} />
+              <ToggleChip
+                key={c}
+                label={labelize(c)}
+                selected={false}
+                onPress={() => createNew(c)}
+              />
             ))}
           </View>
           {create.isPending ? (
@@ -146,8 +216,8 @@ export function ItemPickerBody({
       {!creating && data && fresh && q ? (
         <FlatList
           keyboardShouldPersistTaps="handled"
-          data={rows}
-          keyExtractor={(i) => i.id}
+          data={listRows}
+          keyExtractor={(r) => r.key}
           contentContainerStyle={styles.results}
           ListHeaderComponent={
             suggestion ? (
@@ -155,33 +225,51 @@ export function ItemPickerBody({
                 itemName={suggestion.name}
                 typed={typed}
                 busy={create.isPending}
-                onYes={() => create.mutate({ name: typed, aliasOf: suggestion.id }, { onSuccess: pick })}
+                onYes={() =>
+                  create.mutate(
+                    { name: typed, aliasOf: suggestion.id },
+                    { onSuccess: pick },
+                  )
+                }
                 onNo={() => setCreating(true)}
               />
             ) : data.match === "none" && rows.length > 0 ? (
               <SectionLabel>Similar items</SectionLabel>
             ) : null
           }
-          renderItem={({ item }) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Add ${item.name}`}
-              style={({ pressed }) => [styles.result, pressed && { opacity: pressedOpacity }]}
-              onPress={() => pick(item)}
-            >
-              <AppText variant="bodyL" weight="heavy" style={styles.flex}>
-                {item.name}
-              </AppText>
-              {item.category ? (
-                <AppText variant="caption" color="muted">
-                  {labelize(item.category)}
+          renderItem={({ item: row }) => {
+            if (!("item" in row))
+              return <SectionLabel>{row.label}</SectionLabel>;
+            const { item } = row;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${item.name}`}
+                style={({ pressed }) => [
+                  styles.result,
+                  pressed && { opacity: pressedOpacity },
+                ]}
+                onPress={() => pick(item)}
+              >
+                <AppText variant="bodyL" weight="heavy" style={styles.flex}>
+                  {item.name}
                 </AppText>
-              ) : null}
-            </Pressable>
-          )}
+                {item.category ? (
+                  <AppText variant="caption" color="muted">
+                    {labelize(item.category)}
+                  </AppText>
+                ) : null}
+              </Pressable>
+            );
+          }}
           ListFooterComponent={
             data.match === "none" ? (
-              <Button label={`Create "${typed}"`} variant="secondary" fullWidth onPress={() => setCreating(true)} />
+              <Button
+                label={`Create "${typed}"`}
+                variant="secondary"
+                fullWidth
+                onPress={() => setCreating(true)}
+              />
             ) : null
           }
         />
@@ -189,6 +277,8 @@ export function ItemPickerBody({
     </View>
   );
 }
+
+type PickerRow = { key: string; item: Item } | { key: string; label: string };
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: color.bg },

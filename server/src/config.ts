@@ -37,6 +37,13 @@ const schema = z.object({
   RESEND_API_KEY: optional,
   RESEND_FROM: optional,
   OPENFDA_API_KEY: optional,
+  /** Akamai embedding model for semantic item search. Without a key, search falls back to spelling matches only. */
+  AKAMAI_API_KEY: optional,
+  /** Full URL of the OpenAI-compatible embeddings endpoint, e.g. https://<host>/v1/embeddings. */
+  AKAMAI_EMBEDDING_URL: optional,
+  AKAMAI_EMBEDDING_MODEL: z.string().trim().min(1).default("hackathon-embedding"),
+  /** Cosine distance cutoff for "related" items (0 = identical, 2 = opposite). */
+  SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.6),
   CONTACT_EMAIL: z.string().default("team@grocerez.app"),
   /** If set in production, /api/dev/login-as is mounted and requires header `x-demo-key: <DEMO_KEY>`. */
   DEMO_KEY: optional,

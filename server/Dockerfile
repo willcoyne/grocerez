@@ -14,8 +14,10 @@ ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/generated ./generated
-COPY package.json prisma.config.ts ./
+COPY package.json prisma.config.ts tsconfig.json ./
 COPY prisma ./prisma
+# The seed (tsx prisma/seed.ts) imports TypeScript from src/, so keep the sources for `prisma db seed`.
+COPY src ./src
 EXPOSE 3000
 USER node
 # MIGRATE_DATABASE_URL (owner) is used by migrate deploy when set; DATABASE_URL (grocerez_app) by the API.

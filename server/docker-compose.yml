@@ -1,7 +1,7 @@
 name: grocerez
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16-trixie
     restart: unless-stopped
     environment:
       POSTGRES_USER: grocerez

@@ -18,8 +18,10 @@ export const MatchKind = z.enum(["exact", "suggested", "none"]);
 /**
  * exact: results = [the item]. suggested: results[0] is "Did you mean…?", the rest are other similar items.
  * none: results are "similar" options (possibly empty); offer to create a new item.
+ * related: items that mean something close (Akamai embeddings), e.g. "oreo" → Cookies, Chips Ahoy.
+ * Never repeats an item from `results`; empty when embeddings aren't configured or the lookup fails.
  */
-export const ItemSearchResponse = z.object({ match: MatchKind, results: z.array(Item) });
+export const ItemSearchResponse = z.object({ match: MatchKind, results: z.array(Item), related: z.array(Item) });
 export type ItemSearchResponse = z.infer<typeof ItemSearchResponse>;
 
 export const CreateItemBody = z.object({

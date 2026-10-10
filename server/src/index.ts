@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
+import { backfillItemEmbeddings } from "./jobs/embedItems.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
 import { createSocketServer } from "./realtime/socket.js";
 
@@ -13,6 +14,8 @@ const jobs = config.ENABLE_JOBS ? [scheduleRecallImport()] : [];
 
 httpServer.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
+  // Fill in embeddings for seeded/older items in the background; search works without them meanwhile.
+  backfillItemEmbeddings().catch((err) => logger.warn({ err: String(err) }, "item embedding backfill failed"));
 });
 
 async function shutdown(signal: string) {
