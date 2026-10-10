@@ -28,5 +28,5 @@
 
 ## Done when
 
-- [ ] Typing "cherios" offers Cheerios; picking it adds it to my staples
-- [ ] Adding a staple that's not in the cabinet makes it show up on the List tab for everyone
+- [x] Typing "cherios" offers Cheerios; picking it adds it to my staples — verified in mock mode (`me` + `loop.e2e` tests)
+- [x] Adding a staple that's not in the cabinet makes it show up on the List tab for everyone — verified in mock mode (engine tests); live update across phones needs the backend

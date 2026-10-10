@@ -1,12 +1,7 @@
-import { View } from 'react-native';
+import { HouseholdView } from '@/features/onboarding/HouseholdView';
+import { useHousehold } from '@/features/onboarding/useOnboarding';
 
-import { AppText } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent A builds DESIGN.md §4.2.
+// DESIGN.md §4.2. Root testID: screen-household (in HouseholdView).
 export default function HouseholdScreen() {
-  return (
-    <View testID="screen-household">
-      <AppText variant="h1">Join or start a household</AppText>
-    </View>
-  );
+  return <HouseholdView {...useHousehold()} />;
 }

@@ -27,3 +27,4 @@
 
 - [ ] Kill and reopen the app → still signed in
 - [ ] A new Google account goes through onboarding; a returning one goes straight to the List tab
+  — route guard verified in mock mode (`boot` test: no group → Household, in a group → List); real Google sign-in **needs device check** and client IDs.

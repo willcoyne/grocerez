@@ -1,12 +1,4 @@
-import { View } from 'react-native';
+import { CabinetScreen } from '@/features/cabinet/CabinetScreen';
 
-import { ScreenHeader } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent C builds DESIGN.md §4.6.
-export default function CabinetScreen() {
-  return (
-    <View testID="tab-cabinet">
-      <ScreenHeader title="Cabinet" />
-    </View>
-  );
-}
+// DESIGN.md §4.6 — screen = data hooks + presentational CabinetView (see src/features/cabinet).
+export default CabinetScreen;

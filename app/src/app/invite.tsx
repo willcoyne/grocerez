@@ -1,12 +1,7 @@
-import { View } from 'react-native';
+import { InviteView } from '@/features/onboarding/InviteView';
+import { useInviteScreen } from '@/features/onboarding/useOnboarding';
 
-import { AppText } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent A builds DESIGN.md §4.4.
+// DESIGN.md §4.4. Root testID: screen-invite (in InviteView).
 export default function InviteScreen() {
-  return (
-    <View testID="screen-invite">
-      <AppText variant="h1">Invite your household</AppText>
-    </View>
-  );
+  return <InviteView {...useInviteScreen()} />;
 }

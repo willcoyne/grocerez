@@ -1,12 +1,7 @@
-import { View } from 'react-native';
+import { CreateView } from '@/features/onboarding/CreateView';
+import { useCreateHousehold } from '@/features/onboarding/useOnboarding';
 
-import { AppText } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent A builds DESIGN.md §4.3.
+// DESIGN.md §4.3. Root testID: screen-create (in CreateView).
 export default function CreateScreen() {
-  return (
-    <View testID="screen-create">
-      <AppText variant="h1">Name your household</AppText>
-    </View>
-  );
+  return <CreateView {...useCreateHousehold()} />;
 }

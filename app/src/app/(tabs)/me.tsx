@@ -1,12 +1,7 @@
-import { View } from 'react-native';
+import { MeView } from '@/features/me/MeView';
+import { useMeScreen } from '@/features/me/useMeScreen';
 
-import { ScreenHeader } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent D builds DESIGN.md §4.7.
+/** Me tab — DESIGN.md §4.7. Data hook + presentational view (§9). */
 export default function MeScreen() {
-  return (
-    <View testID="tab-me">
-      <ScreenHeader title="My preferences" />
-    </View>
-  );
+  return <MeView model={useMeScreen()} />;
 }

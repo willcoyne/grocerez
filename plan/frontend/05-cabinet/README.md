@@ -24,5 +24,5 @@
 
 ## Done when
 
-- [ ] Marking Oreos "ran out" removes them from the cabinet and they appear on the List tab
-- [ ] Marking an item "running low" keeps it in the cabinet and adds it to the list
+- [x] Marking Oreos "ran out" removes them from the cabinet and they appear on the List tab — verified in mock mode (`loop.e2e`)
+- [x] Marking an item "running low" keeps it in the cabinet and adds it to the list — verified in mock mode (engine + cabinet tests)

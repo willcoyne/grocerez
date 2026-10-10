@@ -1,12 +1,7 @@
-import { View } from 'react-native';
+import { SignInView } from '@/features/onboarding/SignInView';
+import { useSignIn } from '@/features/onboarding/useOnboarding';
 
-import { AppText } from '@/components/ui';
-
-// Placeholder (Phase 0). Agent A builds DESIGN.md §4.1.
+// DESIGN.md §4.1. Root testID: screen-signin (in SignInView).
 export default function SignInScreen() {
-  return (
-    <View testID="screen-signin">
-      <AppText variant="hero">GrocerEZ</AppText>
-    </View>
-  );
+  return <SignInView {...useSignIn()} />;
 }

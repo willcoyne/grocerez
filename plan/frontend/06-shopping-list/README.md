@@ -28,3 +28,4 @@
 - [ ] Two phones in the same group see each other's check-offs within a second
 - [ ] Airplane mode → check an item → back online → the check-off syncs
 - [ ] Finish trip empties the checked rows and they appear in the cabinet with expiration pills
+  — rows move to the cabinet as In stock (verified in mock, `loop.e2e`); expiration pills are out of the MVP (DESIGN.md §10). The two-phone and airplane-mode checks need the backend and a device.

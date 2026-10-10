@@ -1,12 +1,11 @@
-import { View } from 'react-native';
+import { useRouter } from 'expo-router';
 
-import { ScreenHeader } from '@/components/ui';
+import { GroupView } from '@/features/group/GroupView';
+import { useHousehold } from '@/features/group/useHousehold';
 
-// Placeholder (Phase 0). Agent E builds DESIGN.md §4.8.
+/** Household tab (DESIGN.md §4.8): data hook + presentational view. */
 export default function GroupScreen() {
-  return (
-    <View testID="tab-group">
-      <ScreenHeader title="Household" />
-    </View>
-  );
+  const router = useRouter();
+  const { retry, ...data } = useHousehold();
+  return <GroupView {...data} onRetry={retry} onInvite={() => router.push('/invite')} />;
 }
