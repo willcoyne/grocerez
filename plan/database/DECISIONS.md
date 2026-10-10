@@ -166,3 +166,23 @@ Format: date · folder · what the plan said · what was done · why.
   This migration was generated with `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
   into a new timestamped folder, then applied with `npx prisma migrate dev`.
 
+### 2026-10-10 · 10 · Seed details
+- **Registration:** the seed command is in `prisma.config.ts` → `migrations.seed = "tsx prisma/seed.ts"` (Prisma 7), not `package.json`.
+- **`db:reset`:** Prisma 7's `migrate reset` no longer runs the seed (its `--skip-seed` flag is gone), so the script is
+  `prisma migrate reset --force && prisma db seed`.
+- **Idempotency:** users upsert by `google_sub`, items by `normalized_name`, the group by a fixed id
+  (`00000000-0000-4000-8000-000000000001`), the recall by `external_id`, the invite by `(group_id, email)`. The demo group's preferences,
+  cabinet and list are reset to the documented state on each run (delete + insert inside one transaction), so re-seeding also
+  undoes anything clicked during a rehearsal. Seeded users have fixed ids `...0101` to `...0104` and emails `seed-user-N@grocerez.test`.
+- **Staples (step 5):** User 1 wants Milk (1 gal) and Peanut Butter; User 2 wants Bread (1 loaf). Badges: Milk → User 3 (milk),
+  Peanut Butter → User 4 (peanuts). Bread has no badge because no seeded user is allergic to wheat or gluten.
+- **Demo recall (step 6):** `source = 'demo'`, `external_id = 'DEMO-0001'`, a Cheerios description; the match score is
+  `word_similarity(item normalized_name, lower(description))` (0.88). The reason text says it's a seeded demo, not a real recall.
+- **Pending invite (step 7):** goes to the placeholder **`teammate@example.com`**. **Swap it before the demo**: run
+  `DEMO_INVITE_EMAIL=<teammate's real Google email> npm run db:seed` (or edit the constant in `seed.ts`).
+- **Step 9, `POST /dev/login-as/:userId`:** is an Express route, so it's left to the backend builder (no server code exists yet).
+  Use the fixed seeded user ids above. The route must be disabled when `NODE_ENV=production`.
+- **Check query:** `server/prisma/seed/check-demo-list.sql` (`npm run db:check:demo`) regenerates the list inside a rolled-back
+  transaction, prints it in aisle order with allergen badges, and prints `PASS` if the list equals (union − in-stock cabinet) and
+  its board items are exactly Lay's, Oreos, Tostitos.
+

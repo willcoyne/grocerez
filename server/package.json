@@ -6,11 +6,12 @@
     "db:up": "docker compose up -d --wait",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:reset": "prisma migrate reset --force",
+    "db:reset": "prisma migrate reset --force && prisma db seed",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
-    "db:check:normalize": "tsx prisma/checks/normalize-sql.ts"
+    "db:check:normalize": "tsx prisma/checks/normalize-sql.ts",
+    "db:check:demo": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/seed/check-demo-list.sql"
   },
   "license": "ISC",
   "type": "module",

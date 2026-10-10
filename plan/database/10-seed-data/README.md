@@ -30,5 +30,5 @@
 
 ## Done when
 
-- [ ] `npm run db:reset` produces the demo state
-- [ ] Generating the demo group's list returns exactly Tostitos, Lay's, Oreos (+ any staples not in the cabinet)
+- [ ] `npm run db:reset` produces the demo state *(not run by the agent: Prisma 7 refuses `migrate reset` from an AI agent without the user's consent. The equivalent fresh-database path, `prisma migrate deploy` + `prisma db seed` on an empty throwaway Postgres 16 and then the seed again, produced the demo state and the check below printed PASS. A teammate should run `npm run db:reset` once and tick this.)*
+- [x] Generating the demo group's list returns exactly Tostitos, Lay's, Oreos (+ any staples not in the cabinet). Check: `npm run db:check:demo` (`server/prisma/seed/check-demo-list.sql`)
