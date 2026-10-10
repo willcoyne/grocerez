@@ -48,3 +48,23 @@ Choices made while implementing `plan/backend` where the plan was silent or uncl
   verification failure or `email_verified !== true` returns `401 UNAUTHENTICATED`.
 - **Test note:** with vitest 5, a `mockRejectedValue` on the Google stub that is still queued or persistent when the test
   ends is reported as a test failure, so the rate-limit test uses resolved tokens instead.
+## 09 (partial, parallel)
+
+Built standalone while 02-07 were in progress elsewhere. No routes, models, migrations, cron, or app wiring.
+
+- **Done:** `src/lib/expiration.ts` (`estimateExpiration`, category shelf-life table; `household`/`other`/unknown → `null`),
+  `src/modules/recalls/openfda.ts` (`fetchRecalls` with injectable `fetch`, `skip` paging, zod-validated rows, malformed
+  rows dropped, 404 = no results, `redirect: "error"`, 15s timeout; `recallLink`), `src/modules/recalls/match.ts`
+  (pure `matchRecalls`, pg_trgm-compatible `similarity` / `strictWordSimilarity`, whole-word `brandAppears`).
+  Tests: `test/recalls.test.ts` (stubbed fetch, no network or DB).
+- **Matching uses `strict_word_similarity`, not `similarity()`.** Whole-string `similarity("baby spinach", <long recall
+  description>)` stays well under 0.35 even for an exact hit, so the plan's rule would almost never match. The score is
+  the best over item name, aliases, and `brand + ' ' + productName`, each against the best whole-word run of the
+  description. When the SQL version is written, use `strict_word_similarity(name, product_description) >= 0.35` so it
+  agrees with the JS function.
+- **Brand gate** is a case-insensitive whole-word check ("Valley" does not match "Valleyview").
+- **Alert link:** openFDA has no per-recall web page, so `recallLink` returns the API query for that `recall_number`.
+- **Remaining:** `recalls`/`recall_matches` tables (database/09), `jobs/importRecalls.ts` + `node-cron` `"0 6 * * *"`
+  wiring in `index.ts` (upsert by `external_id`, last-import tracking), per-item re-match on cabinet add, saving
+  estimates in `finishTrip`/cabinet add and `expiration_source`, `GET /groups/:groupId/alerts`, `POST .../dismiss`,
+  `cabinet:changed` emit, `OPENFDA_API_KEY` in config/.env.example, the Done-when checks.
