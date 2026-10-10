@@ -143,3 +143,11 @@ Format: date · folder · what the plan said · what was done · why.
 - Prisma scalar lists are created nullable, so a follow-up migration `shopping_list_wanted_by_not_null` sets `wanted_by NOT NULL`
   (the `shopping_list` migration was already applied when this was noticed).
 
+### 2026-10-10 · 08 · Products
+- **Did:** `item_id` is required, `ON DELETE RESTRICT`; `cabinet_items.product_id` and `shopping_list_items.scanned_product_id`
+  get their FKs here (`ON DELETE SET NULL`). Extra CHECKs: `gtin ~ '^[0-9]{8,14}$'`, `calories_per_serving >= 0`;
+  `allergens` / `may_contain` are `NOT NULL DEFAULT '{}'`. Index on `products(item_id)`.
+- **Linked product (plan step 3 / backend/06 step 1.3):** `item_allergens_for(group, item)` is replaced to return
+  `allergens ∪ may_contain` of the list row's `scanned_product_id`, else the group's `cabinet_items.product_id` for that item,
+  else `items.default_allergens`. Scanning is a cache upsert: `prisma.product.upsert({ where: { gtin } ... })` (or `smartlabelUrl`).
+

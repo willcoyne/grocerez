@@ -164,6 +164,7 @@ model Item {
   preferences  Preference[]
   cabinetItems CabinetItem[]
   listItems    ShoppingListItem[]
+  products     Product[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -241,7 +242,7 @@ model CabinetItem {
   id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   groupId          String            @map("group_id") @db.Uuid
   itemId           String            @map("item_id") @db.Uuid
-  /// Set when bought by scanning a SmartLabel / barcode. FK to products is added in 08.
+  /// Set when bought by scanning a SmartLabel / barcode.
   productId        String?           @map("product_id") @db.Uuid
   status           StockStatus       @default(in_stock)
   quantityText     String?           @map("quantity_text")
@@ -254,9 +255,10 @@ model CabinetItem {
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  item  Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  adder User? @relation(fields: [addedBy], references: [id], onDelete: SetNull)
+  group   Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item    Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  adder   User?    @relation(fields: [addedBy], references: [id], onDelete: SetNull)
 
   @@unique([groupId, itemId])
   @@index([groupId, expiresAt])
@@ -289,18 +291,66 @@ model ShoppingListItem {
   checked          Boolean    @default(false)
   checkedBy        String?    @map("checked_by") @db.Uuid
   checkedAt        DateTime?  @map("checked_at") @db.Timestamptz(6)
-  /// SmartLabel scanned while checking off. FK to products is added in 08.
+  /// SmartLabel / barcode scanned while checking off.
   scannedProductId String?    @map("scanned_product_id") @db.Uuid
   addedBy          String?    @map("added_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  item    Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  checker User? @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
-  adder   User? @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  checker        User?    @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
+  scannedProduct Product? @relation(fields: [scannedProductId], references: [id], onDelete: SetNull)
+  adder          User?    @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
 
   @@unique([groupId, itemId])
   @@index([groupId, checked])
   @@map("shopping_list_items")
+}
+
+// ─── 08 Product data cache (SmartLabel / barcode) ──────────────────────────────
+
+enum ProductSource {
+  smartlabel
+  openfoodfacts
+  manual
+
+  @@map("product_source")
+}
+
+/// Branded product info, cached globally the first time anyone scans it. Refresh when `fetched_at` is older than 30 days.
+/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is 8–14 digits.
+model Product {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Generic catalog item this product belongs to ("Honey Nut Cheerios" box → Cheerios).
+  itemId             String        @map("item_id") @db.Uuid
+  /// UPC/EAN barcode digits.
+  gtin               String?       @unique
+  /// URL encoded in the SmartLabel QR code.
+  smartlabelUrl      String?       @unique @map("smartlabel_url")
+  brand              String?
+  name               String
+  servingSize        String?       @map("serving_size")
+  caloriesPerServing Decimal?      @map("calories_per_serving")
+  /// {fat_g, sat_fat_g, sodium_mg, carbs_g, sugar_g, protein_g, ...}
+  nutrition          Json?
+  ingredients        String?
+  /// "Contains".
+  allergens          Allergen[]    @default([])
+  /// "May contain / processed in a facility with".
+  mayContain         Allergen[]    @default([]) @map("may_contain")
+  /// e.g. Nutri-Score letter.
+  healthScore        String?       @map("health_score")
+  imageS3Key         String?       @map("image_s3_key")
+  source             ProductSource
+  /// Original scraped / API payload, for debugging.
+  raw                Json?
+  fetchedAt          DateTime      @map("fetched_at") @db.Timestamptz(6)
+
+  item         Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  cabinetItems CabinetItem[]
+  listItems    ShoppingListItem[]
+
+  @@index([itemId])
+  @@map("products")
 }

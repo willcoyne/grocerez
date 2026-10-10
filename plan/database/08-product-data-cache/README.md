@@ -34,5 +34,5 @@
 
 ## Done when
 
-- [ ] Scanning the same barcode twice reads from the cache (only one row exists)
-- [ ] A product can be looked up by `gtin` or `smartlabel_url`
+- [x] Scanning the same barcode twice reads from the cache (only one row exists)
+- [x] A product can be looked up by `gtin` or `smartlabel_url`
