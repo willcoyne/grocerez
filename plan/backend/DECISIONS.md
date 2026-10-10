@@ -124,3 +124,13 @@ Format: date · folder · what the plan said · what was done · why.
   for **all** members of the group. Then the checked rows are deleted and the list regenerated, all in one transaction under the group lock.
 - The seeded demo list is Bread, Lay's, Milk, Oreos, Peanut Butter, Tostitos (the board items Tostitos, Lay's, Oreos plus the
   seed's staples; database/10), with Milk flagged for User 3 and Peanut Butter for User 4.
+
+### 2026-10-10 · 07 · Socket.IO details
+- Connect with `io(API_URL, { auth: { token: appJwt } })`. Invalid/expired token or deleted user → connection refused with error message
+  `UNAUTHENTICATED`. Every socket joins `user:<id>`.
+- `group:join {groupId}` and `group:leave {groupId}` accept an **ack callback**: `{ok:true}` or `{ok:false, error:{code:"NOT_FOUND", message}}`
+  (non-member, unknown or malformed id; same "don't reveal" rule as REST). Clients should re-send `group:join` after reconnecting.
+- Group-room payloads are `{groupId, by}`. Personal-room events: `invites:changed {groupId}` (invited, revoked, accepted, declined, removed) and
+  `group:changed {groupId, by}` (you were removed, the group was deleted) so the app can refresh its group switcher.
+- Leaving, removal and group deletion make the affected sockets leave the group room (`fetchSockets()`); `DELETE /me` disconnects the user's sockets.
+- Single instance only (no Redis adapter), per step 7.

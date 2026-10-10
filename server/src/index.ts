@@ -3,9 +3,11 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
+import { createSocketServer } from "./realtime/socket.js";
 
 const app = createApp();
 const httpServer = createServer(app);
+const io = createSocketServer(httpServer);
 
 httpServer.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
@@ -13,6 +15,7 @@ httpServer.listen(config.PORT, () => {
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "shutting down");
+  io.close();
   httpServer.close();
   await prisma.$disconnect();
   process.exit(0);
