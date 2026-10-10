@@ -44,6 +44,19 @@ Format: date · folder · what the plan said · what was done · why.
 - The invites banner is rendered at the top of the tab screens (not above the navigator) so it doesn't collide with the header's safe area.
 - Confirmations use `src/lib/confirm.ts` (Alert on phones, `window.confirm` on web).
 
+### 2026-10-10 · 04 · Preferences UI
+- Swipe-to-delete is a "Delete" button on each row; tap the row to edit quantity, note and recurrence in a small sheet.
+- "+ Add" adds to the segment you're looking at (Staples → `staple`, This week → `one_time`).
+- Avatar upload (backend/11 "Frontend must update"): Me tab "Change photo" → `expo-image-picker` → `POST /uploads/presign` → PUT → `PATCH /me {avatarKey}`.
+  Without AWS the server answers `503 NOT_CONFIGURED`, shown as "This feature isn't set up on the server yet."
+
+### 2026-10-10 · API changes on `carson` after this branch (coordinator note)
+- `POST /groups` now accepts `timeZone`: the app sends the device's IANA zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`).
+  `Group.timeZone` isn't in this branch's contracts, so it isn't displayed; renaming still sends only `name`.
+- `409 PRODUCT_ITEM_MISMATCH` (check-off with a product of another item) → "That product doesn't match this list item." (`errorMessage`).
+- `POST /products/scan` `400` for a bad barcode check digit → scanner shows "Couldn't read that barcode, try again" (07).
+- Item search: only `results[0]` can be `suggested`, which is how the ItemPicker already reads it.
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no

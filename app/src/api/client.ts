@@ -118,6 +118,8 @@ export function errorMessage(error: unknown): string {
       case "AI_UNAVAILABLE":
       case "AI_BAD_OUTPUT":
         return "The AI helper is unavailable right now. The rest of the app keeps working.";
+      case "PRODUCT_ITEM_MISMATCH":
+        return "That product doesn't match this list item.";
       case "AI_REFUSED":
         return "The AI helper couldn't answer that request.";
       default:

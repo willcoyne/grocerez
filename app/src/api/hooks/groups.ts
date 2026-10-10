@@ -4,6 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import { keys } from "../keys";
 
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useGroups(enabled = true) {
   return useQuery({ queryKey: keys.groups, queryFn: () => api<Group[]>("/groups"), enabled });
 }
@@ -19,7 +27,8 @@ export function useGroupDetail(groupId: string | null | undefined) {
 export function useCreateGroup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => api<Group>("/groups", { method: "POST", body: { name } }),
+    // timeZone (IANA) is accepted by POST /groups on carson (added after this branch was cut).
+    mutationFn: (name: string) => api<Group>("/groups", { method: "POST", body: { name, timeZone: deviceTimeZone() } }),
     onSuccess: (group) => {
       qc.setQueryData<Group[]>(keys.groups, (old) => [...(old ?? []).filter((g) => g.id !== group.id), group]);
       void qc.invalidateQueries({ queryKey: keys.groups });
