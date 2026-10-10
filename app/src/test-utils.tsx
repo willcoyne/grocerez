@@ -22,6 +22,7 @@ export const testGroup: Group = {
   name: "Hack Midwest House",
   role: "owner",
   memberCount: 3,
+  timeZone: "America/Chicago",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
