@@ -90,7 +90,7 @@ describe("09 recall import job", () => {
       data: { itemId: tostitos, gtin: "00028400090902", brand: "Frito-Lay", name: "Tostitos Scoops", source: "manual", fetchedAt: new Date() },
     });
     const wrongBrand = await prisma.product.create({
-      data: { itemId: tostitos, gtin: "00099999999991", brand: "Kirkland", name: "Tortilla Chips", source: "manual", fetchedAt: new Date() },
+      data: { itemId: tostitos, gtin: "00099999999990", brand: "Kirkland", name: "Tortilla Chips", source: "manual", fetchedAt: new Date() },
     });
     await prisma.cabinetItem.create({ data: { groupId: g.id, itemId: tostitos, productId: fritoLay.id } });
     await prisma.cabinetItem.create({ data: { groupId: other.id, itemId: tostitos, productId: wrongBrand.id } });

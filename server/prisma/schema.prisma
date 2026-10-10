@@ -97,6 +97,8 @@ model Group {
   name      String
   /// Nullable so deleting the creator's account doesn't delete or block the household.
   createdBy String?  @map("created_by") @db.Uuid
+  /// IANA time zone of the household (CHECK: is_valid_time_zone). "Today" and expiry estimates use it (DB-08).
+  timeZone  String   @default("America/Chicago") @map("time_zone")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -272,6 +274,7 @@ model CabinetItem {
   /// Target of recall_matches' composite FK (keeps a match's group equal to its cabinet item's group).
   @@unique([id, groupId])
   @@index([groupId, expiresAt])
+  @@index([productId])
   @@map("cabinet_items")
 }
 
@@ -315,6 +318,7 @@ model ShoppingListItem {
 
   @@unique([groupId, itemId])
   @@index([groupId, checked])
+  @@index([scannedProductId])
   @@map("shopping_list_items")
 }
 
@@ -329,12 +333,12 @@ enum ProductSource {
 }
 
 /// Branded product info, cached globally the first time anyone scans it. Refresh when `fetched_at` is older than 30 days.
-/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is 8–14 digits.
+/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is a GTIN-14 with a valid check digit.
 model Product {
   id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// Generic catalog item this product belongs to ("Honey Nut Cheerios" box → Cheerios).
   itemId             String        @map("item_id") @db.Uuid
-  /// UPC/EAN barcode digits.
+  /// GTIN-14 (8/12/13-digit codes are left-padded by a trigger; CHECK: 14 digits + valid check digit).
   gtin               String?       @unique
   /// URL encoded in the SmartLabel QR code.
   smartlabelUrl      String?       @unique @map("smartlabel_url")

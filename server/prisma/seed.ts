@@ -2,6 +2,7 @@
 // Uses only Prisma's query builder and tagged-template $queryRaw / $executeRaw (never the *Unsafe variants).
 import { readFileSync } from "node:fs";
 import { prisma } from "../src/db.js";
+import { DEFAULT_TIME_ZONE, householdToday } from "../src/lib/expiration.js";
 
 type CatalogItem = {
   name: string;
@@ -115,8 +116,8 @@ async function seedDemo() {
 
     // Cabinet: Cheerios in stock; Oreos running low and expiring in 2 days.
     await tx.cabinetItem.deleteMany({ where: { groupId: DEMO_GROUP_ID } });
-    const today = new Date();
-    const inDays = (n: number) => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + n));
+    // Days in the household's time zone (groups.time_zone default), not the server's UTC day (DB-08).
+    const inDays = (n: number) => householdToday(DEFAULT_TIME_ZONE, n);
     const cheerios = await tx.cabinetItem.create({
       data: { groupId: DEMO_GROUP_ID, itemId: ids.get("Cheerios")!, status: "in_stock", location: "pantry",
         quantityText: "1 box", purchasedAt: inDays(-3), expiresAt: inDays(177), expirationSource: "estimated", addedBy: owner.id },

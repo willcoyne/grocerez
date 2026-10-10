@@ -1,6 +1,6 @@
 import { prisma } from "../../db.js";
 import type { AddCabinetBody, CabinetItem, UpdateCabinetBody } from "../../contracts/cabinet.js";
-import { estimateExpiration, fromCalendarDate, toCalendarDate } from "../../lib/expiration.js";
+import { estimateExpiration, fromCalendarDate, groupTimeZone, toCalendarDate } from "../../lib/expiration.js";
 import { uploadKeyPattern } from "../../contracts/uploads.js";
 import { badRequest, notFound } from "../../lib/errors.js";
 import { images } from "../../lib/images.js";
@@ -49,6 +49,7 @@ export const cabinetService = {
   async add(groupId: string, userId: string, body: AddCabinetBody): Promise<{ row: CabinetItem; created: boolean }> {
     const item = await prisma.item.findUnique({ where: { id: body.itemId } });
     if (!item) throw notFound("Item");
+    const timeZone = await groupTimeZone(prisma, groupId);
     const { result } = await withRegeneration(groupId, userId, ["cabinet:changed"], async (tx) => {
       const existing = await cabinetRepo.findByItem(tx, groupId, body.itemId);
       const expiry = body.expiresAt
@@ -56,7 +57,7 @@ export const cabinetService = {
         : existing?.expiresAt
           ? {}
           : (() => {
-              const d = estimateExpiration(item);
+              const d = estimateExpiration(item, new Date(), timeZone);
               return d ? { expiresAt: d, expirationSource: "estimated" as const } : {};
             })();
       const row = existing

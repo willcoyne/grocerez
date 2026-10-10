@@ -1,5 +1,5 @@
 {
-  "description": "Expected output of normalize_item_name() (SQL, migration item_catalog) for tricky inputs. server/src/lib/normalize.ts must return exactly the same 'expected' for every 'input'. Rules: lower-case; fold accents via the fixed table (àáâãäåā→a, èéêëē→e, ìíîïī→i, òóôõöøō→o, ùúûüū→u, ñ→n, ç→c, ýÿ→y); delete apostrophes ' ’ ‘ `; any other char not in [a-z0-9& ] becomes a space; collapse spaces and trim; de-pluralize the last word only: unchanged if in exceptions [hummus, asparagus, swiss, molasses, couscous, citrus, brussels, series, species, news, lens, gas, bus, yes], else drop 'es' if length > 4 and it ends in ches|shes|xes|zes|sses|oes, else drop 's' if length > 3 and it does not end in ss|us. normalize(normalize(x)) == normalize(x) for every case.",
+  "description": "Expected output of normalize_item_name() (SQL, version 2: migration normalize_unicode) for tricky inputs. server/src/lib/normalize.ts must return exactly the same 'expected' for every 'input'. Rules: Unicode NFKC; lower-case (ICU root rules = JavaScript toLowerCase); strip accents (NFD, delete U+0300-U+036F, NFC); fold ß→ss æ→ae œ→oe þ→th ø→o đ→d ð→d ł→l ı→i ħ→h ŧ→t; delete apostrophes ' ’ ‘ `; any run of chars that are not a letter (Unicode L), a decimal digit (Nd), '&' or space becomes one space; '&' gets one space on each side; collapse spaces and trim; de-pluralize the last word only: unchanged if in exceptions [hummus, asparagus, swiss, molasses, couscous, citrus, brussels, series, species, news, lens, gas, bus, yes], else drop 'es' if length > 4 and it ends in ches|shes|xes|zes|sses|oes, else drop 's' if length > 3 and it does not end in ss|us. normalize(normalize(x)) == normalize(x) for every case.",
   "cases": [
     { "input": "Cheerios", "expected": "cheerio" },
     { "input": "cheerio", "expected": "cheerio" },
@@ -12,7 +12,7 @@
     { "input": "Oreos", "expected": "oreo" },
     { "input": "Tostitos", "expected": "tostito" },
     { "input": "Reese's Pieces", "expected": "reeses piece" },
-    { "input": "M&M's", "expected": "m&m" },
+    { "input": "M&M's", "expected": "m & ms" },
     { "input": "Mac & Cheese", "expected": "mac & cheese" },
     { "input": "mac   &   cheese", "expected": "mac & cheese" },
     { "input": "Half-and-Half", "expected": "half and half" },
@@ -55,6 +55,24 @@
     { "input": "...", "expected": "" },
     { "input": "", "expected": "" },
     { "input": "s", "expected": "s" },
-    { "input": "Bus", "expected": "bus" }
+    { "input": "Bus", "expected": "bus" },
+    { "input": "M & M's", "expected": "m & ms" },
+    { "input": "Mac&Cheese", "expected": "mac & cheese" },
+    { "input": "Ben&Jerry's", "expected": "ben & jerry" },
+    { "input": "Half&Half", "expected": "half & half" },
+    { "input": "Ｍｉｌｋ", "expected": "milk" },
+    { "input": "ﬁg Newtons", "expected": "fig newton" },
+    { "input": "Weißbier", "expected": "weissbier" },
+    { "input": "Œufs", "expected": "oeuf" },
+    { "input": "Smørrebrød", "expected": "smorrebrod" },
+    { "input": "Ǽble", "expected": "aeble" },
+    { "input": "Молоко", "expected": "молоко" },
+    { "input": "Сырки", "expected": "сырки" },
+    { "input": "豆腐", "expected": "豆腐" },
+    { "input": "牛乳 2%", "expected": "牛乳 2" },
+    { "input": "Crème Brûlée", "expected": "creme brulee" },
+    { "input": "İstanbul Simit", "expected": "istanbul simit" },
+    { "input": "½ & ½", "expected": "1 2 & 1 2" },
+    { "input": "Pão de Queijo", "expected": "pao de queijo" }
   ]
 }

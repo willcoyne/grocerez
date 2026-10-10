@@ -206,6 +206,36 @@ Format: date · folder · what the plan said · what was done · why.
   Anyone who ran the database before this commit has an orphaned `server_pgdata` volume. Re-run migrate + seed, then
   `docker volume rm server_pgdata` when it's no longer needed.
 
+### 2026-10-10 · break-test fixes (test-reports/database.md)
+- **DB-04 · product links:** triggers (not composite FKs) make `cabinet_items.product_id` / `shopping_list_items.scanned_product_id`
+  belong to the row's `item_id` (SQLSTATE 23503), and a linked product can't change item. A composite FK would need
+  `ON DELETE SET NULL (product_id)`, which Prisma's schema can't express (an FK it doesn't know is drift).
+  Backend: `PATCH .../shopping-list/:id` with a product of another item → `409 PRODUCT_ITEM_MISMATCH`.
+- **DB-01 / DB-09 · owner handoff:** `lock_group_list(group)` (the advisory lock `generate_shopping_list` and the backend's `lockGroup`
+  use) + `group_ensure_owner(group)` (lock, then promote the longest-standing member in a retry loop). The immediate trigger only locks
+  when no other owner is visible; DEFERRED constraint triggers re-check at commit when an owner row was deleted or demoted.
+  Demoting the last owner raises 23514. Lock order everywhere: advisory lock → rows.
+- **DB-02 · list lock:** a BEFORE ROW trigger on `shopping_list_items` takes the group's advisory lock for every write, so a
+  transaction that touches list rows already holds the lock when it regenerates. Compatible with the backend's `lockGroup` (same key,
+  re-entrant).
+- **DB-03 · departed members:** AFTER DELETE on `group_members` regenerates the group's list when the departed user still appears
+  in `wanted_by` or `allergen_flags` (no lock or work otherwise).
+- **DB-05 / DB-11 · search labels:** only row 1 can be `suggested`; queries ≤ 6 chars also need similarity ≥ 0.5 or a pure
+  insert/delete edit (`bred` → Bread, not `batter` → Butter); whole-word containment ranks first (`pea` → Frozen Peas);
+  single-word anagrams within 2 edits are added as candidates (`mlik` → Milk). Backend contract unchanged.
+- **DB-06 / DB-14 · normalization v2:** NFKC, ICU-root lower-case (`COLLATE "und-x-icu"`, matches JS `toLowerCase`), accent strip
+  (U+0300–036F), folds ß/æ/œ/þ/ø/đ/ð/ł/ı/ħ/ŧ, keep Unicode letters and decimal digits, one space around `&`. Existing names were
+  re-normalized (`M&M's` is now `m & ms`). TS port and fixture updated; 20,000 random Unicode strings agreed between SQL and TS.
+  Known limitation: combining marks outside U+0300–036F (e.g. Thai/Devanagari vowel signs) become spaces in both versions.
+- **DB-07 · GTIN-14:** stored GTINs are 14 digits with a valid GS1 check digit (CHECK); a trigger left-pads 8/12/13-digit input.
+  The migration dropped invalid codes and merged duplicates. Backend `normalizeGtin` validates the check digit and expands UPC-E
+  (8 digits, number system 0/1, valid as UPC-E) to UPC-A before padding; other 8-digit codes are EAN-8.
+- **DB-08 · time zone:** `groups.time_zone text NOT NULL DEFAULT 'America/Chicago'`, `CHECK (is_valid_time_zone(time_zone))`
+  (IANA names only), `group_today(group)`. Backend uses the group's zone for alerts, recipes, cabinet estimates, finish trip and the seed.
+  **Frontend:** `Group.timeZone` is a new response field; `POST /groups` and `PATCH /groups/:groupId` accept `timeZone`
+  (PATCH now accepts `name` and/or `timeZone`).
+- **Skipped (scope cut):** DB-10, DB-12, DB-13, DB-15, DB-16, DB-17.
+
 ## Needs team sign-off
 
 None. No API contract change was needed. The SQL helpers (`search_items`, `generate_shopping_list`) are offered to the backend,

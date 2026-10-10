@@ -2,7 +2,7 @@ import { prisma, type Db } from "../../db.js";
 import { CATEGORIES } from "../../contracts/common.js";
 import type { AddListItemBody, AllergenFlag, CheckListItemBody, ShoppingListItem } from "../../contracts/shoppingList.js";
 import { conflict, notFound } from "../../lib/errors.js";
-import { estimateExpiration } from "../../lib/expiration.js";
+import { estimateExpiration, groupTimeZone } from "../../lib/expiration.js";
 import { emitGroup } from "../../lib/realtime.js";
 import { cabinetHooks } from "../cabinet/service.js";
 import { lockGroup, regenerate, withRegeneration } from "./engine.js";
@@ -73,10 +73,15 @@ export const shoppingListService = {
 
   /** Check / uncheck (the DB trigger stamps checked_at; unchecking clears checked_by/at) and link a scanned product. */
   async check(groupId: string, userId: string, id: string, body: CheckListItemBody): Promise<ShoppingListItem> {
-    if (!(await shoppingListRepo.find(prisma, groupId, id))) throw notFound("List item");
+    const row = await shoppingListRepo.find(prisma, groupId, id);
+    if (!row) throw notFound("List item");
     if (body.scannedProductId) {
-      const p = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true } });
+      const p = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true, itemId: true } });
       if (!p) throw notFound("Product");
+      // DB-04: the database rejects a product of another catalog item (its allergens would replace this item's).
+      if (p.itemId !== row.itemId) {
+        throw conflict("The scanned product belongs to a different item than this list row", "PRODUCT_ITEM_MISMATCH");
+      }
     }
     await withRegeneration(groupId, userId, ["shopping-list:changed"], (tx) =>
       shoppingListRepo.setChecked(tx, groupId, id, {
@@ -106,10 +111,11 @@ export const shoppingListService = {
     const now = new Date();
     const { moved, cabinetIds, prefsDeleted } = await prisma.$transaction(async (tx) => {
       await lockGroup(tx, groupId);
+      const timeZone = await groupTimeZone(tx, groupId);
       const rows = await shoppingListRepo.checkedRows(tx, groupId);
       const cabinetIds: string[] = [];
       for (const r of rows) {
-        const expiresAt = estimateExpiration(r.item, now);
+        const expiresAt = estimateExpiration(r.item, now, timeZone);
         const expiry = expiresAt
           ? { expiresAt, expirationSource: "estimated" as const }
           : { expiresAt: null, expirationSource: null };

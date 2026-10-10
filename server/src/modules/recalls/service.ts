@@ -1,7 +1,7 @@
 import { prisma } from "../../db.js";
 import type { AlertsResponse, RecallAlert } from "../../contracts/alerts.js";
 import { notFound } from "../../lib/errors.js";
-import { toCalendarDate } from "../../lib/expiration.js";
+import { groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
 import { logger } from "../../lib/logger.js";
 import { openFda } from "../../lib/openfda.js";
 import { emitGroup } from "../../lib/realtime.js";
@@ -45,8 +45,7 @@ export const recallsService = {
   },
 
   async alerts(groupId: string): Promise<AlertsResponse> {
-    const today = new Date();
-    const horizon = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + EXPIRING_DAYS));
+    const horizon = householdToday(await groupTimeZone(prisma, groupId), EXPIRING_DAYS);
     const [expiring, matches] = await Promise.all([
       prisma.cabinetItem.findMany({
         where: { groupId, expiresAt: { lte: horizon } },

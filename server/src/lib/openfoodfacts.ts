@@ -3,11 +3,41 @@ import { allergensFromOffTags } from "./allergens.js";
 import { AppError } from "./errors.js";
 import { http, USER_AGENT } from "./http.js";
 
-/** Digits only, valid lengths 8/12/13/14, left-padded to GTIN-14 (so UPC-A, EAN-13 and GTIN-14 scans share a cache row). */
+/** GS1 check digit of a GTIN-14 (same rule as the SQL gtin_check_digit_ok()). */
+export function gtinCheckDigitOk(g14: string): boolean {
+  if (!/^\d{14}$/.test(g14)) return false;
+  let sum = 0;
+  for (let i = 0; i < 13; i++) sum += Number(g14[i]) * (i % 2 === 0 ? 3 : 1);
+  return (10 - (sum % 10)) % 10 === Number(g14[13]);
+}
+
+/** UPC-E (8 digits, number system 0/1) → UPC-A (12 digits), or null if it isn't UPC-E shaped. */
+export function expandUpcE(d: string): string | null {
+  if (!/^[01]\d{7}$/.test(d)) return null;
+  const [ns, x1, x2, x3, x4, x5, x6, check] = d;
+  let body: string;
+  if ("012".includes(x6)) body = `${x1}${x2}${x6}0000${x3}${x4}${x5}`;
+  else if (x6 === "3") body = `${x1}${x2}${x3}00000${x4}${x5}`;
+  else if (x6 === "4") body = `${x1}${x2}${x3}${x4}00000${x5}`;
+  else body = `${x1}${x2}${x3}${x4}${x5}0000${x6}`;
+  return `${ns}${body}${check}`;
+}
+
+/**
+ * Digits only → GTIN-14 with a valid check digit, or null (DB-07: the database CHECK requires exactly this).
+ * 12/13/14 digits are left-padded, so UPC-A, EAN-13 and GTIN-14 scans share a cache row. 8 digits are UPC-E
+ * (expanded to UPC-A) when that reading has a valid check digit, else EAN-8.
+ */
 export function normalizeGtin(raw: string): string | null {
   const d = raw.replace(/\D/g, "");
-  if (![8, 12, 13, 14].includes(d.length)) return null;
-  return d.padStart(14, "0");
+  if (d.length === 8) {
+    const upcA = expandUpcE(d)?.padStart(14, "0");
+    if (upcA && gtinCheckDigitOk(upcA)) return upcA;
+  } else if (![12, 13, 14].includes(d.length)) {
+    return null;
+  }
+  const g = d.padStart(14, "0");
+  return gtinCheckDigitOk(g) ? g : null;
 }
 
 /** The code Open Food Facts indexes: EAN-13 (or EAN-8 for short codes). */

@@ -11,27 +11,41 @@ How the database was set up: a throwaway `postgres:16` container on port 5434 (`
 `grocerez_break_fresh`, and drops it when it finishes. `prisma migrate reset` was **not** used: Prisma 7 refuses it from an agent
 without user consent. A "reset" here means `DROP DATABASE … WITH (FORCE)` + `CREATE` + `migrate deploy` + seed.
 
+## Fix status (2026-10-10, branch `worktree-agent-a4dc6d870be5fd66d`)
+
+Scope: DB-04 and the Medium findings. DB-09, DB-11 and DB-14 were fixed before the scope was cut; the other Low
+findings are skipped. After the fixes: break suite **209 passed, 11 failed, 1 todo (221)** (the fixture grew by 18
+cases); before: 167 passed, 35 failed, 1 todo (203). No previously passing test regressed. Backend suite: 164/164.
+Fixture data changed in break tests (assertions untouched): the DB-04 tests' product GTINs `99999999` / `99999998`
+had invalid check digits and are now `99999995` / `99999988`, because DB-07 makes the database reject bad check digits.
+
+**DB-02 note.** The break test sends the competing `generate_shopping_list()`, waits until it is blocked, runs the trip's
+regeneration, and then awaits the competing call *before* committing the trip. With correct serialization the competing call
+can only finish after the trip commits, so the test hangs until its 120 s timeout (it could only finish before when Postgres
+aborted one side with 40P01). The same scenario with the trip committing first was run: both transactions commit, no deadlock,
+and the list is correct.
+
 ## Summary
 
-| ID | Severity | Area | Title | Test file |
-|---|---|---|---|---|
-| DB-04 | **High** | Constraints / allergens | A cabinet or list row can link to a product of a *different* item, which removes allergen badges | `constraints.test.ts` |
-| DB-01 | Medium | Concurrency / owner handoff | Two members leaving at the same time can leave a group with no owner | `concurrency.test.ts` |
-| DB-02 | Medium | Concurrency / list generation | Finish trip and a concurrent `generate_shopping_list()` deadlock (40P01) | `concurrency.test.ts` |
-| DB-03 | Medium | Cascades / privacy | `DELETE /me` and leaving a group leave the user's id, name and allergy in `shopping_list_items` | `cascades.test.ts` |
-| DB-05 | Medium | Fuzzy search | `search_items` labels **every** candidate `suggested`, including ones 12 edits away | `search.test.ts` |
-| DB-06 | Medium | Normalization | Non-ASCII letters are deleted: `Ｍｉｌｋ`→`''`, `Weißbier`→`wei bier`, `ﬁg`→`g`, Cyrillic and CJK →`''` | `normalize.test.ts` |
-| DB-07 | Medium | Constraints / product cache | One barcode can be stored as 12/13/14-digit GTINs (duplicate cache rows); no check-digit validation | `constraints.test.ts` |
-| DB-08 | Medium | Time | No household time zone, so "today" is the server's UTC date and expiry dates are off by one in US evenings | `time.test.ts` |
-| DB-09 | Low | Constraints | Demoting the only owner leaves a group with zero owners | `constraints.test.ts` |
-| DB-10 | Low | Seed | Re-seeding doesn't undo a rehearsal (extra member kept); changing the invite email leaves two pending invites | `migrations.test.ts` |
-| DB-11 | Low | Fuzzy search | Short-word false positives (`pea`→Pears, `batter`/`bitter`→Butter); transpositions (`mlik`, `oero`) return nothing | `search.test.ts` |
-| DB-12 | Low | Constraints | Product identifier CHECK accepts `smartlabel_url = ''`; `calories_per_serving` accepts NaN/Infinity | `constraints.test.ts` |
-| DB-13 | Low | Constraints | `users.email` / `display_name` can be blank; `users.zip_code` is unvalidated | `constraints.test.ts` |
-| DB-14 | Low | Normalization | `&` spacing gives two normalized names (`mac&cheese` vs `mac & cheese`) | `normalize.test.ts` |
-| DB-15 | Low | Fuzzy search / perf | With 6,000 items the planner seq-scans at least one trigram table (search is still ~7 ms) | `search.test.ts` |
-| DB-16 | Low | Security | App role can still create TEMP tables and `pg_temp` functions | `security.test.ts` |
-| DB-17 | Low | Security | `app-role.sql` silently falls back to the public password `grocerez_app` | `security.test.ts` |
+| ID | Severity | Area | Title | Test file | Status |
+|---|---|---|---|---|---|
+| DB-04 | **High** | Constraints / allergens | A cabinet or list row can link to a product of a *different* item, which removes allergen badges | `constraints.test.ts` | Fixed (migration `product_item_link`: triggers, 23503) |
+| DB-01 | Medium | Concurrency / owner handoff | Two members leaving at the same time can leave a group with no owner | `concurrency.test.ts` | Fixed (migration `owner_handoff_concurrency`) |
+| DB-02 | Medium | Concurrency / list generation | Finish trip and a concurrent `generate_shopping_list()` deadlock (40P01) | `concurrency.test.ts` | Fixed (migration `list_lock_and_member_cleanup`). Break test still fails: it awaits the blocked transaction before committing the trip, which can only end in a deadlock abort. See note below |
+| DB-03 | Medium | Cascades / privacy | `DELETE /me` and leaving a group leave the user's id, name and allergy in `shopping_list_items` | `cascades.test.ts` | Fixed (migration `list_lock_and_member_cleanup`) |
+| DB-05 | Medium | Fuzzy search | `search_items` labels **every** candidate `suggested`, including ones 12 edits away | `search.test.ts` | Fixed (migration `search_labels`) |
+| DB-06 | Medium | Normalization | Non-ASCII letters are deleted: `Ｍｉｌｋ`→`''`, `Weißbier`→`wei bier`, `ﬁg`→`g`, Cyrillic and CJK →`''` | `normalize.test.ts` | Fixed (migration `normalize_unicode`). `Œufs` test expects `oeufs`, but the plan's plural rule gives `oeuf` (like `ﬁg Newtons` → `fig newton`); test left as is |
+| DB-07 | Medium | Constraints / product cache | One barcode can be stored as 12/13/14-digit GTINs (duplicate cache rows); no check-digit validation | `constraints.test.ts` | Fixed (migration `gtin14` + `normalizeGtin`) |
+| DB-08 | Medium | Time | No household time zone, so "today" is the server's UTC date and expiry dates are off by one in US evenings | `time.test.ts` | Fixed (migration `group_time_zone` + backend). 2nd test needs the *session* TimeZone to be local, which contradicts the passing test that asserts it is UTC; the fix uses `groups.time_zone` explicitly instead |
+| DB-09 | Low | Constraints | Demoting the only owner leaves a group with zero owners | `constraints.test.ts` | Fixed (done in `owner_handoff_concurrency` before the scope cut) |
+| DB-10 | Low | Seed | Re-seeding doesn't undo a rehearsal (extra member kept); changing the invite email leaves two pending invites | `migrations.test.ts` | Skipped (scope cut) |
+| DB-11 | Low | Fuzzy search | Short-word false positives (`pea`→Pears, `batter`/`bitter`→Butter); transpositions (`mlik`, `oero`) return nothing | `search.test.ts` | Fixed (done in `search_labels` before the scope cut) |
+| DB-12 | Low | Constraints | Product identifier CHECK accepts `smartlabel_url = ''`; `calories_per_serving` accepts NaN/Infinity | `constraints.test.ts` | Skipped (scope cut). The NaN/Infinity test now passes only because its fixture GTINs fail the DB-07 check digit |
+| DB-13 | Low | Constraints | `users.email` / `display_name` can be blank; `users.zip_code` is unvalidated | `constraints.test.ts` | Skipped (scope cut) |
+| DB-14 | Low | Normalization | `&` spacing gives two normalized names (`mac&cheese` vs `mac & cheese`) | `normalize.test.ts` | Fixed (done in `normalize_unicode` before the scope cut) |
+| DB-15 | Low | Fuzzy search / perf | With 6,000 items the planner seq-scans at least one trigram table (search is still ~7 ms) | `search.test.ts` | Skipped (scope cut; `random_page_cost = 1.1` was tried and did not change the plan) |
+| DB-16 | Low | Security | App role can still create TEMP tables and `pg_temp` functions | `security.test.ts` | Skipped (scope cut) |
+| DB-17 | Low | Security | `app-role.sql` silently falls back to the public password `grocerez_app` | `security.test.ts` | Skipped (scope cut) |
 
 ---
 

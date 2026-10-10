@@ -15,7 +15,7 @@ groupsRouter.get("/groups", async (req, res) => {
   res.json(await groupsService.list(uid(req)));
 });
 groupsRouter.post("/groups", validate({ body: CreateGroupBody }), async (req, res) => {
-  res.status(201).json(await groupsService.create(uid(req), req.body.name));
+  res.status(201).json(await groupsService.create(uid(req), req.body.name, req.body.timeZone));
 });
 groupsRouter.get("/me/invites", async (req, res) => {
   res.json(await groupsService.myInvites(uid(req)));
@@ -35,7 +35,7 @@ groupScopedRouter.get("/", async (req, res) => {
   res.json(await groupsService.get(gid(req), req.membership!.role));
 });
 groupScopedRouter.patch("/", requireOwner, validate({ body: UpdateGroupBody }), async (req, res) => {
-  res.json(await groupsService.rename(gid(req), req.body.name, uid(req)));
+  res.json(await groupsService.rename(gid(req), { name: req.body.name, timeZone: req.body.timeZone }, uid(req)));
 });
 groupScopedRouter.delete("/", requireOwner, async (req, res) => {
   await groupsService.remove(gid(req), uid(req));

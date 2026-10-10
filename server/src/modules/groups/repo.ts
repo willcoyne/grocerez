@@ -7,9 +7,9 @@ export const groupsRepo = {
   findMembership: (db: Db, groupId: string, userId: string) =>
     db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { role: true, joinedAt: true } }),
 
-  create: (db: Db, name: string, ownerId: string) =>
+  create: (db: Db, name: string, ownerId: string, timeZone?: string) =>
     db.group.create({
-      data: { name, createdBy: ownerId, members: { create: { userId: ownerId, role: "owner" } } },
+      data: { name, ...(timeZone ? { timeZone } : {}), createdBy: ownerId, members: { create: { userId: ownerId, role: "owner" } } },
       include: { _count: { select: { members: true } } },
     }),
 
@@ -32,8 +32,8 @@ export const groupsRepo = {
       },
     }),
 
-  rename: (db: Db, groupId: string, name: string) =>
-    db.group.update({ where: { id: groupId }, data: { name }, include: { _count: { select: { members: true } } } }),
+  rename: (db: Db, groupId: string, data: { name?: string; timeZone?: string }) =>
+    db.group.update({ where: { id: groupId }, data, include: { _count: { select: { members: true } } } }),
 
   delete: (db: Db, groupId: string) => db.group.delete({ where: { id: groupId } }),
 
