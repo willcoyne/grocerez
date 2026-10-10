@@ -20,7 +20,7 @@ describe("GET /api/health", () => {
   });
 
   it("unknown routes return 404 NOT_FOUND", async () => {
-    const res = await request(app).get("/api/nope");
+    const res = await request(app).get("/nope");
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("NOT_FOUND");
   });

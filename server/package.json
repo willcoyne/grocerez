@@ -7,7 +7,10 @@
     "start": "node dist/index.js",
     "test": "vitest",
     "postinstall": "prisma generate",
-    "db:up": "docker compose up -d"
+    "db:up": "docker compose up -d",
+    "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset",
+    "db:studio": "prisma studio"
   },
   "type": "module",
   "dependencies": {

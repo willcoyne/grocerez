@@ -1,9 +1,61 @@
 // Owned by plan/database. Models are added by the database folders.
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, pg_trgm, fuzzystrmatch]
+}
+
+// database/02-users
+enum Allergen {
+  milk
+  eggs
+  fish
+  shellfish
+  tree_nuts
+  peanuts
+  wheat
+  soy
+  sesame
+  gluten
+
+  @@map("allergen")
+}
+
+model User {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  googleSub   String         @unique @map("google_sub")
+  email       String         @unique // lower-cased by the app
+  displayName String         @map("display_name")
+  avatarUrl   String?        @map("avatar_url")
+  zipCode     String?        @map("zip_code")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  allergens   UserAllergen[]
+  diets       UserDiet[]
+
+  @@map("users")
+}
+
+model UserAllergen {
+  userId   String   @map("user_id") @db.Uuid
+  allergen Allergen
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, allergen])
+  @@map("user_allergens")
+}
+
+// diet is CHECK-constrained in SQL (see users_profile migration).
+model UserDiet {
+  userId String @map("user_id") @db.Uuid
+  diet   String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, diet])
+  @@map("user_diets")
 }
