@@ -10,5 +10,5 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src", "prisma", "generated", "prisma.config.ts"]
+  "include": ["src", "prisma", "generated", "test", "prisma.config.ts", "vitest.config.ts"]
 }
