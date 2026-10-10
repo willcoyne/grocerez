@@ -84,3 +84,14 @@ Format: date · folder · what the plan said · what was done · why.
 - Every preference write and the regeneration run in **one transaction** (`withRegeneration`), then `preferences:changed` is emitted, plus
   `shopping-list:changed` when the list actually changed.
 - `PUT /me/dietary` dedupes values, returns them sorted, and regenerates every group the user belongs to in the same transaction.
+
+### 2026-10-10 · 05 · Cabinet details
+- `CabinetItem = {id, groupId, itemId, item:{id,name,category}, product:{id,brand,name,imageUrl}|null, status, quantityText, location,
+  purchasedAt, expiresAt ("YYYY-MM-DD"), expirationSource, addedBy, createdAt, updatedAt}`. Dates in bodies are `YYYY-MM-DD`.
+- `POST /cabinet` upserts on `(group, item)`, always sets `status = in_stock`, returns 201 (created) / 200 (updated). Missing `expiresAt`:
+  keeps an existing date, otherwise estimates it (`lib/expiration.ts`, the 09 rule) with `expiration_source = 'estimated'`; household items get none.
+  A given `expiresAt` is `manual`. `PATCH {expiresAt: null}` clears date and source (the DB requires both or neither).
+- Every cabinet write that can change "have" runs with the regeneration in one transaction and emits `cabinet:changed` (+ `shopping-list:changed` if the list changed).
+- **`DELETE /cabinet/:id` (thrown away) does not regenerate**, as the plan says. Note: because the list is `preferences − cabinet`, the next
+  regeneration triggered by anything else will add the item back if someone still has it as a preference. That is the set rule, not a bug.
+- `cabinetHooks.afterAdd` is the hook where 09 runs recall matching for a newly added item.

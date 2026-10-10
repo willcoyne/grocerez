@@ -7,6 +7,7 @@ import { logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
+import { cabinetRouter } from "./modules/cabinet/router.js";
 import { dietaryRouter } from "./modules/dietary/router.js";
 import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
 import { itemsRouter } from "./modules/items/router.js";
@@ -54,6 +55,7 @@ export function createApp() {
   const group = Router({ mergeParams: true });
   group.use(groupScopedRouter);
   group.use(preferencesRouter);
+  group.use(cabinetRouter);
   api.use("/groups/:groupId", requireGroupMember, group);
 
   app.use("/api", api);
