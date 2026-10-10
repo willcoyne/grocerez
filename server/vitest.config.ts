@@ -6,8 +6,8 @@ export const TEST_DATABASE_URL =
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
-    // Break tests fail on purpose until their defects are fixed; run them with `npm run test:db-break`.
-    exclude: ["test/db-break/**", "**/node_modules/**"],
+    // Break tests fail on purpose until their defects are fixed; run them with `npm run test:db-break` / `npm run test:break`.
+    exclude: ["test/db-break/**", "test/break/**", "**/node_modules/**"],
     globalSetup: ["test/globalSetup.ts"],
     // Tests share one real Postgres database, so files run one at a time.
     fileParallelism: false,
