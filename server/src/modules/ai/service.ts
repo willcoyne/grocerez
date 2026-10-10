@@ -2,11 +2,18 @@ import {
   PriceModelOutput,
   RecipeModelOutput,
   type Allergen,
+  type PriceEstimateRequest,
+  type PriceEstimateResponse,
   type PricedItem,
   type Recipe,
+  type RecipeSuggestRequest,
+  type SuggestedRecipe,
 } from "../../contracts/ai.js";
 import { DIET_EXCLUSIONS, findAllergens, findDietConflicts } from "../../lib/allergens.js";
-import { aiUnavailable, callStructured, getAiClient, type AiClient } from "./client.js";
+import { AppError } from "../../lib/errors.js";
+import { search as itemSearch } from "../items/service.js";
+import { AI_MODEL, aiUnavailable, callStructured, getAiClient, type AiClient } from "./client.js";
+import { aiRepo } from "./repo.js";
 import type { BetaWebSearchToolResultBlock } from "@anthropic-ai/sdk/resources/beta/messages/messages.js";
 
 const DAY_MS = 86_400_000;
@@ -154,4 +161,56 @@ export async function estimatePrices(
     });
   }
   return { prices: [...prices.values()], unpricedItemIds: items.filter((i) => !prices.has(i.itemId)).map((i) => i.itemId) };
+}
+
+// ---------------- Route handlers (DB in, DB out; Claude only sees plain data and never writes)
+
+/** POST /groups/:groupId/recipes/suggest */
+export async function suggestForGroup(groupId: string, body: RecipeSuggestRequest): Promise<SuggestedRecipe[]> {
+  const [cabinetItems, members] = await Promise.all([aiRepo.cabinet(groupId), aiRepo.members(groupId)]);
+  const recipes = await suggestRecipes({ cabinetItems, members, ...body });
+  return Promise.all(
+    recipes.map(async (r) => ({
+      ...r,
+      missingItemMatches: await Promise.all(
+        r.missingItems.map(async (name) => {
+          // Same rules as GET /items/search: exact hit, or a close-enough "suggested" top result.
+          const found = await itemSearch(name).catch(() => null); // names with no letters/digits -> no match
+          return { name, item: found && found.match !== "none" ? found.results[0] : null };
+        }),
+      ),
+    })),
+  );
+}
+
+/** POST /groups/:groupId/shopping-list/prices */
+export async function pricesForGroup(
+  groupId: string,
+  userId: string,
+  body: PriceEstimateRequest,
+): Promise<PriceEstimateResponse> {
+  const zipCode = body.zipCode ?? (await aiRepo.userZip(userId));
+  if (!zipCode) throw new AppError(400, "ZIP_REQUIRED", "Set a ZIP code in your profile or send zipCode");
+
+  const items = await aiRepo.listItems(groupId);
+  const cached = new Map((await aiRepo.freshPrices(items.map((i) => i.itemId), zipCode)).map((p) => [p.itemId, p]));
+  const fromCache: PricedItem[] = items.flatMap((i) => {
+    const p = cached.get(i.itemId);
+    if (!p) return [];
+    const sourceUrls = Array.isArray(p.sources) ? p.sources.filter((s): s is string => typeof s === "string") : [];
+    const { lowCents, typicalCents, highCents, unit } = p;
+    return [{ itemId: i.itemId, itemName: i.name, lowCents, typicalCents, highCents, unit, sourceUrls, estimate: true as const }];
+  });
+
+  const fresh = await estimatePrices({ items: items.filter((i) => !cached.has(i.itemId)), zipCode });
+  if (fresh.prices.length) await aiRepo.upsertPrices(zipCode, AI_MODEL, fresh.prices);
+
+  const byId = new Map([...fromCache, ...fresh.prices].map((p) => [p.itemId, p]));
+  const priced = items.flatMap((i) => byId.get(i.itemId) ?? []); // list order
+  return {
+    items: priced,
+    totalLowCents: priced.reduce((s, p) => s + p.lowCents, 0),
+    totalHighCents: priced.reduce((s, p) => s + p.highCents, 0),
+    unpricedItemIds: fresh.unpricedItemIds,
+  };
 }

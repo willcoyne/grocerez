@@ -59,8 +59,8 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/products/scan` | `{qrUrl?}` or `{gtin?}` | `Product` | 08 |
 | GET | `/groups/:groupId/alerts` | — | `{expiring[], recalls[]}` | 09 |
 | POST | `/groups/:groupId/alerts/recalls/:matchId/dismiss` | — | 204 | 09 |
-| POST | `/groups/:groupId/recipes/suggest` | `{maxRecipes?, mustUseExpiring?}` | `Recipe[]` | 10 |
-| POST | `/groups/:groupId/shopping-list/prices` | `{zipCode?}` | `{items[], totalLowCents, totalHighCents}` | 10 |
+| POST | `/groups/:groupId/recipes/suggest` | `{maxRecipes?, mustUseExpiring?}` | `Recipe[]` (each with `missingItemMatches[]`) | 10 |
+| POST | `/groups/:groupId/shopping-list/prices` | `{zipCode?}` | `{items[], totalLowCents, totalHighCents, unpricedItemIds[]}` | 10 |
 | POST | `/uploads/presign` | `{contentType, purpose}` | `{uploadUrl, key}` | 11 |
 
 **Errors** always look like `{ "error": { "code": "NOT_FOUND", "message": "..." } }`, with the matching HTTP status.
