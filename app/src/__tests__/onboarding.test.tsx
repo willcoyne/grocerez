@@ -5,7 +5,7 @@ import { apiRoutes, renderWithProviders, testUser } from "@/test-utils";
 import OnboardingScreen from "@/app/onboarding";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn() }) }));
+jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn() }), useFocusEffect: jest.fn() }));
 const apiMock = api as jest.Mock;
 
 describe("Onboarding", () => {
@@ -33,14 +33,13 @@ describe("Onboarding", () => {
     expect(calls[0]).toEqual(["PATCH /me", { displayName: "Carson N", zipCode: "66049" }]);
     expect(auth.setUser).toHaveBeenCalled();
 
-    await fireEvent.press(screen.getByLabelText("Allergic to Peanuts"));
+    await fireEvent.press(screen.getByLabelText("Peanuts"));
     await fireEvent.press(screen.getByLabelText("Vegetarian"));
     await fireEvent.press(screen.getByText("Next"));
     await screen.findByText("Join your household");
     expect(calls[1]).toEqual(["PUT /me/dietary", { diets: ["vegetarian"], allergens: ["peanuts"] }]);
 
-    await screen.findByText(testUser.email);
-    expect(screen.getByText(/Waiting to join someone\? Ask them to invite/)).toBeTruthy();
+    await screen.findByText(`No invites yet. Ask someone in your household to invite ${testUser.email}.`);
     await fireEvent.press(screen.getByText("Skip for now"));
     expect(auth.finishOnboarding).toHaveBeenCalled();
   });

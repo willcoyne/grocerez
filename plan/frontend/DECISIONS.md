@@ -97,3 +97,15 @@ Format: date · folder · what the plan said · what was done · why.
   `contracts/groups.ts`. The app already renders `member.allergens` chips if the field appears (Group tab, scanner highlights).
 - **Link scanned products to cabinet rows:** `POST /groups/:groupId/cabinet` could accept an optional `productId` so a product scanned
   in lookup / map-out mode keeps its brand and nutrition on the cabinet row (finish trip already does this via `scannedProductId`).
+
+## Restyle to Ian's design system (DESIGN.md)
+
+- **Onboarding flow kept.** Ian's DESIGN.md §1/§10.2 has no separate onboarding step (diet and allergies live only on the Me tab).
+  carson keeps its three skippable steps for new accounts (name + ZIP → diets/allergies → join or create a household), now styled
+  with the kit (`h1`, `TextField`, `ToggleChip`s, invite cards). Signed-in users with no household still land on the Household
+  screen (`no-group`, §4.2). Diet and allergies are also editable on the Me tab.
+- **Sign-in** keeps the dev/demo-key "Demo users" list visible (not behind a toggle) and the server health line under it.
+- **Invite** validation errors (bad email, already invited, 409 ALREADY_MEMBER) show under the field per §4.4; other API errors
+  are error toasts. "Tell them" (share sheet) is kept after a successful invite. Pending rows also say who invited and when.
+- **Create household** defaults to "Our house"; an empty name becomes "Our house". From onboarding it opens
+  `invite?from=onboarding` ("Continue to the app"), otherwise `invite` ("Done").

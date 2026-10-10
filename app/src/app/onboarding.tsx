@@ -1,18 +1,17 @@
 import type { Dietary } from "@contracts/dietary";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { errorMessage } from "@/api/client";
 import { useUpdateDietary, useUpdateMe } from "@/api/hooks/me";
 import { DietaryPicker } from "@/components/DietaryPicker";
 import { MyInvitesList } from "@/components/MyInvitesList";
-import { useToast } from "@/components/ui";
-import { Button, Input } from "@/components/ui";
+import { AppText, Button, SectionLabel, TextField, useToast } from "@/components/ui";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
+import { color, space } from "@/theme";
 
 const ZIP = /^\d{5}$/;
 
@@ -22,6 +21,7 @@ export default function OnboardingScreen() {
   const { groups } = useActiveGroup();
   const router = useRouter();
   const { show: toast } = useToast();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const [name, setName] = useState(user?.displayName ?? "");
   const [zip, setZip] = useState(user?.zipCode ?? "");
@@ -50,71 +50,69 @@ export default function OnboardingScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.progress} accessibilityLabel={`Step ${step + 1} of 3`}>
-            Step {step + 1} of 3
-          </Text>
+    <KeyboardAvoidingView testID="screen-onboarding" behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <AppText variant="micro" color="muted" accessibilityLabel={`Step ${step + 1} of 3`}>
+          {`Step ${step + 1} of 3`}
+        </AppText>
 
-          {step === 0 ? (
-            <View style={styles.step}>
-              <Text style={styles.title} accessibilityRole="header">
-                Welcome! What should we call you?
-              </Text>
-              <Input label="Display name" value={name} onChangeText={setName} autoComplete="name" maxLength={80} />
-              <Input
-                label="ZIP code (for price estimates)"
-                value={zip}
-                onChangeText={(t) => setZip(t.replace(/\D/g, "").slice(0, 5))}
-                keyboardType="number-pad"
-                maxLength={5}
-                placeholder="64105"
-              />
-              {zipInvalid ? <Text style={styles.error}>ZIP codes have 5 digits.</Text> : null}
-              <Button title="Next" onPress={saveProfile} loading={updateMe.isPending} disabled={zipInvalid} />
-              <Button title="Skip" variant="ghost" onPress={() => setStep(1)} />
-            </View>
-          ) : null}
+        {step === 0 ? (
+          <View style={styles.step}>
+            <AppText variant="h1" accessibilityRole="header">
+              Welcome! What should we call you?
+            </AppText>
+            <TextField label="Display name" value={name} onChangeText={setName} autoComplete="name" />
+            <TextField
+              label="ZIP code (for price estimates)"
+              value={zip}
+              onChangeText={(t) => setZip(t.replace(/\D/g, "").slice(0, 5))}
+              keyboardType="number-pad"
+              placeholder="64105"
+              error={zipInvalid ? "ZIP codes have 5 digits." : null}
+            />
+            <Button label="Next" size="lg" fullWidth onPress={saveProfile} loading={updateMe.isPending} disabled={zipInvalid} />
+            <Button label="Skip" variant="ghost" onPress={() => setStep(1)} />
+          </View>
+        ) : null}
 
-          {step === 1 ? (
-            <View style={styles.step}>
-              <Text style={styles.title} accessibilityRole="header">
-                Any diets or allergies?
-              </Text>
-              <Text style={styles.muted}>Your allergens are flagged on your household&apos;s shopping list.</Text>
-              <DietaryPicker value={dietary} onChange={setDietary} />
-              <Button title="Next" onPress={saveDietary} loading={updateDietary.isPending} />
-              <Button title="Skip" variant="ghost" onPress={() => setStep(2)} />
-            </View>
-          ) : null}
+        {step === 1 ? (
+          <View style={styles.step}>
+            <AppText variant="h1" accessibilityRole="header">
+              Any diets or allergies?
+            </AppText>
+            <AppText color="ink2">{"Your allergies are flagged on the household's shopping list, with your name."}</AppText>
+            <DietaryPicker value={dietary} onChange={setDietary} />
+            <Button label="Next" size="lg" fullWidth onPress={saveDietary} loading={updateDietary.isPending} />
+            <Button label="Skip" variant="ghost" onPress={() => setStep(2)} />
+          </View>
+        ) : null}
 
-          {step === 2 ? (
-            <View style={styles.step}>
-              <Text style={styles.title} accessibilityRole="header">
-                Join your household
-              </Text>
-              <MyInvitesList onAccepted={finishOnboarding} />
-              {groups.length > 0 ? (
-                <Button title="Go to my household" onPress={finishOnboarding} />
-              ) : (
-                <Button title="Create a household" variant="secondary" onPress={() => router.push("/create-group")} />
-              )}
-              <Button title="Skip for now" variant="ghost" onPress={finishOnboarding} />
-            </View>
-          ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        {step === 2 ? (
+          <View style={styles.step}>
+            <AppText variant="h1" accessibilityRole="header">
+              Join your household
+            </AppText>
+            <SectionLabel>Invites for you</SectionLabel>
+            <MyInvitesList onAccepted={finishOnboarding} />
+            {groups.length > 0 ? (
+              <Button label="Go to my household" size="lg" fullWidth onPress={finishOnboarding} />
+            ) : (
+              <Button label="Create a household" variant="secondary" size="lg" fullWidth onPress={() => router.push("/create-group")} />
+            )}
+            <Button label="Skip for now" variant="ghost" onPress={finishOnboarding} />
+          </View>
+        ) : null}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  container: { padding: spacing.xl, gap: spacing.lg, maxWidth: 560, width: "100%", alignSelf: "center" },
-  progress: { color: colors.textMuted, fontSize: fontSize.sm, fontWeight: "600" },
-  step: { gap: spacing.md },
-  title: { fontSize: fontSize.xl, fontWeight: "800", color: colors.text },
-  muted: { color: colors.textMuted, fontSize: fontSize.md },
-  error: { color: colors.danger, fontSize: fontSize.sm },
+  screen: { flex: 1, backgroundColor: color.bg },
+  content: { paddingHorizontal: space.screenX, paddingBottom: 48, gap: space.lg, maxWidth: 560, width: "100%", alignSelf: "center" },
+  step: { gap: space.lg },
 });

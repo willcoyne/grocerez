@@ -1,16 +1,15 @@
-import { StyleSheet, Text, View } from "react-native";
+import type { Invite } from "@contracts/groups";
+import { StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useGroupInvites, useRevokeInvite } from "@/api/hooks/groups";
+import { AppText, Button, Card, DashedEmpty, ErrorState, LoadingState, useToast } from "@/components/ui";
 import { timeAgo } from "@/lib/format";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
-import { ErrorState } from "./States";
-import { useToast } from "@/components/ui";
-import { Button } from "./ui";
+import { space } from "@/theme";
 
-/** Pending invites of the active group: email, "invited by Ian · 2h ago", and Revoke (owner or the inviter only). */
+/** Pending invites of the active group (DESIGN.md §4.4 rows). Revoke is shown to the owner or the inviter only. */
 export function GroupInvites() {
   const { activeGroup } = useActiveGroup();
   const { user } = useAuth();
@@ -19,32 +18,41 @@ export function GroupInvites() {
   const revoke = useRevokeInvite(groupId);
   const { show: toast } = useToast();
 
-  if (invites.isPending) return <Text style={styles.muted}>Loading invites…</Text>;
-  if (invites.isError) return <ErrorState error={invites.error} onRetry={() => invites.refetch()} />;
-  if (invites.data.length === 0) return <Text style={styles.muted}>No pending invites.</Text>;
+  if (invites.isPending) return <LoadingState />;
+  if (invites.isError) return <ErrorState message={errorMessage(invites.error)} onRetry={() => invites.refetch()} />;
+  if (invites.data.length === 0) return <DashedEmpty>No pending invites yet.</DashedEmpty>;
+
+  const onRevoke = (inv: Invite) =>
+    revoke.mutate(inv.id, {
+      onSuccess: () => toast(`Invite to ${inv.email} revoked`),
+      onError: (e) => toast(errorMessage(e), { tone: "error" }),
+    });
 
   return (
     <View style={styles.list}>
       {invites.data.map((inv) => {
         const canRevoke = activeGroup?.role === "owner" || inv.invitedBy?.id === user?.id;
         return (
-          <View key={inv.id} style={styles.row}>
-            <View style={styles.flex}>
-              <Text style={styles.email}>{inv.email}</Text>
-              <Text style={styles.muted}>
-                invited by {inv.invitedBy?.displayName ?? "a former member"} · {timeAgo(inv.createdAt)}
-              </Text>
+          <Card key={inv.id} style={styles.row} testID={`row-${inv.id}`}>
+            <View style={styles.text}>
+              <AppText weight="bold" numberOfLines={1} ellipsizeMode="tail">
+                {inv.email}
+              </AppText>
+              <AppText variant="caption" color="muted">
+                {`Waiting for them to sign in · invited by ${inv.invitedBy?.displayName ?? "a former member"} ${timeAgo(inv.createdAt)}`}
+              </AppText>
             </View>
             {canRevoke ? (
               <Button
-                title="Revoke"
-                variant="ghost"
-                compact
-                accessibilityLabel={`Revoke invite for ${inv.email}`}
-                onPress={() => revoke.mutate(inv.id, { onError: (e) => toast(errorMessage(e), { tone: "error" }) })}
+                label="Revoke"
+                variant="secondary"
+                size="sm"
+                loading={revoke.isPending && revoke.variables === inv.id}
+                accessibilityLabel={`Revoke invite to ${inv.email}`}
+                onPress={() => onRevoke(inv)}
               />
             ) : null}
-          </View>
+          </Card>
         );
       })}
     </View>
@@ -52,9 +60,7 @@ export function GroupInvites() {
 }
 
 const styles = StyleSheet.create({
-  list: { gap: spacing.sm },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  flex: { flex: 1 },
-  email: { fontSize: fontSize.md, color: colors.text, fontWeight: "600" },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
+  list: { gap: space.md },
+  row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space.md },
+  text: { flex: 1, minWidth: 160, gap: 2 },
 });
