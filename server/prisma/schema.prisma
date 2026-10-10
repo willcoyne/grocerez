@@ -331,12 +331,12 @@ enum ProductSource {
 }
 
 /// Branded product info, cached globally the first time anyone scans it. Refresh when `fetched_at` is older than 30 days.
-/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is 8–14 digits.
+/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is a GTIN-14 with a valid check digit.
 model Product {
   id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// Generic catalog item this product belongs to ("Honey Nut Cheerios" box → Cheerios).
   itemId             String        @map("item_id") @db.Uuid
-  /// UPC/EAN barcode digits.
+  /// GTIN-14 (8/12/13-digit codes are left-padded by a trigger; CHECK: 14 digits + valid check digit).
   gtin               String?       @unique
   /// URL encoded in the SmartLabel QR code.
   smartlabelUrl      String?       @unique @map("smartlabel_url")

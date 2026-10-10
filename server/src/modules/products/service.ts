@@ -217,7 +217,7 @@ export const productsService = {
   async scan(userId: string, body: ScanBody): Promise<Product> {
     if (body.gtin) {
       const gtin = normalizeGtin(body.gtin);
-      if (!gtin) throw badRequest("Barcode must have 8, 12, 13 or 14 digits", "VALIDATION_ERROR");
+      if (!gtin) throw badRequest("Barcode must have 8, 12, 13 or 14 digits and a valid check digit", "VALIDATION_ERROR");
       return toProduct(await scanGtin(gtin, userId));
     }
     return toProduct(await scanSmartLabel(body.qrUrl!, userId));

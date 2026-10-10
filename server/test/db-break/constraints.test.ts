@@ -133,7 +133,7 @@ describe("defects: invalid states the database accepts", () => {
       await c.query(`INSERT INTO preferences (group_id, user_id, item_id) VALUES ($1, $2, $3)`, [g, a, milk]);
       // An Oreos product (no milk listed) gets attached to the MILK cabinet row (a wrong scan / buggy finish-trip).
       const p = await c.query(
-        `INSERT INTO products (item_id, gtin, name, source, fetched_at, allergens) VALUES ($1, '99999999', 'Oreo Thins', 'openfoodfacts', now(), '{wheat,soy}') RETURNING id`,
+        `INSERT INTO products (item_id, gtin, name, source, fetched_at, allergens) VALUES ($1, '99999995', 'Oreo Thins', 'openfoodfacts', now(), '{wheat,soy}') RETURNING id`,
         [oreos],
       );
       const err = await tryQuery(
@@ -160,7 +160,7 @@ describe("defects: invalid states the database accepts", () => {
       const a = await mkUser(c);
       const g = await mkGroup(c, a);
       const p = await c.query(
-        `INSERT INTO products (item_id, gtin, name, source, fetched_at) VALUES ($1, '99999998', 'Oreo', 'openfoodfacts', now()) RETURNING id`,
+        `INSERT INTO products (item_id, gtin, name, source, fetched_at) VALUES ($1, '99999988', 'Oreo', 'openfoodfacts', now()) RETURNING id`,
         [await itemId(c, "Oreos")],
       );
       const err = await tryQuery(
