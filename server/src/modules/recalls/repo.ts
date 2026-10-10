@@ -1,25 +1,34 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
+import { logger } from "../../lib/logger.js";
 import { MATCH_THRESHOLD, STOP_WORDS } from "./match.js";
 import type { Recall } from "./openfda.js";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
 export const recallsRepo = {
-  // Upsert by external_id (openFDA recall_number): re-importing never duplicates.
-  upsert: (recalls: Recall[]) =>
-    prisma.$transaction(
-      recalls.map(({ raw, ...r }) => {
-        const data = { ...r, raw: raw as Prisma.InputJsonValue };
-        return prisma.recall.upsert({ where: { externalId: r.externalId }, create: data, update: data, select: { id: true } });
-      }),
-    ),
+  // Upsert by external_id (openFDA recall_number): re-importing never duplicates. Row by row, so one row the DB
+  // rejects is logged and skipped instead of failing the whole import (M3-07). Returns how many rows failed.
+  upsert: async (recalls: Recall[]) => {
+    let failed = 0;
+    for (const { raw, ...r } of recalls) {
+      const data = { ...r, raw: raw as Prisma.InputJsonValue };
+      await prisma.recall
+        .upsert({ where: { externalId: r.externalId }, create: data, update: data, select: { id: true } })
+        .catch((err) => {
+          failed++;
+          logger.warn({ err, externalId: r.externalId }, "recall upsert failed, row skipped");
+        });
+    }
+    return failed;
+  },
 
   /**
    * Scores recalls against cabinet items with pg_trgm strict_word_similarity (DECISIONS "09 (partial, parallel)").
    * Same rule as `matchRecalls` in match.ts: candidate names are item name, aliases and `brand + ' ' + product name`;
    * a name qualifies with score >= 0.35 and all its significant words in the description (whole words, optional
-   * trailing "s"); score = best qualifying name; a known brand must appear as whole words in the description.
+   * trailing "s"); score = best qualifying name; a known brand must pass brandAppears (all words, or a 4+ letter first
+   * word). Both sides go through match_norm() (case, accents, apostrophes), like matchNorm() in JS.
    * Match + insert is one statement: `FOR KEY SHARE` locks the matched cabinet item and recall rows, so a concurrent
    * delete either waits or its row is skipped (no FK error), and `ON CONFLICT DO NOTHING` keeps existing/dismissed
    * matches. Returns the groups that got a new match.
@@ -36,23 +45,27 @@ export const recallsRepo = {
       JOIN items i ON i.id = c.item_id
       LEFT JOIN products p ON p.id = c.product_id
       CROSS JOIN recalls r
+      CROSS JOIN LATERAL (SELECT match_norm(r.product_description) AS d) rd
       CROSS JOIN LATERAL (
-        SELECT max(strict_word_similarity(n, r.product_description))::real AS score
+        SELECT max(strict_word_similarity(n, rd.d))::real AS score
         FROM unnest(
-          ARRAY[i.name, CASE WHEN p.id IS NOT NULL THEN COALESCE(p.brand, '') || ' ' || p.name END]
-          || ARRAY(SELECT a.alias_normalized FROM item_aliases a WHERE a.item_id = i.id)
+          ARRAY[match_norm(i.name), CASE WHEN p.id IS NOT NULL THEN match_norm(COALESCE(p.brand, '') || ' ' || p.name) END]
+          || ARRAY(SELECT match_norm(a.alias_normalized) FROM item_aliases a WHERE a.item_id = i.id)
         ) n
         WHERE n IS NOT NULL
-          AND strict_word_similarity(n, r.product_description) >= ${MATCH_THRESHOLD}
+          AND strict_word_similarity(n, rd.d) >= ${MATCH_THRESHOLD}
           AND NOT EXISTS (
-            SELECT 1 FROM regexp_split_to_table(lower(n), '[^[:alnum:]]+') w
+            SELECT 1 FROM regexp_split_to_table(n, '[^[:alnum:]]+') w
             WHERE length(w) >= 3 AND w <> ALL(${STOP_WORDS}::text[])
-              AND lower(r.product_description) !~ ('\\m' || regexp_replace(w, 's$', '') || 's?\\M'))
+              AND rd.d !~ ('\\m' || regexp_replace(w, 's$', '') || 's?\\M'))
       ) s
+      CROSS JOIN LATERAL (
+        SELECT array_remove(regexp_split_to_array(match_norm(COALESCE(p.brand, '')), '[^[:alnum:]]+'), '') AS bw
+      ) b
       WHERE s.score IS NOT NULL
-        AND (p.brand IS NULL OR p.brand !~ '[[:alnum:]]'
-             OR lower(r.product_description) ~ ('\\m' || array_to_string(
-                  array_remove(regexp_split_to_array(lower(p.brand), '[^[:alnum:]]+'), ''), '[^[:alnum:]]+') || '\\M'))
+        AND (cardinality(b.bw) = 0
+             OR NOT EXISTS (SELECT 1 FROM unnest(b.bw) w WHERE rd.d !~ ('\\m' || regexp_replace(w, 's$', '') || 's?\\M'))
+             OR (length(b.bw[1]) >= 4 AND rd.d ~ ('\\m' || regexp_replace(b.bw[1], 's$', '') || 's?\\M')))
         ${scope.recallsSince ? Prisma.sql`AND r.report_date >= ${scope.recallsSince}::date` : Prisma.empty}
         ${scope.cabinetItemIds ? Prisma.sql`AND c.id = ANY(${scope.cabinetItemIds}::uuid[])` : Prisma.empty}
       FOR KEY SHARE OF c, r

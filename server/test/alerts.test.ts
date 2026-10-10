@@ -175,6 +175,36 @@ describe("alerts: recalls", () => {
     await addToCabinet(owner, g.id, spinach.id); // per-item re-match on add
     expect((await getAlerts()).recalls.map((r) => r.recall.externalId)).toEqual([`F-${tag}-DOLE`]);
   });
+
+  it("brand gate in SQL ignores case, accents and apostrophes; a parent brand matches on its first word (M3-09)", async () => {
+    // One item per brand (cabinet is unique per group+item); each recall names one item.
+    const brands = ["Trader Joe’s", "Häagen-Dazs", "Kraft Heinz", "Dole"];
+    const leaves = ["Kale", "Chard", "Arugula", "Sorrel"];
+    const cab = await Promise.all(
+      brands.map(async (brand, i) => {
+        const item = await mkItem(`Baby ${leaves[i]}`, "produce");
+        const product = await prisma.product.create({ data: { name: item.name, brand, source: "manual", fetchedAt: new Date() } });
+        return prisma.cabinetItem.create({ data: { groupId: g.id, itemId: item.id, addedBy: owner.id, productId: product.id } });
+      }),
+    );
+    await prisma.recall.createMany({
+      data: [
+        { source: "openfda", externalId: `F-${tag}-TJ`, productDescription: `Organic Baby Kale ${tag}, TRADER JOES, 6 oz` },
+        { source: "openfda", externalId: `F-${tag}-HD`, productDescription: `HAAGEN-DAZS Baby Chard ${tag} sorbet` },
+        { source: "openfda", externalId: `F-${tag}-KR`, productDescription: `Kraft Baby Arugula ${tag} dip` },
+        { source: "openfda", externalId: `F-${tag}-SO`, productDescription: `Fresh Express Baby Sorrel ${tag}` },
+      ],
+    });
+    await recallsRepo.match({ cabinetItemIds: cab.map((c) => c.id) });
+    const got = await prisma.recallMatch.findMany({ where: { cabinetItemId: { in: cab.map((c) => c.id) } }, select: { cabinetItemId: true, recall: { select: { externalId: true } } } });
+    const byBrand = brands.map((b, i) => [b, got.filter((m) => m.cabinetItemId === cab[i].id).map((m) => m.recall.externalId).sort()]);
+    expect(byBrand).toEqual([
+      ["Trader Joe’s", [`F-${tag}-TJ`]],
+      ["Häagen-Dazs", [`F-${tag}-HD`]],
+      ["Kraft Heinz", [`F-${tag}-KR`]],
+      ["Dole", []],
+    ]);
+  });
 });
 
 describe("recall matching precision and races", () => {
@@ -241,7 +271,7 @@ describe("importRecalls job", () => {
     const f2 = stubFetch(rows.slice(0, 3).map((r) => ({ ...r, status: "Terminated" })));
     emit.mockClear();
     await importRecalls({ now: t2, fetch: f2 as unknown as typeof fetch, job: JOB });
-    expect(f2.mock.calls[0][0]).toContain(`report_date:[${ymd(t1).replaceAll("-", "")}+TO+${ymd(t2).replaceAll("-", "")}]`);
+    expect(f2.mock.calls[0][0]).toContain(`report_date:[${ymd(new Date(t1.getTime() - 14 * DAY)).replaceAll("-", "")}+TO+${ymd(t2).replaceAll("-", "")}]`);
     expect(await prisma.recall.count({ where: { externalId: { startsWith: `F-${tag}-` } } })).toBe(3);
     expect(await prisma.recall.findUniqueOrThrow({ where: { externalId: `F-${tag}-1` } })).toMatchObject({ status: "Terminated" });
     const second = await getAlerts();

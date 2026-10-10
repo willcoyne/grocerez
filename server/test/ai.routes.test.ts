@@ -16,7 +16,7 @@ const ai = vi.hoisted(() => {
     const r = queue.shift();
     if (r instanceof Error) throw r;
     if (r === undefined) throw new Error("unexpected Claude call");
-    return r;
+    return typeof r === "function" ? (r as (...a: unknown[]) => unknown)(..._args) : r;
   });
   return { queue, create };
 });
@@ -95,6 +95,19 @@ describe("POST /groups/:groupId/recipes/suggest", () => {
         { groupId: g.id, itemId: items.rice.id, expiresAt: plusDays(200) },
       ],
     });
+  });
+
+  it("a missing item that exactly matches a catalog item with a member's allergen drops the recipe (M3-16)", async () => {
+    const name = `Crunchbar ${tag}`;
+    const bar = await prisma.item.create({ data: { name, normalizedName: normalizeItemName(name), defaultAllergens: ["milk"] }, select: { id: true } });
+    // Own group so g's 10/hour recipe limit isn't used up; u2 (milk allergy) is a member.
+    const gg = Group.parse((await api().post("/api/groups").set(u1.auth).send({ name: "Bars" }).expect(201)).body);
+    await prisma.groupMember.create({ data: { groupId: gg.id, userId: u2.id, role: "member" } });
+    await prisma.cabinetItem.create({ data: { groupId: gg.id, itemId: items.rice.id } });
+    ai.queue.push(msg({ recipes: [recipe({ title: "Bar bites", missingItems: [name] }), recipe({ title: "Plain" })] }));
+    const res = await api().post(`/api/groups/${gg.id}/recipes/suggest`).set(u1.auth).send({ mustUseExpiring: false }).expect(200);
+    expect(res.body.map((r: { title: string }) => r.title)).toEqual(["Plain"]);
+    await prisma.item.delete({ where: { id: bar.id } });
   });
 
   it("builds context from the cabinet and combined member diets/allergens, drops unsafe recipes, maps missing items", async () => {
@@ -194,6 +207,36 @@ describe("POST /groups/:groupId/shopping-list/prices", () => {
     await prisma.shoppingListItem.createMany({
       data: [items.milk, items.bread, items.basil].map((i) => ({ groupId: g.id, itemId: i.id, reason: "manual" as const })),
     });
+  });
+
+  it("user-created items are priced in their own call and never cached, even after the creator deletes their account (M3-13)", async () => {
+    const creator = await makeUser();
+    const name = `homemade granola ${tag}`;
+    const own = await prisma.item.create({ data: { name, normalizedName: normalizeItemName(name), createdBy: creator.id }, select: { id: true, name: true } });
+    await prisma.user.delete({ where: { id: creator.id } }); // created_by -> NULL
+    expect(await prisma.item.findUniqueOrThrow({ where: { id: own.id } })).toMatchObject({ createdBy: null, userCreated: true });
+    await prisma.shoppingListItem.create({ data: { groupId: g.id, itemId: own.id, reason: "manual" } });
+    // Each call prices whatever items its prompt names.
+    const model = (params: { messages: { content: string }[] }) => {
+      const text = JSON.stringify(params.messages);
+      const all = [items.milk, items.bread, items.basil, own];
+      return msg({ prices: all.filter((i) => text.includes(i.id)).map((i) => price(i, 100, 200, 300)) }, [search]);
+    };
+    ai.queue.push(model, model);
+    const res = PriceEstimateResponse.parse(
+      (await api().post(`/api/groups/${g.id}/shopping-list/prices`).set(u1.auth).send({ zipCode: "64106" }).expect(200)).body,
+    );
+    expect(res.items.map((i) => i.itemId).sort()).toEqual([items.milk.id, items.bread.id, items.basil.id, own.id].sort());
+    expect(ai.create).toHaveBeenCalledTimes(2);
+    const [a, b] = [userText(0), userText(1)];
+    const ownCall = a.includes(own.id) ? a : b;
+    expect(ownCall).not.toContain(items.milk.id); // never in the same prompt as cacheable items
+    expect(a.includes(own.id) ? b : a).not.toContain(name);
+    const cachedIds = (await prisma.priceEstimate.findMany({ where: { zipCode: "64106" }, select: { itemId: true } })).map((p) => p.itemId);
+    expect(cachedIds).not.toContain(own.id);
+    expect(cachedIds).toEqual(expect.arrayContaining([items.milk.id, items.bread.id, items.basil.id]));
+    await prisma.shoppingListItem.deleteMany({ where: { itemId: own.id } });
+    await prisma.item.delete({ where: { id: own.id } });
   });
 
   it("400 ZIP_REQUIRED when neither the body nor the profile has a ZIP", async () => {

@@ -37,6 +37,20 @@ finding. See the note there.
 | M3-11 | Low | List/08 | Check-off accepts a scanned product linked to a *different* catalog item; finish trip files it under the list item | `server/test/break/m3m4/checkoff.break.test.ts` |
 | M3-18 | Low | Uploads (11) | `photoKey` regex has an unescaped `.` (template literal), so it accepts keys presign never issues (still inside the caller's prefix) | `server/test/break/m3m4/uploads.break.test.ts` |
 
+### Status: recalls and AI (fix pass `fix: M3 recalls and AI findings`)
+
+| ID | Status |
+|---|---|
+| M3-07 | Fixed: every openFDA row has control characters stripped (keys included) and `report_date` must be a real calendar day, otherwise the row is skipped. Skipped rows are counted in a log line. Upserts run row by row, so a row the DB rejects is logged and skipped. |
+| M3-08 | Fixed (plan gap): `since = last success − 14 days`. The upsert by `recall_number` and `ON CONFLICT` on matches make the overlap idempotent. `alerts.test.ts` now expects the overlap window. |
+| M3-09 | Fixed: `matchNorm` (JS) and `match_norm()` (SQL: `unaccent` + lower-case + apostrophes dropped) run on both sides. The brand gate passes when every brand word appears, or when the first brand word has 4+ letters (parent brand), with an optional trailing "s". New SQL test in `alerts.test.ts`. Precision on the 24×15 set with the all-words rule: 12 true / 10 false (55%, was 44% before the all-words gate), recall 100%. |
+| M3-12 | Fixed: an estimate whose `unit` has control characters or is over 40 chars is rejected (listed in `unpricedItemIds`). Source URLs with control characters or over 2048 chars are dropped, and at most 10 are kept. |
+| M3-13 | Fixed: new `items.user_created`, set by an insert trigger from `created_by` and kept when the creator is deleted. Only non-user items are read from or written to the global cache, and they're priced in a prompt that holds only such names. User-created items get a separate call that is never cached. The test now gives its "household-created" item a `created_by`, as every API-created item has, and queues the second (uncached) call. The assertion is unchanged. |
+| M3-06, M3-14 | Already fixed on `will` (M2-06: `requireGroupMember` lower-cases the group id). The tests pass unchanged. |
+| M3-15 | Fixed: 10 Claude-backed price requests per group per hour → `429 RATE_LIMITED`. Cache-only answers, early 400s and failed (503) calls don't count. |
+| M3-16 | Fixed: cabinet items carry `default_allergens ∪ product.allergens ∪ may_contain`. Items that hit a forbidden allergen are left out of the prompt, and any recipe naming one is dropped. A missing item that exactly matches a catalog item with a forbidden allergen also drops the recipe. |
+| M3-17 | Fixed: a fuzzy "suggested" match whose item carries a forbidden allergen comes back as `item: null`. |
+
 **No Critical findings.** Every cross-household attempt on the 08–11 routes failed correctly. Recall-match dismissal
 through either group's path, alerts, recipes and prices for a non-member, a foreign list row with a scanned product,
 and another user's `photoKey` or `avatarKey` all returned 404 or 400 with no side effects. Recipe context contained

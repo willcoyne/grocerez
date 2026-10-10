@@ -7,7 +7,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pgcrypto, pg_trgm, fuzzystrmatch]
+  extensions = [pgcrypto, pg_trgm, fuzzystrmatch, unaccent]
 }
 
 // database/02-users
@@ -141,8 +141,10 @@ model Item {
   defaultAllergens Allergen[]         @default([]) @map("default_allergens")
   shelfLifeDays    Int?               @map("shelf_life_days")
   createdBy        String?            @map("created_by") @db.Uuid
+  /// Set by trigger at insert (created_by IS NOT NULL). Only non-user items feed the global price cache.
+  userCreated      Boolean            @default(false) @map("user_created")
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  creator          User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  creator         User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   aliases          ItemAlias[]
   preferences      Preference[]
   cabinetItems     CabinetItem[]
