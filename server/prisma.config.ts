@@ -9,6 +9,8 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Migrations and the seed run as the table owner. In production DATABASE_URL is the least-privilege
+    // grocerez_app role (prisma/sql/app-role.sql), so set MIGRATE_DATABASE_URL to the owner connection there.
+    url: process.env["MIGRATE_DATABASE_URL"] ?? process.env["DATABASE_URL"],
   },
 });

@@ -186,3 +186,21 @@ Format: date · folder · what the plan said · what was done · why.
   transaction, prints it in aisle order with allergen badges, and prints `PASS` if the list equals (union − in-stock cabinet) and
   its board items are exactly Lay's, Oreos, Tostitos.
 
+### 2026-10-10 · 11 · Security
+- **App role:** `server/prisma/sql/app-role.sql` (idempotent, run as the migration owner; `npm run db:app-role` locally) creates
+  `grocerez_app` (LOGIN only, `statement_timeout = 15s`) with `SELECT/INSERT/UPDATE/DELETE` on all tables, `EXECUTE` on
+  functions, no `CREATE` on `public`, no access to `_prisma_migrations`, plus default privileges for future migrations.
+  Local dev password is `grocerez_app`. Production passes `-v app_password=...`.
+- **Two URLs:** `prisma.config.ts` uses `MIGRATE_DATABASE_URL ?? DATABASE_URL`, so production can set `DATABASE_URL` to `grocerez_app`
+  (runtime, via `src/db.ts`) and `MIGRATE_DATABASE_URL` to the owner (migrate deploy, seed).
+- **Owner handoff (step 5) is a trigger:** migration `owner_handoff` adds an `AFTER DELETE` trigger on `group_members`. If the deleted
+  row was the last `owner`, the longest-standing remaining member (earliest `joined_at`, then `user_id`) becomes owner. This covers
+  `DELETE /me` (user cascade), leave, and remove-member. If nobody remains, the group is left for the backend to delete.
+- **Not executed (documented only):** production SSL (`?sslmode=require` in `.env.example`), enabling host backups, and a production
+  restore test. A local `pg_dump -Fc` → `pg_restore` into a scratch database was tested. Group scoping (step 3) and
+  "never log tokens or emails" (step 5) are backend rules. Row-level security (stretch) was not done.
+
+## Needs team sign-off
+
+None. No API contract change was needed. The SQL helpers (`search_items`, `generate_shopping_list`) are offered to the backend,
+not required by the contract.

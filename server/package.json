@@ -11,7 +11,8 @@
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "db:check:normalize": "tsx prisma/checks/normalize-sql.ts",
-    "db:check:demo": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/seed/check-demo-list.sql"
+    "db:check:demo": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/seed/check-demo-list.sql",
+    "db:app-role": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/sql/app-role.sql"
   },
   "license": "ISC",
   "type": "module",
