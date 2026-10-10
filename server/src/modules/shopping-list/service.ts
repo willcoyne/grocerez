@@ -65,10 +65,11 @@ export async function generate(groupId: string, tx: Tx): Promise<void> {
   const kept = rows.filter((r) => !removed.has(r.id));
 
   const allergens = await listRepo.itemAllergens(tx, [...create, ...kept.map((r) => r.itemId)]);
-  // backend/06 step 1.3: a scanned row is flagged by what that exact product declares (allergens ∪ may_contain).
+  // A scanned row is flagged by the catalog item's allergens ∪ the product's allergens ∪ may_contain. Deviates from
+  // backend/06 step 1.3 (product only): OFF often has no allergen data, and "no data" must not clear a flag (M3-10).
   const scanned = new Map(kept.flatMap((r) => (r.scannedProduct ? [[r.itemId, [...r.scannedProduct.allergens, ...r.scannedProduct.mayContain] as string[]]] : [])));
   const flags = (itemId: string): AllergenFlag[] => {
-    const has = scanned.get(itemId) ?? allergens.get(itemId) ?? [];
+    const has = [...(allergens.get(itemId) ?? []), ...(scanned.get(itemId) ?? [])];
     return members.flatMap((m) =>
       m.allergens.filter((a) => has.includes(a)).map((allergen) => ({ userId: m.id, displayName: m.displayName, allergen })),
     );
@@ -127,8 +128,15 @@ export async function addManual(groupId: string, userId: string, { itemId, quant
 
 // Saved immediately; last write wins per row. Un-checking clears who/when and the scanned product.
 export async function check(groupId: string, id: string, userId: string, body: CheckListItemBody): Promise<ShoppingListItem> {
-  if (body.scannedProductId && !(await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true } }))) {
-    throw new AppError(404, "PRODUCT_NOT_FOUND", "Product not found");
+  if (body.scannedProductId) {
+    const product = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { itemId: true } });
+    if (!product) throw new AppError(404, "PRODUCT_NOT_FOUND", "Product not found");
+    // A product linked to another catalog item is a different thing (M3-11). Unlinked products are accepted.
+    if (product.itemId) {
+      const row = await prisma.shoppingListItem.findFirst({ where: { id, groupId }, select: { itemId: true } });
+      if (!row) throw notFound();
+      if (row.itemId !== product.itemId) throw new AppError(400, "PRODUCT_ITEM_MISMATCH", "This product is not the list item");
+    }
   }
   const data = body.checked
     ? { checked: true, checkedBy: userId, checkedAt: new Date(), ...(body.scannedProductId !== undefined && { scannedProductId: body.scannedProductId }) }

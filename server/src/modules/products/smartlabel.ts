@@ -114,6 +114,50 @@ function jsonLdProduct($: cheerio.CheerioAPI): Record<string, any> | null {
   return null;
 }
 
+// cheerio/parse5 tree building and selector matching cost O(depth) per element, so a deeply nested page is quadratic
+// (20k nested <div>s = seconds of blocked event loop, M3-19). Real label pages nest a few dozen levels.
+const MAX_DEPTH = 128;
+// Tags that never open a level, or that the parser closes implicitly when a sibling opens (<p><p>, <li><li>).
+const FLAT = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
+  "p", "li", "dt", "dd", "option", "optgroup", "tr", "td", "th", "thead", "tbody", "tfoot", "rb", "rt", "rp",
+]);
+const RAW_TEXT = new Set(["script", "style", "textarea", "title", "xmp", "noscript"]);
+
+/**
+ * True if elements nest deeper than MAX_DEPTH: one pass, no regex backtracking. A close tag pops back to its open tag, and a stray
+ * one is ignored, like the HTML parser.
+ */
+export function tooDeep(page: string): boolean {
+  const html = page.toLowerCase();
+  const open: string[] = [];
+  let i = 0;
+  for (;;) {
+    if (open.length > MAX_DEPTH) return true;
+    i = html.indexOf("<", i);
+    if (i < 0) return false;
+    if (html.startsWith("<!--", i)) {
+      i = html.indexOf("-->", i + 4);
+      if (i < 0) return false;
+      continue;
+    }
+    const end = html.indexOf(">", i + 1);
+    if (end < 0) return false;
+    const m = /^<(\/?)([a-z][^\s/>]*)/.exec(html.slice(i, Math.min(end + 1, i + 64)));
+    i = end + 1;
+    if (!m) continue;
+    const name = m[2];
+    if (FLAT.has(name)) continue;
+    if (m[1]) {
+      const at = open.lastIndexOf(name);
+      if (at >= 0) open.length = at;
+    } else if (RAW_TEXT.has(name)) {
+      i = html.indexOf(`</${name}`, i); // jump over script/style bodies
+      if (i < 0) return false;
+    } else if (html[end - 1] !== "/") open.push(name);
+  }
+}
+
 export interface SmartLabelParse {
   /** Null when the page doesn't look like a product label (no name, or neither calories nor ingredients). */
   product: ProductData | null;
@@ -126,6 +170,7 @@ export interface SmartLabelParse {
  * ponytail: one heuristic parser instead of one per template; split per template once real fixtures show the need.
  */
 export function parseSmartLabel(html: string): SmartLabelParse {
+  if (tooDeep(html)) return { product: null, gtin: null };
   const $ = cheerio.load(html);
   const ld = jsonLdProduct($);
   const ogTitle = $('meta[property="og:title"]').attr("content")?.trim();

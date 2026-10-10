@@ -37,16 +37,12 @@ export const itemsRepo = {
     }));
   },
 
-  // ON CONFLICT (normalized_name) DO NOTHING-style upsert: a concurrent create of the same name returns the same row.
-  create: async (name: string, normalizedName: string, category: string | undefined, createdBy: string): Promise<Item> =>
-    toItem(
-      await prisma.item.upsert({
-        where: { normalizedName },
-        create: { name, normalizedName, category, createdBy },
-        update: {},
-        select,
-      }),
-    ),
+  // INSERT ... ON CONFLICT (normalized_name) DO NOTHING, then read: a concurrent create of the same name returns the same
+  // row. (prisma.item.upsert with `update: {}` is not a native upsert and raced to P2002 -> 409, M3-05.)
+  create: async (name: string, normalizedName: string, category: string | undefined, createdBy: string): Promise<Item> => {
+    await prisma.item.createMany({ data: [{ name, normalizedName, category, createdBy }], skipDuplicates: true });
+    return toItem(await prisma.item.findUniqueOrThrow({ where: { normalizedName }, select }));
+  },
 
   addAlias: (itemId: string, aliasNormalized: string) =>
     prisma.itemAlias.createMany({ data: [{ itemId, aliasNormalized }], skipDuplicates: true }),

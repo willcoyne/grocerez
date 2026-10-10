@@ -238,7 +238,7 @@ describe("scanned products (06x08)", () => {
     expect(row(await getList(), it_.oreos)).toMatchObject({ checked: false, scannedProductId: null });
   });
 
-  it("a scanned row is flagged by the product's allergens ∪ may_contain; un-checking goes back to the catalog item", async () => {
+  it("a scanned row is flagged by the catalog allergens ∪ the product's allergens ∪ may_contain; un-checking goes back to the catalog item", async () => {
     const list = await generate();
     const tostitos = row(list, it_.tostitos);
     expect(tostitos.allergenFlags).toEqual([]);
@@ -246,11 +246,12 @@ describe("scanned products (06x08)", () => {
     const flagged = await check(u2, tostitos.id, { checked: true, scannedProductId: withMilk.id });
     expect(flagged.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u3.id, "milk"]]);
 
-    // Oreos (catalog: wheat, soy, milk) scanned as a product that declares only "may contain peanuts".
+    // Oreos (catalog: wheat, soy, milk) scanned as a product that declares only "may contain peanuts": the catalog's
+    // milk flag stays (catalog ∪ product, DECISIONS "M3 scan and check-off", M3-10).
     const oreos = row(list, it_.oreos);
     const mayPeanuts = await mkProduct("Oreo Thins", { mayContain: ["peanuts"] });
     const o = await check(u1, oreos.id, { checked: true, scannedProductId: mayPeanuts.id });
-    expect(o.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u4.id, "peanuts"]]);
+    expect(o.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u4.id, "peanuts"], [u3.id, "milk"]]);
 
     const back = await check(u1, oreos.id, { checked: false });
     expect(back.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u3.id, "milk"]]);

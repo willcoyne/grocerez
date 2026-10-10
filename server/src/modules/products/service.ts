@@ -4,13 +4,13 @@ import { AppError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { presignGet, putObject } from "../../lib/s3.js";
 import * as items from "../items/service.js";
-import type { ProductData } from "./common.js";
+import { CACHE_MS, normGtin, stripControl, type ProductData } from "./common.js";
 import { fetchProductImage } from "./image.js";
 import { lookupOpenFoodFacts } from "./openFoodFacts.js";
 import { productsRepo, type ProductRow } from "./repo.js";
 import { allowedSmartLabelUrl, fetchSmartLabelPage, parseSmartLabel } from "./smartlabel.js";
 
-export const CACHE_MS = 30 * 24 * 60 * 60 * 1000;
+export { CACHE_MS };
 const RAW_HTML_CHARS = 100_000; // enough of the page to debug a parser miss without storing 2 MB per row
 
 type Category = (typeof CATEGORIES)[number];
@@ -24,7 +24,7 @@ export async function scan(body: ScanProductBody, userId: string): Promise<Produ
     return cached(await productsRepo.byUrl(key), () => fromSmartLabel(key), key, userId);
   }
   const gtin = body.gtin!;
-  return cached(await productsRepo.byGtin(gtin), () => fromOpenFoodFacts(gtin), null, userId);
+  return cached(await productsRepo.byGtin(normGtin(gtin)), () => fromOpenFoodFacts(gtin), null, userId);
 }
 
 /** Serves a row younger than 30 days; otherwise refetches. If the refetch fails upstream, a stale row beats an error. */
@@ -52,12 +52,17 @@ async function fromSmartLabel(url: string): Promise<Fetched> {
 async function fromOpenFoodFacts(gtin: string): Promise<Fetched> {
   const off = await lookupOpenFoodFacts(gtin);
   if (!off) throw notFound();
+  // Keep OFF's code only if it is the same barcode we asked for (it may report a UPC-A as EAN-13).
+  if (!off.product.gtin || normGtin(off.product.gtin) !== normGtin(gtin)) off.product.gtin = gtin;
   return { data: off.product, raw: off.raw };
 }
 
 const notFound = () => new AppError(404, "PRODUCT_NOT_FOUND", "No product data found for this code");
 
-async function save({ data, raw }: Fetched, url: string | null, userId: string): Promise<ProductRow> {
+async function save(fetched: Fetched, url: string | null, userId: string): Promise<ProductRow> {
+  // Upstream text is crowd-edited / page-controlled: no NULs or control characters reach Postgres.
+  const { data, raw } = stripControl(fetched);
+  if (data.gtin) data.gtin = normGtin(data.gtin);
   const existing = (data.gtin && (await productsRepo.byGtin(data.gtin))) || (url && (await productsRepo.byUrl(url))) || null;
   const itemId = existing?.itemId ?? (await linkItem(data, userId));
   let row = await productsRepo.save(data, url, itemId, raw);

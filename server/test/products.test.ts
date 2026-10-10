@@ -252,6 +252,29 @@ describe("POST /api/products/scan: SmartLabel QR", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("a stale QR row whose page now names an already-cached GTIN is folded into the GTIN row; cabinet links follow", async () => {
+    const gtin = newGtin();
+    const qrUrl = `https://smartlabel.org/${randomUUID()}`;
+    gtins.push(gtin);
+    urls.push(qrUrl);
+    const label = (body: string) => html(`<html><body><h1>Foldos ${tag()}</h1><p>Calories 90</p>${body}</body></html>`);
+    routes[qrUrl] = label("");
+    const urlRow = (await scan({ qrUrl })).body;
+    routes[offUrl(gtin)] = json(offProduct(gtin, `Foldos ${tag()}`, { image_front_url: null }));
+    const gtinRow = (await scan({ gtin })).body;
+    const owner = await makeUser();
+    const g = (await request(app).post("/api/groups").set(owner.auth).send({ name: "Fold" }).expect(201)).body;
+    const cab = await prisma.cabinetItem.create({ data: { groupId: g.id, itemId: urlRow.itemId, productId: urlRow.id, addedBy: owner.id } });
+
+    await prisma.product.update({ where: { id: urlRow.id }, data: { fetchedAt: new Date(Date.now() - CACHE_MS - 60_000) } });
+    routes[qrUrl] = label(`<p>GTIN: ${gtin}</p>`);
+    const merged = (await scan({ qrUrl })).body;
+    expect(merged).toMatchObject({ id: gtinRow.id, gtin, smartlabelUrl: qrUrl, allergens: ["milk"] }); // fresh row kept its allergens
+    expect(await prisma.product.findUnique({ where: { id: urlRow.id } })).toBeNull();
+    expect((await prisma.cabinetItem.findUniqueOrThrow({ where: { id: cab.id } })).productId).toBe(gtinRow.id);
+    await prisma.group.delete({ where: { id: g.id } }); // cabinet row would block the item cleanup in afterAll
+  });
+
   it("refuses a redirect to a host outside the allowlist (SSRF)", async () => {
     const qrUrl = `https://smartlabel.org/${randomUUID()}`;
     routes[qrUrl] = redirect("http://169.254.169.254/latest/meta-data/");

@@ -65,6 +65,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
   follows the plan, so the gap is in the plan. Done-when for 06 and GAPS #12 (allergen flagging).
 - **Fix:** use `product.allergens ∪ product.may_contain ∪ item.default_allergens`. At minimum, fall back to the catalog
   when the product has no allergen data.
+- **Status:** Fixed. `generate()` flags a scanned row by catalog `default_allergens` ∪ product `allergens` ∪ `may_contain` (deviation from 06 1.3, see DECISIONS).
 
 ### M3-01 (Medium): a SmartLabel scan overwrites a fresh barcode cache row
 - **Repro:** `scan.break.test.ts` › `[DEFECT M3-01]`. (1) `{gtin:G}` returns OFF data with `allergens:["peanuts"]`. (2) Any user
@@ -75,6 +76,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Plan:** backend/08 steps 2 and 7, GAPS #10 (global cache).
 - **Fix:** when a fresh row already exists for the parsed GTIN, merge into it instead of overwriting. Never shrink `allergens`/`may_contain`
   (take the union) and keep the existing source's fields unless the new data is strictly richer.
+- **Status:** Fixed. `productsRepo.save` only enriches a fresh (<30 days) row: fills empty fields, unions `allergens`/`may_contain`, keeps source.
 
 ### M3-02 (Medium): refreshing a QR deletes the old product row
 - **Repro:** `scan.break.test.ts` › `[DEFECT M3-02]`. Scan QR `U` (page has no GTIN), which creates product P1. Another household's
@@ -85,6 +87,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Plan:** backend/08 step 7 ("Upsert the product"). backend/09 matching uses `products.brand + name`.
 - **Fix:** update the existing URL row in place (set its `gtin`). If a separate GTIN row also exists, merge by re-pointing
   `cabinet_items`/`shopping_list_items` to the survivor before deleting the other row.
+- **Status:** Fixed. The URL row is updated in place; if a separate GTIN row exists, cabinet/list references are re-pointed to it before the URL row is deleted.
 
 ### M3-04 (Medium): NUL in Open Food Facts data → 500
 - **Repro:** `scan.break.test.ts` › `[DEFECT M3-04]`. OFF returns `product_name`, `brands` or `ingredients_text` containing `\u0000`
@@ -94,6 +97,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Plan:** README error contract (no 500s for bad input). The M1 fix B-04 handled this only for request bodies.
 - **Fix:** strip C0 control characters in `mapOffProduct`/`parseSmartLabel`, and remove `\u0000` from `raw` before saving
   (for example `JSON.parse(JSON.stringify(raw).replaceAll("\\u0000", ""))`).
+- **Status:** Fixed. `stripControl` removes C0 controls (except tab/LF/CR) and DEL from product data and `raw` before any DB write (OFF and SmartLabel).
 
 ### M3-19 (Medium): label parsing blocks the event loop
 - **Repro:** `scan.break.test.ts` › `[DEFECT M3-19]`. `parseSmartLabel("<body>" + "<div>".repeat(20000))` (120 KB) takes about 5 s.
@@ -104,6 +108,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Plan:** backend/08 step 3 (5-second budget). B-13 fixed only the stack overflow.
 - **Fix:** reject pages whose nesting depth or element count is over a small limit before running `cheerio.load`, or lower
   the HTML cap to about 500 KB. Alternatively, parse in a worker thread with a time limit.
+- **Status:** Fixed. `tooDeep()` (one linear pass, stack-based) rejects pages nesting deeper than 128 before `cheerio.load`. Worst-case 2 MB page parses in ~0.3-0.5 s.
 
 ### M3-07 (Medium): one bad openFDA row stops all recall imports
 - **Repro:** `alerts.break.test.ts` › two `[DEFECT M3-07]` tests. Rows `[valid, {report_date:"20261399"}]` or `[valid,
@@ -197,12 +202,14 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Expected:** the second scan is served from the cache (08 Done-when). This affects most US barcodes (UPC-A).
 - **Fix:** normalise GTINs to GTIN-14 (or EAN-13), zero-padded, both when looking up and when saving, and only accept OFF's
   `code` if it normalises to the requested value.
+- **Status:** Fixed. `normGtin` (UPC-A / GTIN-14 with leading 0 -> EAN-13; GTIN-8 unchanged) on lookup and save; OFF `code` kept only if it normalizes to the request.
 
 ### M3-05 (Low): concurrent scans → 409
 - **Repro:** `scan.break.test.ts` › `[DEFECT M3-05]`. Five simultaneous first scans of one new GTIN return 409 CONFLICT for 3–4 of them in most rounds.
   The root cause is `itemsRepo.create`: `prisma.item.upsert({update: {}})` is not a native `ON CONFLICT` upsert, so concurrent creates of the same
   `normalized_name` hit P2002. The comment there claims the opposite. `POST /items` has the same race.
 - **Fix:** use `INSERT … ON CONFLICT (normalized_name) DO NOTHING` followed by a select, or catch P2002 and re-read.
+- **Status:** Fixed. `itemsRepo.create` is `createMany({skipDuplicates})` (INSERT ... ON CONFLICT DO NOTHING) + read; covers scan and `POST /items`.
 
 ### M3-06 (Low): upper-case `groupId` sends realtime events to an empty room
 - **Repro:** `alerts.break.test.ts` › `[DEFECT M3-06]`. A dismiss call through `/groups/<UPPER>/…` returns 204, and `emitGroup` is called with the
@@ -213,6 +220,7 @@ only the caller's cabinet. SSRF guards held on every vector tried.
 - **Repro:** `checkoff.break.test.ts` › `[DEFECT M3-11]`. Check off a `Moomilk` row with a product linked to `Snackfoo`. The call returns 200, and
   finish trip writes the peanut product into the cabinet's milk row (wrong brand and image, recall matching on the wrong product).
 - **Fix:** if `product.item_id` is set and differs from the row's `item_id`, return 409 (or move the check-off to the product's item).
+- **Status:** Fixed. Check-off with a product linked to another catalog item -> `400 PRODUCT_ITEM_MISMATCH`, row unchanged. Unlinked products are still accepted.
 
 ### M3-18 (Low): `photoKey` regex accepts keys that presign never issues
 - **Repro:** `uploads.break.test.ts` › `[DEFECT M3-18]`. `item-photo/<me>/<uuid>xjpg` and `item-photo/<me>/<36 dashes>/jpg` are accepted.

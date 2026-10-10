@@ -612,3 +612,33 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
   `import-recalls-<tag>`. Its recall descriptions now include the test's item tag, since item names carry it and the
   all-words gate requires it.
 - No API contract change.
+
+## Fix: M3 scan and check-off findings
+
+- **M3-10, deviation from backend/06 step 1.3:** a scanned list row is flagged by the catalog item's `default_allergens`
+  ∪ the product's `allergens` ∪ `may_contain`, not the product alone. Open Food Facts often has no allergen data, and
+  "no data" must not clear a flag. The cost is a possible extra flag (catalog says milk, this exact product has none).
+  For allergies, over-warning is the safe side. `shopping-list.test.ts` was updated to match: Oreos keep the milk flag.
+- **M3-11:** `PATCH /shopping-list/:id {scannedProductId}` with a product whose `item_id` is a different catalog item
+  returns `400 PRODUCT_ITEM_MISMATCH` and leaves the row unchanged. A product with no `item_id` is still accepted.
+- **M3-01/M3-02, product cache writes (`productsRepo.save`):** the row is found by GTIN first, then by URL. A row that
+  is still fresh (< 30 days) is only enriched: empty fields are filled, `allergens`/`may_contain` are unioned, and its
+  source is kept. A stale row is refreshed in place (id kept, so cabinet and list links survive). If the URL row and the
+  GTIN row are different rows, `cabinet_items.product_id` and `shopping_list_items.scanned_product_id` are re-pointed to
+  the GTIN row before the URL row is deleted. No migration was needed.
+- **M3-03, GTIN normalization:** lookups and stored `products.gtin` use one key. UPC-A (12), shorter codes, and GTIN-14
+  with a leading 0 become 13 digits. GTIN-8 and GTIN-14 with an indicator digit stay as they are. The Open Food Facts
+  request still uses the digits that were scanned. OFF's `code` is kept only if it normalizes to the same value.
+  Rows saved earlier under a 12-digit key aren't migrated; they are no longer hit and get refetched once.
+- **M3-04:** C0 control characters (except tab, LF, CR) and DEL are stripped from scanned product data and `raw` before
+  any write (`stripControl` in `products/common.ts`), for both OFF and SmartLabel.
+- **M3-05:** `itemsRepo.create` is `createMany({skipDuplicates})`, which is a native `INSERT ... ON CONFLICT DO NOTHING`,
+  followed by a read. Concurrent creates of one name (scan or `POST /items`) return the same row, so there is no 409.
+- **M3-19:** `parseSmartLabel` first runs `tooDeep()`, one linear pass with a tag stack (void and auto-closing tags
+  ignored, script/style bodies skipped). Pages that nest deeper than 128 elements are treated as "not a label page"
+  (404 or OFF fallback, as before), so `cheerio.load` never runs on them. Measured: a worst-case 2 MB page at depth 120
+  parses in about 0.4 s. The 20k nested-div page is rejected in under 1 ms.
+- **Frontend must update:** (1) `PATCH /groups/:groupId/shopping-list/:id` can return `400 PRODUCT_ITEM_MISMATCH` when
+  the scanned product belongs to another catalog item. Tell the user "that's not <item>" and don't check the row.
+  (2) `Product.gtin` from `POST /products/scan` can differ from the scanned digits: a 12-digit UPC-A comes back as the
+  13-digit EAN-13, with a leading 0. Compare barcodes after normalizing, or don't compare them at all.
