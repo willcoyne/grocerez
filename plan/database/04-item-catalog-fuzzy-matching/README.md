@@ -46,6 +46,6 @@ compares IDs, which is fast and predictable.
 
 ## Done when
 
-- [ ] Searching `"cherios"` suggests Cheerios; `"Cheerios!"` is an exact match
-- [ ] Confirming a suggestion creates an alias, and the next search is exact
-- [ ] Search runs under 20 ms on the seeded catalog (`EXPLAIN ANALYZE` uses the GIN index)
+- [x] Searching `"cherios"` suggests Cheerios; `"Cheerios!"` is an exact match
+- [x] Confirming a suggestion creates an alias, and the next search is exact
+- [x] Search runs under 20 ms on the seeded catalog (`EXPLAIN ANALYZE` uses the GIN index)

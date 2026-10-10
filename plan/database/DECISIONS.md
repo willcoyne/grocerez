@@ -58,3 +58,44 @@ Format: date · folder · what the plan said · what was done · why.
 - **Backend impact:** re-inviting must upsert with `ON CONFLICT (group_id, email) DO UPDATE SET status='pending', responded_at=NULL`;
   accept/decline/revoke must set `responded_at = now()` in the same update.
 
+### 2026-10-10 · 04 · Exact normalization rules
+- **Plan said:** lowercase → trim → collapse whitespace → strip punctuation except `&` → drop trailing plural `s`/`es` with a small exceptions list.
+- **Did (precise rules, see the SQL comment and `server/prisma/fixtures/normalize-cases.json`, 55 cases):**
+  accents are folded with a fixed `translate()` table (`jalapeño` → `jalapeno`); apostrophes are **deleted** (`Lay's` → `lays`);
+  every other non-`[a-z0-9& ]` character becomes a **space** (`half-and-half` → `half and half`); then collapse + trim.
+  Only the **last word** is de-pluralized: `es` is dropped only after `ch|sh|x|z|ss|o` (`tomatoes` → `tomato`, `glasses` → `glass`,
+  but `grapes` → `grape`, `cheeses` → `cheese`); otherwise one `s` is dropped if the word is longer than 3 and doesn't end in `ss`/`us`.
+  No `ies` → `y` rule (`raspberries` → `raspberrie`), because it breaks `cookies` → `cooky`; trigram search covers the gap.
+  The function is idempotent (checked for every fixture case).
+- **Why:** "drop es" on every word would turn `grapes` into `grap`; keeping the rule tiny makes the TS port trivial to keep identical.
+
+### 2026-10-10 · 04 · Constraints tie stored names to the SQL function
+- **Did:** `CHECK (items.normalized_name = normalize_item_name(name))` and `CHECK (item_aliases.alias_normalized = normalize_item_name(alias_normalized))`,
+  plus non-empty and ≤ 200 chars (levenshtein() errors past 255). `category` is CHECK-constrained to the 11 listed values,
+  `default_allergens` is `NOT NULL DEFAULT '{}'`, `shelf_life_days > 0` when set.
+- **Backend impact:** if `lib/normalize.ts` ever drifts from SQL, inserts fail loudly instead of creating duplicate items.
+  The backend may also skip TS normalization on insert and write `normalize_item_name(${name})` in a tagged `$queryRaw`.
+
+### 2026-10-10 · 04 · `search_items(q, max_results = 5)` SQL function
+- **Plan said:** "Matching query (wrapped by the backend's `GET /items/search`)".
+- **Did:** implemented the query as a `STABLE` SQL function returning
+  `(match, item_id, name, normalized_name, category, default_allergens text[], shelf_life_days, similarity, distance)`.
+  It normalizes `q` itself, checks exact name/alias first, then uses `%` (GIN-indexable, threshold pinned to 0.3 via the
+  function's `SET` clause) plus an explicit `similarity > 0.3`, takes the best hit per item across name and aliases, and labels
+  every row `suggested` or `none` from the best candidate. Zero rows = `none` with no candidates.
+  Backend call: ``prisma.$queryRaw`SELECT * FROM search_items(${q})` ``.
+- **Why:** one tested implementation of the matching rule; the backend can't accidentally build it with string concatenation.
+
+### 2026-10-10 · 04 · GIN indexes and the 20 ms check
+- **Did:** the two `gin_trgm_ops` indexes are declared in `schema.prisma` (`@@index(..., type: Gin)`) so Prisma doesn't see them as drift.
+- **Measured:** on the seeded 213-item catalog the planner correctly prefers a seq scan (3 pages); `search_items('cherios')` runs in ~1.3 ms.
+  With `enable_seqscan = off` the plan is `Bitmap Index Scan on items_name_trgm` / `item_aliases_trgm`. With 50,000 extra rows
+  (inserted, `VACUUM ANALYZE`d, then deleted) the planner chooses `Bitmap Index Scan on items_name_trgm` on its own
+  (0.04 ms) and `search_items` takes 0.9 ms.
+
+### 2026-10-10 · 04 · Catalog file and seed registration
+- **Did:** `server/prisma/seed/items.json` (213 items) is created here (04 step 6) and loaded by `prisma/seed.ts`, which upserts on
+  `normalized_name` using the SQL function. Prisma 7 reads the seed command from `prisma.config.ts` → `migrations.seed`
+  (the `package.json` `"prisma": {"seed": ...}` key from the plan is no longer used).
+- `npm run db:check:normalize` checks the SQL function against the fixture.
+

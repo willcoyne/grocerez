@@ -44,6 +44,7 @@ model User {
   groupsCreated  Group[]        @relation("GroupCreatedBy")
   memberships    GroupMember[]
   invitesSent    GroupInvite[]  @relation("InviteInvitedBy")
+  itemsCreated   Item[]
 
   @@map("users")
 }
@@ -132,4 +133,40 @@ model GroupInvite {
   @@unique([groupId, email])
   @@index([email, status])
   @@map("group_invites")
+}
+
+// ─── 04 Item catalog & fuzzy matching ──────────────────────────────────────────
+
+/// Global catalog of generic grocery items (shared by all groups).
+/// `normalized_name` must equal `normalize_item_name(name)` (CHECK enforced) and is GIN-trigram indexed.
+/// `category` is CHECK-constrained to: produce, dairy, meat, seafood, bakery, pantry, frozen, snacks, beverages, household, other.
+model Item {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  normalizedName   String     @unique @map("normalized_name")
+  category         String?
+  defaultAllergens Allergen[] @default([]) @map("default_allergens")
+  shelfLifeDays    Int?       @map("shelf_life_days")
+  /// NULL = seeded.
+  createdBy        String?    @map("created_by") @db.Uuid
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator User?       @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases ItemAlias[]
+
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
+  @@map("items")
+}
+
+/// Typed text a user confirmed as meaning `item_id`, already normalized (CHECK enforced). Next search is an exact match.
+model ItemAlias {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId          String @map("item_id") @db.Uuid
+  aliasNormalized String @unique @map("alias_normalized")
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([aliasNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "item_aliases_trgm")
+  @@map("item_aliases")
 }

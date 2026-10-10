@@ -1,0 +1,1502 @@
+[
+ {
+  "name": "Apples",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 28
+ },
+ {
+  "name": "Bananas",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Oranges",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Lemons",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Limes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Grapes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Strawberries",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 3
+ },
+ {
+  "name": "Blueberries",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Raspberries",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 3
+ },
+ {
+  "name": "Avocados",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Tomatoes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Potatoes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Sweet Potatoes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Onions",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Garlic",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Carrots",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Celery",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Broccoli",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Cauliflower",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Spinach",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Lettuce",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Romaine",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Cucumbers",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Bell Peppers",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Jalapeños",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Zucchini",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Mushrooms",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Green Beans",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Asparagus",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Corn on the Cob",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Cilantro",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Ginger",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Pineapple",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Watermelon",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Mangoes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Peaches",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Pears",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Kale",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Cabbage",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Green Onions",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Milk",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Almond Milk",
+  "category": "dairy",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Oat Milk",
+  "category": "dairy",
+  "default_allergens": [],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Eggs",
+  "category": "dairy",
+  "default_allergens": [
+   "eggs"
+  ],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Butter",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Cheddar Cheese",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 42
+ },
+ {
+  "name": "Mozzarella",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Parmesan",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Swiss Cheese",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 42
+ },
+ {
+  "name": "Cream Cheese",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Sour Cream",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Yogurt",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Greek Yogurt",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Heavy Cream",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Half and Half",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Cottage Cheese",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "String Cheese",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Coffee Creamer",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Chicken Breast",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Chicken Thighs",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Ground Beef",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Steak",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Pork Chops",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Bacon",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Sausage",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Ham",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Turkey Deli Meat",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Hot Dogs",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Ground Turkey",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Pepperoni",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Salmon",
+  "category": "seafood",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Tilapia",
+  "category": "seafood",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Shrimp",
+  "category": "seafood",
+  "default_allergens": [
+   "shellfish"
+  ],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Tuna Steak",
+  "category": "seafood",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Crab",
+  "category": "seafood",
+  "default_allergens": [
+   "shellfish"
+  ],
+  "shelf_life_days": 3
+ },
+ {
+  "name": "Bread",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Whole Wheat Bread",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Bagels",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Tortillas",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Hamburger Buns",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Hot Dog Buns",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "English Muffins",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Croissants",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 3
+ },
+ {
+  "name": "Muffins",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 4
+ },
+ {
+  "name": "Pita",
+  "category": "bakery",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Cheerios",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Honey Nut Cheerios",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Frosted Flakes",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Oatmeal",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Granola",
+  "category": "pantry",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Peanut Butter",
+  "category": "pantry",
+  "default_allergens": [
+   "peanuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Almond Butter",
+  "category": "pantry",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Jelly",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Honey",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Maple Syrup",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Pasta",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Spaghetti",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Macaroni and Cheese",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Rice",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Brown Rice",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Quinoa",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Flour",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Sugar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Brown Sugar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Salt",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 1825
+ },
+ {
+  "name": "Black Pepper",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 1095
+ },
+ {
+  "name": "Olive Oil",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Vegetable Oil",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Canola Oil",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Vinegar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Soy Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "soy",
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Ketchup",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Mustard",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Mayonnaise",
+  "category": "pantry",
+  "default_allergens": [
+   "eggs"
+  ],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Ranch Dressing",
+  "category": "pantry",
+  "default_allergens": [
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Salsa",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Pasta Sauce",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Tomato Sauce",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Canned Tomatoes",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Black Beans",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Chickpeas",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Canned Tuna",
+  "category": "pantry",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 1095
+ },
+ {
+  "name": "Chicken Broth",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Canned Soup",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Baking Soda",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Baking Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Vanilla Extract",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 1095
+ },
+ {
+  "name": "Cinnamon",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 1095
+ },
+ {
+  "name": "Ramen",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "soy"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Hummus",
+  "category": "pantry",
+  "default_allergens": [
+   "sesame"
+  ],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Tahini",
+  "category": "pantry",
+  "default_allergens": [
+   "sesame"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Coffee",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Tea",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 540
+ },
+ {
+  "name": "Hot Sauce",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Pancake Mix",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Couscous",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Lentils",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Bread Crumbs",
+  "category": "pantry",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Chocolate Chips",
+  "category": "pantry",
+  "default_allergens": [
+   "milk",
+   "soy"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Molasses",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Frozen Pizza",
+  "category": "frozen",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Ice Cream",
+  "category": "frozen",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Frozen Peas",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 240
+ },
+ {
+  "name": "Frozen Corn",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 240
+ },
+ {
+  "name": "Frozen Broccoli",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 240
+ },
+ {
+  "name": "Frozen Berries",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 240
+ },
+ {
+  "name": "Frozen Waffles",
+  "category": "frozen",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Chicken Nuggets",
+  "category": "frozen",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "French Fries",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 240
+ },
+ {
+  "name": "Frozen Burritos",
+  "category": "frozen",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Fish Sticks",
+  "category": "frozen",
+  "default_allergens": [
+   "fish",
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Ice",
+  "category": "frozen",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Tostitos",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Lay's",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Oreos",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "soy"
+  ],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Doritos",
+  "category": "snacks",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Pringles",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 120
+ },
+ {
+  "name": "Cheez-Its",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Goldfish Crackers",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Ritz Crackers",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "soy"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Pretzels",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Popcorn",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Tortilla Chips",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Potato Chips",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Trail Mix",
+  "category": "snacks",
+  "default_allergens": [
+   "peanuts",
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Almonds",
+  "category": "snacks",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Peanuts",
+  "category": "snacks",
+  "default_allergens": [
+   "peanuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Cashews",
+  "category": "snacks",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Granola Bars",
+  "category": "snacks",
+  "default_allergens": [
+   "tree_nuts",
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Chips Ahoy",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "soy"
+  ],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "M&M's",
+  "category": "snacks",
+  "default_allergens": [
+   "milk",
+   "soy",
+   "peanuts"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Reese's Peanut Butter Cups",
+  "category": "snacks",
+  "default_allergens": [
+   "milk",
+   "peanuts",
+   "soy"
+  ],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Snickers",
+  "category": "snacks",
+  "default_allergens": [
+   "milk",
+   "peanuts",
+   "soy",
+   "eggs"
+  ],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Fruit Snacks",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Rice Cakes",
+  "category": "snacks",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Beef Jerky",
+  "category": "snacks",
+  "default_allergens": [
+   "soy",
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Cookies",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten",
+   "milk",
+   "eggs"
+  ],
+  "shelf_life_days": 60
+ },
+ {
+  "name": "Graham Crackers",
+  "category": "snacks",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Water",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Sparkling Water",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Orange Juice",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Apple Juice",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Coca-Cola",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Diet Coke",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Sprite",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Dr Pepper",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Gatorade",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Lemonade",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Iced Tea",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Energy Drinks",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 270
+ },
+ {
+  "name": "Beer",
+  "category": "beverages",
+  "default_allergens": [
+   "wheat",
+   "gluten"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Wine",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 1095
+ },
+ {
+  "name": "Kombucha",
+  "category": "beverages",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Paper Towels",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Toilet Paper",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Dish Soap",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Laundry Detergent",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Trash Bags",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Aluminum Foil",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Plastic Wrap",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Zip-Top Bags",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Sponges",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Hand Soap",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Shampoo",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Toothpaste",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Napkins",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Dishwasher Pods",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "All-Purpose Cleaner",
+  "category": "household",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Dog Food",
+  "category": "other",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Cat Food",
+  "category": "other",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Baby Wipes",
+  "category": "other",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Batteries",
+  "category": "other",
+  "default_allergens": [],
+  "shelf_life_days": null
+ },
+ {
+  "name": "Birthday Candles",
+  "category": "other",
+  "default_allergens": [],
+  "shelf_life_days": null
+ }
+]

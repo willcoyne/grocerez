@@ -9,7 +9,8 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:check:normalize": "tsx prisma/checks/normalize-sql.ts"
   },
   "license": "ISC",
   "type": "module",
