@@ -14,6 +14,7 @@ import { itemsRouter } from "./modules/items/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
 import { productsRouter } from "./modules/products/router.js";
 import { healthRouter } from "./modules/health/router.js";
+import { alertsRouter } from "./modules/recalls/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
 import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
@@ -60,6 +61,7 @@ export function createApp() {
   group.use(preferencesRouter);
   group.use(cabinetRouter);
   group.use(shoppingListRouter);
+  group.use(alertsRouter);
   api.use("/groups/:groupId", requireGroupMember, group);
 
   app.use("/api", api);

@@ -162,3 +162,26 @@ Format: date · folder · what the plan said · what was done · why.
   runs (longest, rightmost first), then the full name's "suggested" match; otherwise a new item is created with the category guessed from
   `categories_tags`. Open Food Facts `en:corn` and other non-major allergens are ignored; OFF `en:nuts` → `tree_nuts`.
 - The allergen keyword table (`src/lib/allergens.ts`) excludes phrases such as "peanut butter", "coconut milk", "nutmeg", "rice flour".
+
+### 2026-10-10 · 09 · Recall matching score
+- **Plan said:** `similarity()` of `product_description` vs item name / brand + product name, keep `≥ 0.35`.
+- **Did:** `strict_word_similarity(name, lower(description))` (best of item name and `brand + ' ' + product name`), keep **`≥ 0.6`**, plus the brand rule
+  (when the cabinet product has a brand, it must appear in the description **or in the recalling firm**).
+- **Why:** plain `similarity()` compares a 1–2 word name with a 200+ character description, so real matches score ~0.1. `word_similarity ≥ 0.35`
+  (what the seed uses for its demo score) was tried against the live openFDA feed (9 real recalls, 2026-09-30..10-10) and produced 31 false
+  matches (Milk ↔ "Powdered Sugar", Apples ↔ "Pecorino Toscano"…). `strict_word_similarity ≥ 0.6` produced none of those and keeps the true
+  ones (Cheerios 0.70, Tostitos 0.78, Spinach 1.0). Still a "possible match, check your package" suggestion, never automatic.
+- Matching runs over recalls **imported** (`created_at`) in the last 30 days, after each import and for a single cabinet item whenever it is
+  added (`POST /cabinet`) or bought (finish trip). Existing matches (including dismissed ones) are never re-created.
+
+### 2026-10-10 · 09 · Import job and alerts
+- `jobs/importRecalls.ts` schedules `0 6 * * *` (server time) when `ENABLE_JOBS=true` (default; tests set false). `npm run job:recalls` runs it once.
+  `since` = the latest stored openFDA `report_date` (first run: 30 days back); pages of 100 with `skip`; openFDA's `404 NOT_FOUND` = nothing new.
+  `OPENFDA_API_KEY` is optional. Upsert by `recall_number`; running twice creates no duplicates (tested).
+- `GET /alerts` → `{expiring: CabinetItem[], recalls: RecallAlert[]}`. `RecallAlert = {id (the match id), score, createdAt,
+  label: "possible match, check your package", cabinetItem:{id,itemId,name,brand}, recall:{id, source, externalId, productDescription, reason,
+  classification, firm, distribution, reportDate, status, url}}`. openFDA has no per-recall web page, so `url` is the openFDA API query for that
+  recall number (`null` for the seeded demo recall).
+- Dismiss is idempotent (204 again); a match from another group → 404. New matches and dismissals emit `cabinet:changed` (by `null` for the job).
+- Fixture `server/test/fixtures/openfda/enforcement-page.json` holds two real openFDA records plus one **synthetic** record (`SYNTH-0001`, marked in its text).
+- Expiration stretch (Claude vision for printed dates) was not built.
