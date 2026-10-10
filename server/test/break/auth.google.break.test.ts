@@ -63,11 +63,13 @@ describe("Google ID token verification (real library, stubbed certs)", () => {
       return `${h}.${p}.${sig}`;
     }],
   ])("%s -> 401 UNAUTHENTICATED, no user row", async (_name, make) => {
-    const before = await prisma.user.count();
+    // Count only this file's users: other test files create users in parallel on the shared DB.
+    const mine = () => prisma.user.count({ where: { OR: [{ googleSub: { startsWith: "break-g-" } }, { googleSub: "x" }] } });
+    const before = await mine();
     const res = await post(make());
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: { code: "UNAUTHENTICATED", message: expect.any(String) } });
-    expect(await prisma.user.count()).toBe(before);
+    expect(await mine()).toBe(before);
   });
 });
 

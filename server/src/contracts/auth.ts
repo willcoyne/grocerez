@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { visibleName } from "./common.js";
 
 export const User = z.object({
   id: z.uuid(),
@@ -17,7 +18,7 @@ export type AuthResponse = z.infer<typeof AuthResponse>;
 
 export const UpdateMeBody = z
   .object({
-    displayName: z.string().trim().min(1).max(80).optional(),
+    displayName: visibleName(80).optional(),
     // US ZIP (5 digits, optional +4). null clears it.
     zipCode: z.string().trim().regex(/^\d{5}(-\d{4})?$/, "must be a US ZIP code").nullable().optional(),
     // Key from POST /uploads/presign; the service checks it is under avatar/<own userId>/. null clears it.

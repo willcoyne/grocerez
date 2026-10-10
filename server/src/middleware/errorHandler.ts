@@ -19,6 +19,10 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
     return send(409, "CONFLICT", "A record with these values already exists");
   }
+  // Row deleted between the auth/membership check and the write (e.g. concurrent DELETE /me).
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+    return send(404, "NOT_FOUND", "Record not found");
+  }
   // Client errors raised by express.json (malformed JSON, body too large).
   if (err?.expose && typeof err.status === "number" && err.status < 500) {
     if (err.type === "entity.parse.failed") return send(400, "VALIDATION_ERROR", "Malformed JSON body");

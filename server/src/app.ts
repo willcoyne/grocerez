@@ -21,7 +21,19 @@ export const app = express();
 app.use(helmet());
 app.use(cors({ origin: EXPO_DEV_ORIGINS }));
 app.use(express.json({ limit: "1mb" }));
-app.use(pinoHttp({ logger }));
+// Query strings are never logged: Socket.IO-style clients send `?token=`, and searches can be personal (GAPS #26).
+app.use(
+  pinoHttp({
+    logger,
+    serializers: {
+      req: (req) => {
+        req.url = String(req.url ?? "").split("?")[0];
+        delete req.query;
+        return req;
+      },
+    },
+  }),
+);
 
 // Public routes.
 app.use("/api", healthRouter);

@@ -3,7 +3,7 @@ import { BlockList, isIP } from "node:net";
 import * as cheerio from "cheerio";
 import { AppError } from "../../lib/errors.js";
 import {
-  FETCH_TIMEOUT_MS, USER_AGENT, mapAllergens, readCapped, upstreamError, type ProductData,
+  FETCH_TIMEOUT_MS, USER_AGENT, mapAllergens, readCapped, safeImageUrl, upstreamError, type ProductData,
 } from "./common.js";
 
 // ---------- SSRF guard ----------
@@ -19,8 +19,10 @@ for (const [net, prefix] of [
   ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3],
 ] as const) blocked.addSubnet(net, prefix, "ipv4");
 for (const [net, prefix] of [
-  // IPv4-mapped (::ffff:a.b.c.d) addresses are matched against the IPv4 rules by BlockList itself.
-  ["::", 127], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
+  // IPv4-mapped (::ffff:a.b.c.d) addresses are matched against the IPv4 rules by BlockList itself. The other forms
+  // that embed an IPv4 (IPv4-compatible ::a.b.c.d, IPv4-translated ::ffff:0:a.b.c.d, NAT64, 6to4) are blocked whole.
+  ["::", 96], ["::ffff:0:0:0", 96], ["64:ff9b::", 96], ["64:ff9b:1::", 48], ["2002::", 16],
+  ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
 ] as const) blocked.addSubnet(net, prefix, "ipv6");
 
 export function isPrivateAddress(address: string): boolean {
@@ -132,14 +134,42 @@ function toUnit(value: number, unit: string, key: string): number {
   return value;
 }
 
-/** Parses the label page into lines of visible text, one per block element. */
+const BLOCKS = new Set(["p", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "div", "dt", "dd", "section", "td", "th"]);
+const SKIP = new Set(["script", "style", "noscript", "template"]);
+type DomNode = { type: string; name?: string; data?: string; children?: DomNode[] };
+
+/**
+ * Parses the label page into lines of visible text, one per block element. Iterative walk: cheerio's recursive
+ * .text() overflows the stack on a few thousand nested elements (a 25 KB page).
+ */
 function pageLines($: cheerio.CheerioAPI): string[] {
-  $("script, style, noscript, template").remove();
-  $("br").replaceWith("\n");
-  $("p, li, tr, h1, h2, h3, h4, h5, h6, div, dt, dd, section, td, th").each((_, el) => {
-    $(el).append("\n");
+  const parts: string[] = [];
+  const stack: (DomNode | "\n")[] = [$("body")[0] as unknown as DomNode];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (node === "\n") parts.push("\n");
+    else if (node.type === "text") parts.push(node.data ?? "");
+    else if (node.name === "br") parts.push("\n");
+    else if (node.children && !SKIP.has(node.name ?? "")) {
+      if (BLOCKS.has(node.name ?? "")) stack.push("\n");
+      for (let i = node.children.length - 1; i >= 0; i--) stack.push(node.children[i]);
+    }
+  }
+  return parts.join("").split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+/**
+ * Every allergen statement on the page ("Contains: Milk, Wheat."), including one at the end of the ingredients
+ * paragraph. "Contains 2% or less of ..." / "contains less than ..." are ingredient sub-lists, not statements.
+ */
+function containsStatements(lines: string[]): string | null {
+  const parts: string[] = [];
+  lines.forEach((line, i) => {
+    for (const m of line.matchAll(/\bcontains\b(?!\s*\d|\s+less\b)\s*:?\s*([^.]*)/gi)) {
+      parts.push(m[1].trim() || lines[i + 1] || "");
+    }
   });
-  return $("body").text().split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return parts.join(", ") || null;
 }
 
 /** Text after "Label:" on the first matching line; if the line is only the label, the next line. */
@@ -199,10 +229,14 @@ export function parseSmartLabel(html: string): SmartLabelParse {
   const brandLd = typeof ld?.brand === "string" ? ld.brand : ld?.brand?.name;
   const brand = (brandLd && String(brandLd).trim()) || afterLabel(lines, /brand:/);
 
-  const servingSize = (ld?.nutrition?.servingSize as string | undefined) ?? afterLabel(lines, /serving size/);
-  const calText = ld?.nutrition?.calories ?? text.match(/\bcalories\b\s*:?\s*(\d+(?:\.\d+)?)/i)?.[1];
+  // JSON-LD is page-controlled: accept only the expected types, and non-negative numbers.
+  const ldServing = ld?.nutrition?.servingSize;
+  const servingSize = (typeof ldServing === "string" ? ldServing.trim() : null) || afterLabel(lines, /serving size/);
+  const ldCal = ld?.nutrition?.calories;
+  const calText = (typeof ldCal === "string" || typeof ldCal === "number" ? ldCal : null) ??
+    text.match(/\bcalories\b\s*:?\s*(\d+(?:\.\d+)?)/i)?.[1];
   const calNum = calText != null ? parseFloat(String(calText)) : NaN;
-  const caloriesPerServing = Number.isFinite(calNum) ? calNum : null;
+  const caloriesPerServing = Number.isFinite(calNum) && calNum >= 0 ? calNum : null;
 
   const nutrition: Record<string, number> = {};
   for (const [key, label] of NUTRIENTS) {
@@ -214,7 +248,7 @@ export function parseSmartLabel(html: string): SmartLabelParse {
   if (added) nutrition.added_sugar_g = parseFloat(added[1]);
 
   const ingredients = afterLabel(lines, /ingredients/);
-  const contains = afterLabel(lines, /contains/);
+  const contains = containsStatements(lines);
   const mayContainText = afterLabel(lines, /(?:may contain|manufactured in a facility (?:that|which) (?:also )?processes)/);
 
   if (!name || (caloriesPerServing == null && !ingredients)) return { product: null, gtin };
@@ -233,7 +267,7 @@ export function parseSmartLabel(html: string): SmartLabelParse {
       allergens: mapAllergens(contains),
       mayContain: mapAllergens(mayContainText),
       healthScore: null,
-      imageUrl: (typeof ld?.image === "string" ? ld.image : ogImage) ?? null,
+      imageUrl: safeImageUrl(typeof ld?.image === "string" ? ld.image : ogImage),
       categoriesTags: [],
     },
   };

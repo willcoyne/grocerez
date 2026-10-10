@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { visibleName } from "./common.js";
 
 export const GroupRole = z.enum(["owner", "member"]);
 export const InviteStatus = z.enum(["pending", "accepted", "declined", "revoked"]);
@@ -39,7 +40,7 @@ export const MyInvite = Invite.extend({
 });
 export type MyInvite = z.infer<typeof MyInvite>;
 
-export const GroupNameBody = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+export const GroupNameBody = z.object({ name: visibleName(80) }).strict();
 export const CreateInviteBody = z
   .object({ email: z.string().trim().pipe(z.email()).transform((e) => e.toLowerCase()) })
   .strict();

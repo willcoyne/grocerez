@@ -227,3 +227,39 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
   their personal `user:<id>` room so their group list refreshes. `invites:changed` has an empty payload `{}`.
 - **Member objects go through `toUser` in `users/service.ts`** (the single DB-row to public-User mapping that backend/11 extends with presigned avatar URLs), then are narrowed to `{id, displayName, email, avatarUrl, role}`.
 - **Skipped:** redis adapter (07 step 7, single instance). The polling fallback (07 step 6) needs no API work.
+
+## M1 break fixes (test-reports/backend.md)
+
+- **Control characters (B-04):** `validate` rejects any string in the parsed body, query or params that has a C0
+  control character other than tab/LF/CR (or DEL) with `400 VALIDATION_ERROR` "Text must not contain control
+  characters". This covers every current and future text field without touching each contract.
+- **Visible names (B-09):** `visibleName(max)` in `contracts/common.ts` (trim, 1..max, must have a character outside
+  `\p{Cf}`/whitespace). Used for `PATCH /me displayName` and group names. Format characters are only rejected when
+  nothing else is there, so emoji ZWJ sequences still work. A Google `name` with no visible characters falls back to
+  the email local part on first login.
+- **P2025 (B-05):** `errorHandler` maps Prisma "record not found" to `404 NOT_FOUND` (a row deleted between the auth
+  check and the write, e.g. concurrent `DELETE /me`).
+- **Google email collision (B-08):** Google has just verified the address for this `sub`, so another row still holding
+  it is stale. In the login transaction its email is parked at `stale+<userId>@invalid`, then the upsert runs. The stale
+  account keeps its id, groups and data, and gets its real email back if its owner signs in again. Pending invites
+  keyed by email now follow the current verified owner.
+- **`/dev/login-as` (B-07):** only users whose `google_sub` starts with `seed-` (database/10). Others get
+  `404 NOT_FOUND`. The `DEMO_KEY` header from backend/12 is left for 12 (the route is still not mounted in production).
+- **Access log (B-10):** the pino-http `req` serializer drops `query` and strips the query string from `url`, so
+  `?token=` (Socket.IO handshakes) and search text never reach the logs.
+- **S3 presign (B-16):** `S3Client` uses `requestChecksumCalculation` / `responseChecksumValidation: "WHEN_REQUIRED"`, so
+  presigned PUT URLs carry no CRC32 of an empty body. Still worth one real PUT once AWS keys exist.
+- **SmartLabel parser:**
+  - B-02: allergens come from every `Contains[:] ...` statement on the page, including one at the end of the
+    ingredients paragraph, cut at the next period. "Contains 2% or less of" / "contains less than" are skipped.
+  - B-13: visible text is extracted with an iterative DOM walk (cheerio's recursive `.text()` overflowed the stack at
+    about 5,000 nested elements).
+  - B-12: JSON-LD `servingSize` must be a string and `calories` a string or number; calories must be finite and >= 0.
+    Open Food Facts numbers must also be >= 0.
+  - B-06: `safeImageUrl` in `products/common.ts` keeps only `https:` image URLs with a hostname (no IP literal,
+    credentials or port), for both SmartLabel and Open Food Facts. The backend/11 copy-to-S3 step must still fetch
+    through the DNS/private-IP guard, manual redirects, a size cap and an image host allowlist.
+  - B-11: the IPv6 blocklist also covers `::/96` (IPv4-compatible), `::ffff:0:0:0/96` (IPv4-translated),
+    `64:ff9b:1::/48` (local NAT64) and `2002::/16` (6to4).
+- **Deferred:** B-01, B-03, B-14 (allergen keyword tables and recipe diet checks) wait for the allergen consolidation
+  happening on `main`.
