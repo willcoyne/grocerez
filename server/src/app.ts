@@ -7,6 +7,7 @@ import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { healthRouter } from "./modules/health/router.js";
 import { authRouter, devRouter } from "./modules/auth/router.js";
 import { usersRouter } from "./modules/users/router.js";
+import { uploadsRouter } from "./modules/uploads/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { config } from "./config.js";
 
@@ -28,6 +29,7 @@ if (config.NODE_ENV !== "production") app.use("/api", devRouter);
 // Everything below requires a valid app JWT (unknown /api paths included, so routes can't be probed).
 app.use("/api", requireAuth);
 app.use("/api", usersRouter);
+app.use("/api", uploadsRouter);
 
 app.use(notFound);
 app.use(errorHandler);

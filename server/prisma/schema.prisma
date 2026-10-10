@@ -32,6 +32,7 @@ model User {
   email       String         @unique // lower-cased by the app
   displayName String         @map("display_name")
   avatarUrl   String?        @map("avatar_url")
+  avatarKey   String?        @map("avatar_s3_key") // backend/11; presigned into the API's avatarUrl
   zipCode     String?        @map("zip_code")
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz

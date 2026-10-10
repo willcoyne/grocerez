@@ -20,6 +20,8 @@ export const UpdateMeBody = z
     displayName: z.string().trim().min(1).max(80).optional(),
     // US ZIP (5 digits, optional +4). null clears it.
     zipCode: z.string().trim().regex(/^\d{5}(-\d{4})?$/, "must be a US ZIP code").nullable().optional(),
+    // Key from POST /uploads/presign; the service checks it is under avatar/<own userId>/. null clears it.
+    avatarKey: z.string().max(200).nullable().optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof UpdateMeBody>;
