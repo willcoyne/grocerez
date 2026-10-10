@@ -41,12 +41,14 @@ model User {
 
   allergens     UserAllergen[]
   diets         UserDiet[]
-  groupsCreated Group[]        @relation("GroupCreatedBy")
+  groupsCreated Group[]            @relation("GroupCreatedBy")
   memberships   GroupMember[]
-  invitesSent   GroupInvite[]  @relation("InviteInvitedBy")
+  invitesSent   GroupInvite[]      @relation("InviteInvitedBy")
   itemsCreated  Item[]
   preferences   Preference[]
   cabinetItems  CabinetItem[]
+  listChecked   ShoppingListItem[] @relation("ListCheckedBy")
+  listAdded     ShoppingListItem[] @relation("ListAddedBy")
 
   @@map("users")
 }
@@ -96,11 +98,12 @@ model Group {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  creator      User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  creator      User?              @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   members      GroupMember[]
   invites      GroupInvite[]
   preferences  Preference[]
   cabinetItems CabinetItem[]
+  listItems    ShoppingListItem[]
 
   @@map("groups")
 }
@@ -156,10 +159,11 @@ model Item {
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  creator      User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  creator      User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   aliases      ItemAlias[]
   preferences  Preference[]
   cabinetItems CabinetItem[]
+  listItems    ShoppingListItem[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -257,4 +261,46 @@ model CabinetItem {
   @@unique([groupId, itemId])
   @@index([groupId, expiresAt])
   @@map("cabinet_items")
+}
+
+// ─── 07 Shopping list ──────────────────────────────────────────────────────────
+
+enum ListReason {
+  /// Added by generation (preferences − cabinet).
+  preference
+  /// Someone tapped "we're out of X" / "add to list".
+  manual
+
+  @@map("list_reason")
+}
+
+/// The group's one active list (the rows for a group ARE the list). Maintained by generate_shopping_list(group_id).
+/// `checked_at` is set iff `checked`; unchecking clears `checked_by`/`checked_at` (trigger + CHECK).
+/// `allergen_flags` is a JSON array of {userId, displayName, allergen}.
+model ShoppingListItem {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String     @map("group_id") @db.Uuid
+  itemId           String     @map("item_id") @db.Uuid
+  reason           ListReason
+  /// Member IDs from the preference union.
+  wantedBy         String[]   @default([]) @map("wanted_by") @db.Uuid
+  quantityText     String?    @map("quantity_text")
+  allergenFlags    Json       @default("[]") @map("allergen_flags")
+  checked          Boolean    @default(false)
+  checkedBy        String?    @map("checked_by") @db.Uuid
+  checkedAt        DateTime?  @map("checked_at") @db.Timestamptz(6)
+  /// SmartLabel scanned while checking off. FK to products is added in 08.
+  scannedProductId String?    @map("scanned_product_id") @db.Uuid
+  addedBy          String?    @map("added_by") @db.Uuid
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item    Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  checker User? @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
+  adder   User? @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, itemId])
+  @@index([groupId, checked])
+  @@map("shopping_list_items")
 }

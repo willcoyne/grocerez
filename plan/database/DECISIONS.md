@@ -121,3 +121,25 @@ Format: date · folder · what the plan said · what was done · why.
 - **"Expiring in the next 3 days" query** (uses `cabinet_items_group_id_expires_at_idx`, verified with 200k rows):
   `SELECT ... FROM cabinet_items WHERE group_id = $1 AND expires_at <= current_date + 3 ORDER BY expires_at` (includes already-expired rows).
 
+### 2026-10-10 · 07 · Check-off stamping is enforced in the database
+- **Did:** CHECKs `checked = (checked_at IS NOT NULL)` and `checked OR checked_by IS NULL`, plus a `BEFORE INSERT OR UPDATE`
+  trigger: checking a row stamps `checked_at = now()` (if not given); unchecking clears `checked_by` and `checked_at`.
+  The backend only sets `checked` and `checked_by` (`PATCH .../shopping-list/:id`). `allergen_flags` must be a JSON array (CHECK).
+- `scanned_product_id` gets its FK to `products` (`ON DELETE SET NULL`) in migration `products` (08). `checked_by`/`added_by` are `ON DELETE SET NULL`.
+
+### 2026-10-10 · 07 · `generate_shopping_list(group_id)` SQL function (offered to the backend)
+- **Plan said:** the backend's `service.generate(groupId)` (backend/06) computes and upserts the list; the database stores it.
+- **Did:** to prove "running generation twice changes nothing", the generation is implemented as SQL functions:
+  `needed_items(group)` (union − in-stock cabinet, with `wanted_by` and combined `quantity_text`),
+  `allergen_flags_for(group, allergens[])` (`[{userId, displayName, allergen}]` for every member, ordered deterministically),
+  `item_allergens_for(group, item)` (07: `items.default_allergens`; 08 replaces it to prefer a linked product), and
+  `generate_shopping_list(group) → integer` (rows changed). It follows backend/06 steps 1.2–1.5: upserts needed items without
+  touching `checked`, deletes unchecked `preference` rows no longer needed, keeps `manual` and checked rows (refreshing their
+  `wanted_by` and flags), only writes rows whose values actually changed, and takes a per-group advisory lock.
+  An existing `manual` row that becomes needed keeps `reason = 'manual'` and its own `quantity_text`.
+- **Backend impact (recommended, not required):** `service.generate` can be
+  ``await tx.$executeRaw`SELECT generate_shopping_list(${groupId}::uuid)` `` followed by reading the rows and emitting
+  `shopping-list:changed`. If the backend writes its own TS version instead, it must produce the same rows (the seed check in 10 uses this function).
+- Prisma scalar lists are created nullable, so a follow-up migration `shopping_list_wanted_by_not_null` sets `wanted_by NOT NULL`
+  (the `shopping_list` migration was already applied when this was noticed).
+
