@@ -16,7 +16,7 @@ export type ListRowProps = {
 
 function metaFor(row: ShoppingListItem, meId: string | undefined, members: ListRowProps['members']): string {
   if (row.checked) {
-    return row.checkedBy ? `In the cart · checked by ${nameFor(row.checkedBy, meId, members)}` : 'In the cart';
+    return `In the cart · checked by ${nameFor(row.checkedBy ?? '', meId, members)}`;
   }
   if (row.reason === 'manual') return "Not in anyone's preferences";
   return `For ${namesFor(row.wantedBy, meId, members)}`;

@@ -42,6 +42,9 @@ The placeholder theme above is replaced by DESIGN.md §2. Rule used: the spec wi
 - **Normalization follows the spec** (§6.3: drop a trailing `s` but not `ss`), not `database/04` (`s`/`es` plus an exceptions list).
   The backend should pick one rule for both; see below.
 
+### Copy deviations
+- **"{groupName} · 1 member"** (singular) in ScreenHeader and the invite card, where the spec writes "{n} members". Plural otherwise.
+
 ### Copy the spec doesn't give
 - Failed actions show a toast. List, Cabinet, Me, and the add fields use **"Something went wrong. Try again."**; the onboarding screens
   show the server's error message when there is one, otherwise "Something went wrong." Worth unifying in a later pass.

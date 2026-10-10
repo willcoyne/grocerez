@@ -29,7 +29,7 @@ export type AppTextProps = TextProps & {
   variant?: TypeVariant;
   weight?: Weight;
   color?: ColorName;
-  /** micro labels are uppercase in the spec; set explicitly where needed. */
+  /** Defaults to true for `micro` (DESIGN.md §2: chips, tab labels, section labels are uppercase). */
   uppercase?: boolean;
   strike?: boolean;
   center?: boolean;
@@ -58,7 +58,7 @@ export function AppText({
           letterSpacing: letterSpacing[variant],
           color: color[colorName],
         },
-        uppercase && styles.upper,
+        (uppercase ?? variant === 'micro') && styles.upper,
         strike && styles.strike,
         center && styles.center,
         style,
