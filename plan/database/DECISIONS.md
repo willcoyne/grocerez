@@ -113,3 +113,11 @@ Format: date · folder · what the plan said · what was done · why.
 - **Did:** `ON DELETE RESTRICT` (catalog items in use can't be deleted). Same for `cabinet_items`, `shopping_list_items` (06, 07).
   Added an index on `preferences(user_id)` so user-delete cascades don't seq-scan.
 
+### 2026-10-10 · 06 · Cabinet details
+- **`product_id`:** 06 comes before `products` (08), so the column is created here without a FK; migration `products` (08) adds
+  `cabinet_items.product_id → products ON DELETE SET NULL`.
+- **`added_by`:** nullable, `ON DELETE SET NULL` (plan didn't say). The cabinet row belongs to the group, not the adder.
+- **CHECKs added:** `location IN ('fridge','freezer','pantry','other')`; `expires_at` and `expiration_source` are both set or both NULL.
+- **"Expiring in the next 3 days" query** (uses `cabinet_items_group_id_expires_at_idx`, verified with 200k rows):
+  `SELECT ... FROM cabinet_items WHERE group_id = $1 AND expires_at <= current_date + 3 ORDER BY expires_at` (includes already-expired rows).
+

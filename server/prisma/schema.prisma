@@ -46,6 +46,7 @@ model User {
   invitesSent   GroupInvite[]  @relation("InviteInvitedBy")
   itemsCreated  Item[]
   preferences   Preference[]
+  cabinetItems  CabinetItem[]
 
   @@map("users")
 }
@@ -95,10 +96,11 @@ model Group {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  creator     User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  members     GroupMember[]
-  invites     GroupInvite[]
-  preferences Preference[]
+  creator      User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  members      GroupMember[]
+  invites      GroupInvite[]
+  preferences  Preference[]
+  cabinetItems CabinetItem[]
 
   @@map("groups")
 }
@@ -154,9 +156,10 @@ model Item {
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  creator     User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
-  aliases     ItemAlias[]
-  preferences Preference[]
+  creator      User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases      ItemAlias[]
+  preferences  Preference[]
+  cabinetItems CabinetItem[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -208,4 +211,50 @@ model Preference {
   @@index([groupId, itemId])
   @@index([userId])
   @@map("preferences")
+}
+
+// ─── 06 Cabinet ────────────────────────────────────────────────────────────────
+
+/// "Ran out" is not a status: running out deletes the cabinet row.
+enum StockStatus {
+  in_stock
+  running_low
+
+  @@map("stock_status")
+}
+
+enum ExpirationSource {
+  manual
+  estimated
+
+  @@map("expiration_source")
+}
+
+/// The group's shared "what we have" set. One row per (group, item); buying again updates the row.
+/// "Have" set = rows with status = 'in_stock'. `location` is CHECK-constrained to fridge, freezer, pantry, other.
+/// `expires_at` and `expiration_source` are both set or both NULL (CHECK enforced).
+model CabinetItem {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String            @map("group_id") @db.Uuid
+  itemId           String            @map("item_id") @db.Uuid
+  /// Set when bought by scanning a SmartLabel / barcode. FK to products is added in 08.
+  productId        String?           @map("product_id") @db.Uuid
+  status           StockStatus       @default(in_stock)
+  quantityText     String?           @map("quantity_text")
+  location         String?
+  purchasedAt      DateTime?         @map("purchased_at") @db.Timestamptz(6)
+  expiresAt        DateTime?         @map("expires_at") @db.Date
+  expirationSource ExpirationSource? @map("expiration_source")
+  /// Nullable so the row survives the adder deleting their account.
+  addedBy          String?           @map("added_by") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item  Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  adder User? @relation(fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, itemId])
+  @@index([groupId, expiresAt])
+  @@map("cabinet_items")
 }
