@@ -73,6 +73,14 @@ export const cabinetRepo = {
   haveItemIds: async (groupId: string, db: Db = prisma) =>
     (await db.cabinetItem.findMany({ where: { groupId, status: "in_stock" }, select: { itemId: true } })).map((r) => r.itemId),
 
+  // backend/09 alerts: expiring on or before `until` (already expired included), soonest first.
+  expiring: (groupId: string, until: Date) =>
+    prisma.cabinetItem.findMany({
+      where: { groupId, expiresAt: { lte: until } },
+      orderBy: [{ expiresAt: "asc" }, { item: { name: "asc" } }],
+      select,
+    }) as Promise<CabinetRow[]>,
+
   isWanted: async (groupId: string, itemId: string, db: Db = prisma) =>
     (await db.preference.count({ where: { groupId, itemId } })) > 0,
 };

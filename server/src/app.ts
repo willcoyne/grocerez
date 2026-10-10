@@ -14,6 +14,7 @@ import { preferencesRouter } from "./modules/preferences/router.js";
 import { cabinetRouter } from "./modules/cabinet/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
 import { productsRouter } from "./modules/products/router.js";
+import { alertsRouter } from "./modules/recalls/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -59,6 +60,7 @@ app.use("/api", preferencesRouter);
 app.use("/api", cabinetRouter);
 app.use("/api", shoppingListRouter);
 app.use("/api", productsRouter);
+app.use("/api", alertsRouter);
 
 app.use(notFound);
 app.use(errorHandler);

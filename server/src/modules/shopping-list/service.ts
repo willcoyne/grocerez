@@ -7,6 +7,7 @@ import { emitGroup } from "../../lib/realtime.js";
 import { cabinetRepo } from "../cabinet/repo.js";
 import { groupsRepo } from "../groups/repo.js";
 import { itemsRepo } from "../items/repo.js";
+import { recallsRepo } from "../recalls/repo.js";
 import { listRepo } from "./repo.js";
 
 type Tx = Prisma.TransactionClient;
@@ -167,6 +168,7 @@ export async function complete(groupId: string, userId: string): Promise<{ moved
     const checked = await listRepo.lockChecked(tx, groupId);
     if (!checked.length) return 0;
     const now = new Date();
+    const cabinetIds: string[] = [];
     for (const r of checked) {
       const expiresAt = estimateExpiration(r.item, now);
       const write = {
@@ -176,8 +178,9 @@ export async function complete(groupId: string, userId: string): Promise<{ moved
         expirationSource: expiresAt ? ("estimated" as const) : null,
         ...(r.scannedProductId && { productId: r.scannedProductId }), // an unscanned re-buy keeps the known product
       };
-      await cabinetRepo.upsert(groupId, r.itemId, userId, write, write, tx);
+      cabinetIds.push((await cabinetRepo.upsert(groupId, r.itemId, userId, write, write, tx)).id);
     }
+    await recallsRepo.match({ cabinetItemIds: cabinetIds }, tx); // backend/09: bought items are cabinet adds too
     const itemIds = checked.map((r) => r.itemId);
     await tx.preference.deleteMany({ where: { groupId, itemId: { in: itemIds }, recurrence: "one_time" } });
     await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: checked.map((r) => r.id) } } });

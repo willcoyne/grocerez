@@ -12,7 +12,8 @@ npm run dev                 # http://localhost:3000/api/health -> {"ok":true}
 npm test                    # vitest (needs db:up); `npx vitest run` for a single pass
 ```
 
-The server refuses to start if any variable in `.env.example` is missing (except `RESEND_API_KEY` and `TRUST_PROXY`).
+The server refuses to start if any variable in `.env.example` is missing (except `RESEND_API_KEY`, `OPENFDA_API_KEY` and `TRUST_PROXY`).
+The openFDA recall import runs daily at 06:00 (server time), and once at startup if the last run is over a day old.
 Deployment (Docker, Railway / Cloud Run, env vars, demo checklist): see `DEPLOY.md`.
 Tests use stub values from `vitest.config.ts` and never need real secrets.
 

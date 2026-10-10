@@ -4,6 +4,7 @@ import { estimateExpiration } from "../../lib/expiration.js";
 import { emitGroup } from "../../lib/realtime.js";
 import { presignGet } from "../../lib/s3.js";
 import { itemsRepo } from "../items/repo.js";
+import { recallsRepo } from "../recalls/repo.js";
 import { generate, inListTx } from "../shopping-list/service.js";
 import { cabinetRepo, type CabinetRow, type CabinetWrite } from "./repo.js";
 
@@ -44,6 +45,7 @@ export async function add(groupId: string, userId: string, { itemId, expiresAt, 
   const row = await inListTx(groupId, async (tx) => {
     const row = await cabinetRepo.upsert(groupId, itemId, userId, { ...body, ...expiry }, update, tx);
     await generate(groupId, tx);
+    await recallsRepo.match({ cabinetItemIds: [row.id] }, tx); // backend/09: catches older recalls; cabinet:changed below
     return row;
   });
   emit(groupId, userId, true);

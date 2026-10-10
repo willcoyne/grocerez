@@ -64,7 +64,7 @@ Built standalone while 02-07 were in progress elsewhere. No routes, models, migr
   agrees with the JS function.
 - **Brand gate** is a case-insensitive whole-word check ("Valley" does not match "Valleyview").
 - **Alert link:** openFDA has no per-recall web page, so `recallLink` returns the API query for that `recall_number`.
-- **Remaining:** `recalls`/`recall_matches` tables (database/09), `jobs/importRecalls.ts` + `node-cron` `"0 6 * * *"`
+- **Remaining (done, see "09-expiration-recalls" below):** `recalls`/`recall_matches` tables (database/09), `jobs/importRecalls.ts` + `node-cron` `"0 6 * * *"`
   wiring in `index.ts` (upsert by `external_id`, last-import tracking), per-item re-match on cabinet add, saving
   estimates in `finishTrip`/cabinet add and `expiration_source`, `GET /groups/:groupId/alerts`, `POST .../dismiss`,
   `cabinet:changed` emit, `OPENFDA_API_KEY` in config/.env.example, the Done-when checks.
@@ -493,3 +493,42 @@ Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud reso
 - **Cabinet product join (05 step 1):** `CabinetItem.product = {brand, imageUrl} | null` (`imageUrl` is a presigned GET, 1 h).
 - **Frontend must update:** `CabinetItem` gains `product: {brand, imageUrl} | null`. Check-off can return
   `404 PRODUCT_NOT_FOUND` (scan again / check off without the product).
+
+## 09-expiration-recalls
+
+- **Schema:** new migration `20261011050100_recalls`: `recalls` and `recall_matches` exactly per `database/09` steps 1-2
+  (GIN trigram index on `product_description`, `UNIQUE (recall_id, cabinet_item_id)`, all three FKs `ON DELETE CASCADE`),
+  plus an index on `report_date` and `(group_id, dismissed_at)`, plus `job_runs (name PK, last_success_at)` for last-import
+  tracking. `price_estimates` is the concurrent agent's separate migration, so the plan's single `recalls_and_prices`
+  name isn't used. `database/09` boxes are left for the database builder (both behaviors are covered by `test/alerts.test.ts`).
+- **Import job** (`src/jobs/importRecalls.ts`): `since` = `job_runs.last_success_at` (first run: 30 days back), `until` =
+  now; the window is inclusive, so the boundary day is fetched twice and the upsert by `external_id` absorbs it. The date
+  only advances after a successful fetch + upsert. Then matching runs for recalls with `report_date` in the last 30 days
+  against every cabinet. `node-cron` `"0 6 * * *"` (server time) is wired in `index.ts` only (tests import `app.ts`), and
+  `index.ts` also runs one import at startup if the last success is over a day old, so a fresh deploy has alerts before 6am.
+  Failures are logged, never thrown into the server. `OPENFDA_API_KEY` is optional (config + `.env.example`).
+- **Matching in SQL:** `strict_word_similarity` (per the earlier decision) on item name, aliases, and
+  `brand + ' ' + product name`, best score ≥ 0.35; the whole-word brand gate is `brandAppears()` from `match.ts` in JS.
+  The pure JS `matchRecalls` stays as the reference implementation. New matches are `createManyAndReturn(skipDuplicates)`.
+  Known ceiling: a two-word item name matches on one shared word (`Cheese Crackers` vs any recall mentioning "cheese"
+  scores 0.44). That's what the plan's threshold gives; the alerts are worded "possible match, check your package".
+  Raise the threshold or require every item word if the demo shows too much noise.
+- **Per-item re-match** runs inside the write's transaction on cabinet `POST` **and finish trip** (bought items are cabinet
+  adds), against **all** stored recalls (catches old ones). A dismissed match stays dismissed on re-add (same row,
+  `UNIQUE (recall_id, cabinet_item_id)`). A ran-out + re-buy creates a new cabinet row, so the alert can come back.
+- **`cabinet:changed`:** the job emits it to every group that got a new match with `by: "system"` (no user did it).
+  Cabinet add / finish trip already emit it. Dismiss emits it too (other members' badges refresh).
+- **Alerts API** (`contracts/alerts.ts`): `GET /groups/:groupId/alerts` → `{expiring: CabinetItem[], recalls: RecallAlert[]}`.
+  `expiring` = `expires_at <= today + 3` (UTC calendar days, already expired included), soonest first then name.
+  `RecallAlert = {id (matchId), cabinetItemId, item: Item, score, createdAt, recall: {externalId, productDescription,
+  reason, classification, firm, distribution, reportDate ("YYYY-MM-DD"), status, link}}`, newest match first.
+  `POST /groups/:groupId/alerts/recalls/:matchId/dismiss` → 204; scoped by `groupId` (another group's match id is
+  `404 RECALL_MATCH_NOT_FOUND`, a bad uuid 400). Re-dismissing is a 204 no-op.
+- **Expiration:** finish trip and cabinet add already save the estimate (`expiration_source='estimated'`) and PATCH sets
+  `manual` (05/06). "Every bought item has an expiration date" is ticked with the plan's exception: categories with no
+  default (household, other, none) get no date. The Claude vision stretch (step 4) is not built.
+- **Seeded fake recall:** `database/10`'s seed doesn't exist on this branch, so the test inserts it. When the seed lands,
+  it should add one recall whose `product_description` contains a seeded cabinet item's name (and brand, if scanned).
+- **Checked live once** (not in the suite): `fetchRecalls` for the last 30 days returned 62 real recalls.
+- **Frontend must update:** `RecallAlert` shape above; dismiss can return `404 RECALL_MATCH_NOT_FOUND`. Show recall alerts
+  as "possible match, check your package"; `link` is the openFDA API query for that recall number (no human page exists).
