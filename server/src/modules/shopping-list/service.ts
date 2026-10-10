@@ -64,8 +64,10 @@ export async function generate(groupId: string, tx: Tx): Promise<void> {
   const kept = rows.filter((r) => !removed.has(r.id));
 
   const allergens = await listRepo.itemAllergens(tx, [...create, ...kept.map((r) => r.itemId)]);
+  // backend/06 step 1.3: a scanned row is flagged by what that exact product declares (allergens ∪ may_contain).
+  const scanned = new Map(kept.flatMap((r) => (r.scannedProduct ? [[r.itemId, [...r.scannedProduct.allergens, ...r.scannedProduct.mayContain] as string[]]] : [])));
   const flags = (itemId: string): AllergenFlag[] => {
-    const has = allergens.get(itemId) ?? [];
+    const has = scanned.get(itemId) ?? allergens.get(itemId) ?? [];
     return members.flatMap((m) =>
       m.allergens.filter((a) => has.includes(a)).map((allergen) => ({ userId: m.id, displayName: m.displayName, allergen })),
     );
@@ -122,11 +124,23 @@ export async function addManual(groupId: string, userId: string, { itemId, quant
 
 // Saved immediately; last write wins per row. Un-checking clears who/when and the scanned product.
 export async function check(groupId: string, id: string, userId: string, body: CheckListItemBody): Promise<ShoppingListItem> {
+  if (body.scannedProductId && !(await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true } }))) {
+    throw new AppError(404, "PRODUCT_NOT_FOUND", "Product not found");
+  }
   const data = body.checked
     ? { checked: true, checkedBy: userId, checkedAt: new Date(), ...(body.scannedProductId !== undefined && { scannedProductId: body.scannedProductId }) }
     : { checked: false, checkedBy: null, checkedAt: null, scannedProductId: body.scannedProductId ?? null };
-  // ponytail: scannedProductId isn't checked against products (no table on this branch); 08 merge adds the FK.
-  if (!(await listRepo.update(groupId, id, data))) throw notFound();
+  // The scanned product changes the row's allergen flags, so that case regenerates under the group lock.
+  // A plain check-off stays a lock-free single-row update.
+  const productChanged = body.scannedProductId !== undefined || !body.checked;
+  const ok = productChanged
+    ? await inListTx(groupId, async (tx) => {
+        const row = await listRepo.update(groupId, id, data, tx);
+        if (row) await generate(groupId, tx);
+        return row;
+      })
+    : await listRepo.update(groupId, id, data);
+  if (!ok) throw notFound();
   changed(groupId, userId);
   const [row] = await listRepo.load(prisma, groupId, id);
   if (!row) throw notFound(); // finished/deleted in between

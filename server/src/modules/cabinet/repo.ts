@@ -20,6 +20,7 @@ const select = {
   createdAt: true,
   updatedAt: true,
   item: { select: { id: true, name: true, category: true, defaultAllergens: true, shelfLifeDays: true } },
+  product: { select: { brand: true, imageS3Key: true } },
 } as const;
 export type CabinetRow = Omit<Prisma.CabinetItemGetPayload<{ select: typeof select }>, "item"> & { item: Item };
 

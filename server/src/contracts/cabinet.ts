@@ -8,7 +8,8 @@ export const CabinetItem = z.object({
   id: z.uuid(),
   groupId: z.uuid(),
   item: Item,
-  productId: z.uuid().nullable(), // backend/08 adds the product join (brand, image)
+  productId: z.uuid().nullable(),
+  product: z.object({ brand: z.string().nullable(), imageUrl: z.string().nullable() }).nullable(), // imageUrl: presigned GET, 1 h
   status: StockStatus,
   quantityText: z.string().nullable(),
   location: Location.nullable(),

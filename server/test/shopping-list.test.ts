@@ -21,6 +21,10 @@ const plusDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString(
 let u1: U, u2: U, u3: U, u4: U, outsider: U, g: Group, other: Group;
 const it_ = {} as Record<"cheerios" | "tostitos" | "lays" | "oreos" | "pb" | "apples", { id: string; name: string }>;
 
+type Prod = { id: string };
+const mkProduct = (name: string, data: { allergens?: Allergen[]; mayContain?: Allergen[]; brand?: string } = {}): Promise<Prod> =>
+  prisma.product.create({ data: { name: `${name} ${tag}`, source: "manual", fetchedAt: new Date(), ...data } });
+
 const mkItem = (name: string, category: string, defaultAllergens: Allergen[] = []) =>
   prisma.item.create({ data: { name: `${name} ${tag}`, normalizedName: `${name.toLowerCase()} ${tag}`, category, defaultAllergens } });
 
@@ -77,6 +81,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await cleanupUsers();
+  await prisma.product.deleteMany({ where: { name: { endsWith: ` ${tag}` } } });
   await prisma.item.deleteMany({ where: { name: { endsWith: ` ${tag}` } } });
   await prisma.$disconnect();
 });
@@ -195,7 +200,7 @@ describe("survival rules", () => {
   it("un-checking clears checkedBy/checkedAt/scannedProductId; DELETE: wanted preference row 409, manual 204", async () => {
     const list = await generate();
     const id = row(list, it_.oreos).id;
-    const scanned = randomUUID();
+    const scanned = (await mkProduct("Oreo Double Stuf")).id;
     expect(await check(u2, id, { checked: true, scannedProductId: scanned })).toMatchObject({ scannedProductId: scanned });
     expect(await check(u3, id, { checked: false })).toMatchObject({ checked: false, checkedBy: null, checkedAt: null, scannedProductId: null });
 
@@ -225,10 +230,51 @@ describe("survival rules", () => {
   });
 });
 
+describe("scanned products (06x08)", () => {
+  it("PATCH with an unknown scannedProductId is 404 PRODUCT_NOT_FOUND and changes nothing", async () => {
+    const id = row(await generate(), it_.oreos).id;
+    const res = await api().patch(`${base()}/${id}`).set(u1.auth).send({ checked: true, scannedProductId: randomUUID() }).expect(404);
+    expect(res.body.error.code).toBe("PRODUCT_NOT_FOUND");
+    expect(row(await getList(), it_.oreos)).toMatchObject({ checked: false, scannedProductId: null });
+  });
+
+  it("a scanned row is flagged by the product's allergens ∪ may_contain; un-checking goes back to the catalog item", async () => {
+    const list = await generate();
+    const tostitos = row(list, it_.tostitos);
+    expect(tostitos.allergenFlags).toEqual([]);
+    const withMilk = await mkProduct("Tostitos Queso", { allergens: ["milk"] });
+    const flagged = await check(u2, tostitos.id, { checked: true, scannedProductId: withMilk.id });
+    expect(flagged.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u3.id, "milk"]]);
+
+    // Oreos (catalog: wheat, soy, milk) scanned as a product that declares only "may contain peanuts".
+    const oreos = row(list, it_.oreos);
+    const mayPeanuts = await mkProduct("Oreo Thins", { mayContain: ["peanuts"] });
+    const o = await check(u1, oreos.id, { checked: true, scannedProductId: mayPeanuts.id });
+    expect(o.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u4.id, "peanuts"]]);
+
+    const back = await check(u1, oreos.id, { checked: false });
+    expect(back.allergenFlags.map((f) => [f.userId, f.allergen])).toEqual([[u3.id, "milk"]]);
+  });
+
+  it("deleting a product sets scanned_product_id and cabinet product_id to null (ON DELETE SET NULL)", async () => {
+    const list = await generate();
+    const p1 = await mkProduct("Tostitos Scoops");
+    const p2 = await mkProduct("Lays Wavy");
+    await check(u1, row(list, it_.tostitos).id, { checked: true, scannedProductId: p1.id });
+    await check(u1, row(list, it_.lays).id, { checked: true, scannedProductId: p2.id });
+    await complete();
+    await check(u1, row(await generate(), it_.oreos).id, { checked: true, scannedProductId: p1.id });
+    await prisma.product.deleteMany({ where: { id: { in: [p1.id, p2.id] } } });
+    expect(row(await getList(), it_.oreos).scannedProductId).toBeNull();
+    const cab = await prisma.cabinetItem.findMany({ where: { groupId: g.id, itemId: { in: [it_.tostitos.id, it_.lays.id] } } });
+    expect(cab.map((c) => c.productId)).toEqual([null, null]);
+  });
+});
+
 describe("finish trip", () => {
   it("moves exactly the checked items, estimates expiry, deletes one_time preferences, keeps staples", async () => {
     const list = await generate();
-    const scanned = randomUUID();
+    const scanned = (await mkProduct("Lay's Classic", { brand: "Lay's" })).id;
     await check(u1, row(list, it_.tostitos).id, { checked: true });
     await check(u2, row(list, it_.lays).id, { checked: true, scannedProductId: scanned });
     emit.mockClear();
@@ -239,7 +285,7 @@ describe("finish trip", () => {
 
     const cab = CabinetItem.array().parse((await api().get(`/api/groups/${g.id}/cabinet`).set(u1.auth).expect(200)).body);
     const lays = cab.find((c) => c.item.id === it_.lays.id)!;
-    expect(lays).toMatchObject({ status: "in_stock", productId: scanned, expiresAt: plusDays(90), expirationSource: "estimated" });
+    expect(lays).toMatchObject({ status: "in_stock", productId: scanned, product: { brand: "Lay's", imageUrl: null }, expiresAt: plusDays(90), expirationSource: "estimated" });
     expect(lays.purchasedAt).not.toBeNull();
     expect(cab.find((c) => c.item.id === it_.tostitos.id)).toMatchObject({ status: "in_stock", productId: null });
     expect(cab.find((c) => c.item.id === it_.oreos.id)).toMatchObject({ status: "running_low" }); // not bought

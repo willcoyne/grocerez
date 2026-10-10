@@ -478,3 +478,18 @@ Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud reso
 - **Frontend must update:** `DELETE /cabinet/:id` of an item someone wants now puts it back on the list (expect
   `shopping-list:changed`). `ShoppingListItem` shape above (names are included, no member lookup needed). Manual add returns
   200, not 201. List DELETE on a wanted preference row is `409 LIST_ITEM_IS_PREFERENCE` (tell the user to remove the preference).
+
+## 06x08 product wiring
+
+- **Schema:** new migration `20261011050000_product_fks` adds `cabinet_items.product_id → products ON DELETE SET NULL` and
+  `shopping_list_items.scanned_product_id → products ON DELETE SET NULL` (deferred by 05 and 06). Dangling ids written
+  before the FK existed are nulled first. Its timestamp equals the concurrent `20261011050000_price_estimates`; the names
+  differ and the two are independent, so order doesn't matter. Applied with `migrate deploy` (no reset).
+- **Check-off:** `PATCH /shopping-list/:id` with a `scannedProductId` that isn't a product → `404 PRODUCT_NOT_FOUND`, nothing
+  written. When the scanned product changes (a `scannedProductId` is sent, or un-checking clears it) the update runs in
+  `inListTx` and regenerates, so the row's allergen flags are right in the response. A plain check-off stays lock-free.
+- **Allergen flags:** a row with a scanned product is flagged by that product's `allergens ∪ may_contain` **instead of**
+  `items.default_allergens` (the label of the exact package beats the generic catalog guess); unscanned rows keep the catalog.
+- **Cabinet product join (05 step 1):** `CabinetItem.product = {brand, imageUrl} | null` (`imageUrl` is a presigned GET, 1 h).
+- **Frontend must update:** `CabinetItem` gains `product: {brand, imageUrl} | null`. Check-off can return
+  `404 PRODUCT_NOT_FOUND` (scan again / check off without the product).

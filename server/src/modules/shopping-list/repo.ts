@@ -81,11 +81,19 @@ export const listRepo = {
   rows: (tx: Tx, groupId: string) =>
     tx.shoppingListItem.findMany({
       where: { groupId },
-      select: { id: true, itemId: true, reason: true, checked: true, wantedBy: true, quantityText: true, allergenFlags: true },
+      select: {
+        id: true,
+        itemId: true,
+        reason: true,
+        checked: true,
+        wantedBy: true,
+        quantityText: true,
+        allergenFlags: true,
+        scannedProduct: { select: { allergens: true, mayContain: true } },
+      },
     }),
 
-  // ponytail: items.default_allergens only. When products (database/08) lands here, union the scanned product's
-  // allergens ∪ may_contain for rows with scanned_product_id (backend/06 step 1.3).
+  // Catalog allergens per item; generate() uses the scanned product's allergens ∪ may_contain instead when a row has one.
   itemAllergens: async (tx: Tx, itemIds: string[]) =>
     new Map(
       (await tx.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, defaultAllergens: true } })).map((i) => [

@@ -12,9 +12,10 @@ const notFound = () => new AppError(404, "CABINET_ITEM_NOT_FOUND", "Cabinet item
 const manualExpiry = (d: string | null): CabinetWrite =>
   d ? { expiresAt: new Date(`${d}T00:00:00Z`), expirationSource: "manual" } : { expiresAt: null, expirationSource: null };
 
-async function toCabinetItem({ photoKey, expiresAt, purchasedAt, createdAt, updatedAt, ...row }: CabinetRow): Promise<CabinetItem> {
+export async function toCabinetItem({ photoKey, expiresAt, purchasedAt, createdAt, updatedAt, product, ...row }: CabinetRow): Promise<CabinetItem> {
   return {
     ...row,
+    product: product && { brand: product.brand, imageUrl: product.imageS3Key ? await presignGet(product.imageS3Key) : null },
     location: row.location as CabinetItem["location"], // CHECK-constrained
     expiresAt: expiresAt ? expiresAt.toISOString().slice(0, 10) : null,
     purchasedAt: purchasedAt?.toISOString() ?? null,
