@@ -47,3 +47,18 @@ Format: date · folder · what the plan said · what was done · why.
 - `POST /api/dev/login-as/:userId` returns `{token, user}` like `/auth/google`. Mounted when `NODE_ENV !== "production"`; in production
   only when `DEMO_KEY` is set, and then it requires header `x-demo-key` (backend/12 step 4). Seeded ids: `00000000-0000-4000-8000-000000000101`…`0104`.
 - Google verification lives in `src/lib/google.ts` (`google.verifyIdToken`), which tests stub with `vi.spyOn`.
+
+### 2026-10-10 · 03 · Groups and invites details
+- **Response shapes:** `Group = {id, name, role (caller's), memberCount, createdAt}`; `GET /groups/:groupId` adds
+  `members[] = {id, displayName, email, avatarUrl, role, joinedAt}`. `Invite = {id, groupId, email, status, invitedBy:{id,displayName}|null,
+  createdAt, respondedAt}`; `GET /me/invites` adds `group:{id, name, memberCount}`. `POST /groups` and `POST .../invites` return **201**.
+- **Error codes:** non-member / malformed group id → `404 NOT_FOUND`; owner-only route → `403 FORBIDDEN`; invite not pending or not the
+  caller's email → `404 INVITE_NOT_FOUND`; revoking a non-pending invite → `409 INVITE_NOT_PENDING`; inviting a member → `409 ALREADY_MEMBER`;
+  removing yourself → `400 CANNOT_REMOVE_SELF` (use leave); invites over 20/hour per user → `429 RATE_LIMITED`.
+- **Status transitions are conditional** (`UPDATE ... WHERE status = 'pending'`) so two concurrent accept/decline/revoke calls can't both win.
+- **Accepting regenerates the list** (the new member's allergens change the allergen flags), as do leave and remove-member.
+- **Leave:** the explicit preference delete is kept (it's a no-op because the composite FK cascades). Owner promotion is the database
+  `owner_handoff` trigger; the backend only deletes the group when nobody is left.
+- **Remove member** revokes that person's invite row in the group whatever its status (normally `accepted`), so the old invite can't be re-used.
+- **Email (step 13, stretch) is implemented but off by default:** `src/lib/email.ts` posts to Resend when `RESEND_API_KEY` is set
+  (sender `RESEND_FROM`), fire-and-forget, sent for known and unknown emails alike so the response and timing don't differ.
