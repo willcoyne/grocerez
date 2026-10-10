@@ -62,3 +62,25 @@ Format: date · folder · what the plan said · what was done · why.
 - **Remove member** revokes that person's invite row in the group whatever its status (normally `accepted`), so the old invite can't be re-used.
 - **Email (step 13, stretch) is implemented but off by default:** `src/lib/email.ts` posts to Resend when `RESEND_API_KEY` is set
   (sender `RESEND_FROM`), fire-and-forget, sent for known and unknown emails alike so the response and timing don't differ.
+
+### 2026-10-10 · 04 · Item search reuses `search_items()`
+- `GET /items/search` calls the database's `search_items(q)` (tagged `$queryRaw`) instead of re-implementing the query. Empty-after-normalize
+  or missing `q` → `400 VALIDATION_ERROR`. Zero rows → `{match:"none", results:[]}`; otherwise `match` is the function's label for the best
+  candidate and `results` are all candidates (best first), so for `suggested` the app shows `results[0]` as "Did you mean…?".
+- `Item = {id, name, normalizedName, category, defaultAllergens, shelfLifeDays}`.
+- `lib/normalize.ts` is a line-by-line port of `normalize_item_name()`; the test checks all fixture cases plus extra inputs against the SQL function.
+
+### 2026-10-10 · 04 · `POST /items` details
+- Without `aliasOf`: if the normalized name (or an alias) already exists, returns that item with **200**; otherwise creates it (**201**),
+  `category` defaults to `"other"`. `normalized_name` is computed by SQL in the insert (`ON CONFLICT DO NOTHING`), so races return the existing row.
+- With `aliasOf`: unknown item → 404; the text already normalizes to that item → 200; the text already means a **different** item
+  (its name or another alias) → `409 NAME_TAKEN`; otherwise the alias is stored (201) and the target item is returned.
+
+### 2026-10-10 · 04 · Preferences response
+- **Plan said:** "`all` adds `wantedBy` names".
+- **Did:** every `Preference` row includes `user: {id, displayName}` (for both `me` and `all`), plus the full `item`. `POST` returns 201 when
+  created and 200 when it updated the existing `(group, user, item)` row. Unknown `itemId` → 404. Rows from another group → 404; another
+  member's row → 403.
+- Every preference write and the regeneration run in **one transaction** (`withRegeneration`), then `preferences:changed` is emitted, plus
+  `shopping-list:changed` when the list actually changed.
+- `PUT /me/dietary` dedupes values, returns them sorted, and regenerates every group the user belongs to in the same transaction.

@@ -7,7 +7,10 @@ import { logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
+import { dietaryRouter } from "./modules/dietary/router.js";
 import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
+import { itemsRouter } from "./modules/items/router.js";
+import { preferencesRouter } from "./modules/preferences/router.js";
 import { healthRouter } from "./modules/health/router.js";
 import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
@@ -43,11 +46,14 @@ export function createApp() {
   // Everything below needs a valid app JWT.
   api.use(requireAuth);
   api.use(meRouter);
+  api.use(dietaryRouter);
   api.use(groupsRouter);
+  api.use(itemsRouter);
 
   // /groups/:groupId/* : membership is checked once here for every group-scoped feature router.
   const group = Router({ mergeParams: true });
   group.use(groupScopedRouter);
+  group.use(preferencesRouter);
   api.use("/groups/:groupId", requireGroupMember, group);
 
   app.use("/api", api);
