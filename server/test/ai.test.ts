@@ -68,6 +68,12 @@ describe("findAllergens", () => {
     expect(findAllergens(["Eggplant parmigiana", "crabapple"], ["eggs", "shellfish"])).toEqual([]);
     expect(findAllergens(["Béchamel", "nut butter"], ["milk", "tree_nuts"])).toEqual(["milk", "tree_nuts"]);
   });
+  it("does not flag gluten-free flours, cream of tartar, or coconut milk", () => {
+    expect(findAllergens(["rice flour", "corn tortillas", "cream of tartar", "coconut milk"])).toEqual([]);
+    expect(findAllergens(["almond flour"])).toEqual(["tree_nuts"]);
+    expect(findAllergens(["rice flour, wheat flour"])).toEqual(["wheat", "gluten"]);
+    expect(findAllergens(["heavy cream"])).toEqual(["milk"]);
+  });
   it("checks meat/pork/honey keywords for the diets that forbid them", () => {
     expect(findDietConflicts(["Pork buns", "honey"], ["halal", "keto", "vegan", "vegetarian"])).toEqual(["halal", "vegan", "vegetarian"]);
     expect(findDietConflicts(["Mushroom risotto", "meatless", "hamachi-free"], ["vegan", "vegetarian"])).toEqual([]);

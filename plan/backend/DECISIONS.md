@@ -303,7 +303,7 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
   neither counts as dairy). Wheat words also count as gluten. Compound words (buttermilk, crabmeat, catfish, cheesecake)
   and derived foods (custard, aioli, pesto, Nutella, hummus, teriyaki, seitan, panko, Worcestershire, Caesar, satay, ...)
   are listed explicitly rather than matched as substrings, so "eggplant", "butternut" and "crabapple" don't match.
-  The table errs toward flagging: "rice flour" counts as wheat, "pesto" as milk and tree nuts, and "soy sauce"/"teriyaki"
+  The table errs toward flagging: "pesto" as milk and tree nuts, and "soy sauce"/"teriyaki"
   as wheat. 08's old table only flagged milk for "butter", so a `Contains:` line saying "peanut butter" is now peanuts only.
 - **Diets in code (B-14):** `findDietConflicts(texts, diets)` drops recipes for vegetarian (meat, poultry, gelatin, lard),
   vegan (the same plus honey), halal (pork, lard, gelatin) and kosher (pork; kosher also implies the `shellfish`
@@ -313,6 +313,18 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
   follow-up). With "flour", "cream" and similar words it would mislabel many products ("rice flour", "cream of tartar"),
   so `allergens` stays tied to the label's declared statement. Recipes for vegan households that say "vegan butter" or
   "vegan mayo" are still dropped; neutralizing "vegan X" phrases can be added if that shows up.
+- **False-positive exceptions (follow-up):** whole-phrase exceptions in `normalize()` now drop the wheat/milk word from
+  gluten-free flours and staples ("rice/almond/coconut/corn/chickpea/potato/tapioca/cassava/buckwheat/oat
+  flour|noodle|pasta|tortilla") and "cream of tartar", keeping the base word, so "almond flour" is tree nuts only and
+  "rice flour" is nothing. "Coconut milk" was already not milk. Oat flour is treated as not wheat (cross-contact is
+  the label's job).
+
+## Single guarded fetch (08 follow-up)
+
+- `products/guardedFetch.ts` now holds the only SSRF guard: private-address blocklist (incl. IPv6 forms), `checkUrl`,
+  and `guardedFetch(start, allowHost, accept, read, deps, label)`. `fetchSmartLabelPage` and `fetchProductImage` both
+  use it; `smartlabel.ts` re-exports `isPrivateAddress`. The body `read` callback runs inside the guard's try and
+  timeout, so a stalled or aborted image body is now a 502 like a stalled page (before, only the page read was wrapped).
 ## 04-preferences
 
 - **Schema created here** (no database branch existed), two new migrations, nothing earlier touched:

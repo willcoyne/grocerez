@@ -3,7 +3,8 @@ import { Allergen } from "../contracts/ai.js";
 // The one allergen keyword table (backend/08 scan parsing and backend/10 recipe re-check). Keys are the DB `allergen` enum.
 // Whole words with an optional plural, so "eggplant" is not egg and "butternut" is not butter. Compound words and
 // derived foods (buttermilk, crabmeat, pesto, hummus, ...) are listed explicitly.
-// ponytail: keyword match, errs toward flagging ("rice flour" -> wheat). Swap for ingredient-level data if false positives annoy users.
+// ponytail: keyword match, errs toward flagging; known false positives get a whole-phrase exception in normalize().
+// Swap for ingredient-level data if false positives still annoy users.
 const WHEAT = [
   "wheat", "flour", "bread", "breadcrumb", "pasta", "spaghetti", "noodle", "couscous", "tortilla", "semolina", "cracker",
   "panko", "seitan", "durum", "farina", "bulgur", "farro", "spelt", "teriyaki", "soy sauce",
@@ -68,7 +69,10 @@ function normalize(texts: (string | null | undefined)[]): string {
     .replace(/[̀-ͯ]/g, "") // béchamel -> bechamel
     .replace(/\b\w+[- ]free\b/gi, " ") // "dairy-free", "nut free"
     // Plant "milks"/nut butters are not dairy, but keep the plant word so peanut/soy/almond/nut still match.
-    .replace(/\b(peanut|almond|cashew|sunflower|nut|apple|cocoa|coconut|oat|soy|rice) (?:butter|milk|cream|yogurt)s?\b/gi, "$1");
+    .replace(/\b(peanut|almond|cashew|sunflower|nut|apple|cocoa|coconut|oat|soy|rice) (?:butter|milk|cream|yogurt)s?\b/gi, "$1")
+    // Gluten-free flours/staples are not wheat; keep the base word so "almond flour" still flags tree nuts.
+    .replace(/\b(rice|almond|coconut|corn|chickpea|potato|tapioca|cassava|buckwheat|oat) (?:flour|noodle|pasta|tortilla)s?\b/gi, "$1")
+    .replace(/\bcreams? of tartar\b/gi, "tartar"); // potassium bitartrate, not dairy
 }
 
 /** Allergens from `forbidden` that any of the texts mention, in enum order. */

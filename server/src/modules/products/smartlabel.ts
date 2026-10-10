@@ -1,115 +1,27 @@
-import { lookup as dnsLookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
 import * as cheerio from "cheerio";
 import { AppError } from "../../lib/errors.js";
-import {
-  FETCH_TIMEOUT_MS, USER_AGENT, readCapped, safeImageUrl, upstreamError, type ProductData,
-} from "./common.js";
+import { readCapped, safeImageUrl, type ProductData } from "./common.js";
 import { mapAllergens } from "../../lib/allergens.js";
+import { checkUrl, guardedFetch, type FetchDeps } from "./guardedFetch.js";
+
+export { isPrivateAddress, type FetchDeps, type LookupFn } from "./guardedFetch.js";
 
 // ---------- SSRF guard ----------
 
 // Exact hosts, and suffixes that allow any subdomain. Add brand hosts here as they're found while testing.
 const ALLOWED_HOSTS = ["smartlabel.org", "smartlabel.labelinsight.com"];
 const ALLOWED_SUFFIXES = [".smartlabel.org"];
-const MAX_REDIRECTS = 5;
-
-const blocked = new BlockList();
-for (const [net, prefix] of [
-  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
-  ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3],
-] as const) blocked.addSubnet(net, prefix, "ipv4");
-for (const [net, prefix] of [
-  // IPv4-mapped (::ffff:a.b.c.d) addresses are matched against the IPv4 rules by BlockList itself. The other forms
-  // that embed an IPv4 (IPv4-compatible ::a.b.c.d, IPv4-translated ::ffff:0:a.b.c.d, NAT64, 6to4) are blocked whole.
-  ["::", 96], ["::ffff:0:0:0", 96], ["64:ff9b::", 96], ["64:ff9b:1::", 48], ["2002::", 16],
-  ["fc00::", 7], ["fe80::", 10], ["ff00::", 8],
-] as const) blocked.addSubnet(net, prefix, "ipv6");
-
-export function isPrivateAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 0) return true; // not an IP at all: refuse
-  return blocked.check(address, family === 4 ? "ipv4" : "ipv6");
-}
+const smartLabelHost = (h: string) => ALLOWED_HOSTS.includes(h) || ALLOWED_SUFFIXES.some((s) => h.endsWith(s));
 
 /** Parses and checks a URL against the allowlist. Returns null if it must not be fetched. */
-export function allowedSmartLabelUrl(raw: string, base?: URL): URL | null {
-  let url: URL;
-  try {
-    url = new URL(raw, base);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" || url.username || url.password || url.port !== "") return null;
-  const host = url.hostname.toLowerCase().replace(/\.$/, "");
-  if (isIP(host.replace(/^\[|\]$/g, ""))) return null;
-  if (!ALLOWED_HOSTS.includes(host) && !ALLOWED_SUFFIXES.some((s) => host.endsWith(s))) return null;
-  return url;
-}
+export const allowedSmartLabelUrl = (raw: string, base?: URL) => checkUrl(raw, smartLabelHost, base);
 
-export type LookupFn = (host: string) => Promise<{ address: string }[]>;
-export interface FetchDeps {
-  fetch?: typeof fetch;
-  lookup?: LookupFn;
-  timeoutMs?: number;
-}
-
-const defaultLookup: LookupFn = (host) => dnsLookup(host, { all: true });
-
-// ponytail: DNS is checked here and resolved again by fetch (rebinding window). Low risk since only allowlisted
-// hostnames get this far; pin the IP with an undici dispatcher `connect.lookup` if that ever matters.
-async function assertPublicHost(url: URL, lookup: LookupFn) {
-  let addrs: { address: string }[];
-  try {
-    addrs = await lookup(url.hostname);
-  } catch {
-    throw upstreamError("SmartLabel host did not resolve");
-  }
-  if (addrs.length === 0 || addrs.some((a) => isPrivateAddress(a.address))) {
-    throw upstreamError("SmartLabel host resolves to a private address");
-  }
-}
-
-/**
- * Fetches a SmartLabel page. Redirects are followed by hand so every hop is re-checked against the allowlist and DNS
- * guard. 5 s timeout for the whole chain, 2 MB body cap.
- */
+/** Fetches a SmartLabel page through the shared guard (5 s for the whole chain, 2 MB body cap). */
 export async function fetchSmartLabelPage(qrUrl: string, deps: FetchDeps = {}): Promise<{ url: string; html: string }> {
-  const doFetch = deps.fetch ?? fetch;
-  const lookup = deps.lookup ?? defaultLookup;
-  const signal = AbortSignal.timeout(deps.timeoutMs ?? FETCH_TIMEOUT_MS);
-
   const first = allowedSmartLabelUrl(qrUrl);
   if (!first) throw new AppError(400, "VALIDATION_ERROR", "qrUrl is not a SmartLabel URL");
-  let url: URL = first;
-
-  try {
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      await assertPublicHost(url, lookup);
-      const res = await doFetch(url, {
-        redirect: "manual",
-        signal,
-        headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-      });
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get("location");
-        await res.body?.cancel();
-        const next = location ? allowedSmartLabelUrl(location, url) : null;
-        if (!next) throw upstreamError("SmartLabel redirected to a disallowed URL");
-        url = next;
-        continue;
-      }
-      if (!res.ok) {
-        await res.body?.cancel();
-        throw upstreamError(`SmartLabel returned ${res.status}`);
-      }
-      return { url: url.toString(), html: await readCapped(res) };
-    }
-  } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw upstreamError(signal.aborted ? "SmartLabel request timed out" : "SmartLabel request failed");
-  }
-  throw upstreamError("Too many redirects");
+  const { url, result } = await guardedFetch(first, smartLabelHost, "text/html", (res) => readCapped(res), deps, "SmartLabel");
+  return { url: url.toString(), html: result };
 }
 
 // ---------- Parsing ----------
