@@ -51,6 +51,6 @@ Fuzzy matching (Levenshtein) happens **when items are entered** (`04`), so set o
 
 ## Done when
 
-- [ ] The seeded demo produces the expected list
-- [ ] Two phones checking items at the same time end up with the same state
-- [ ] "Finish trip" moves exactly the checked items and nothing else
+- [x] The seeded demo produces the expected list
+- [x] Two phones checking items at the same time end up with the same state
+- [x] "Finish trip" moves exactly the checked items and nothing else

@@ -38,6 +38,6 @@ So:
 
 ## Done when
 
-- [ ] Every bought item has an expiration date (estimated or manual)
-- [ ] The seeded fake recall shows up as an alert and can be dismissed
-- [ ] The import job runs twice without creating duplicates
+- [x] Every bought item has an expiration date (estimated or manual)
+- [x] The seeded fake recall shows up as an alert and can be dismissed
+- [x] The import job runs twice without creating duplicates

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta name="viewport" content="width=device-width" />
+    <title>Smart Label</title>
+    <link href="/favicon.ico" rel="shortcut icon" type="image/x-icon" />
+
+    <script src="/Scripts/basejquery.min.js"></script>
+    <script src="/Scripts/basebootstrap.min.js"></script>
+    <script src="/Scripts/basemodernizr.min.js"></script>
+    <link href="/Content/baseapptheme.min.css" rel="stylesheet" />
+    <link href="/Content/baseappcss.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <!-- Google Tag Manager -->
+    <script>
+        (function (w, d, s, l, i) {
+            w[l] = w[l] || []; w[l].push({
+                'gtm.start':
+                    new Date().getTime(), event: 'gtm.js'
+            }); var f = d.getElementsByTagName(s)[0],
+                j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : ''; j.async = true; j.src =
+                    'https://www.googletagmanager.com/gtm.js?id=' + i + dl; f.parentNode.insertBefore(j, f);
+        })(window, document, 'script', 'dataLayer', 'GTM-TDN2F829');
+    </script>
+    <!-- End Google Tag Manager -->   
+</head>
+<body class="vis">
+    <!-- Google Tag Manager (noscript) -->
+    <noscript>
+        <iframe src=https://www.googletagmanager.com/ns.html?id =GTM-TDN2F829
+                height="0" width="0" style="display:none;visibility:hidden"></iframe>
+    </noscript>
+    <!-- End Google Tag Manager (noscript) -->
+    <header>
+        <nav class="navbar navbar-static-top navbar-default navbar-inverse main-nav landing" role="navigation" style="margin-bottom: 0;">
+            <div class="container-fluid">
+
+                <!-- Brand and toggle get grouped for better mobile display -->
+                <div class="navbar-header">
+                    <a href="#" class="back-arrow" style="display:none" data-heading="00016000275287"></a>
+                    <a href="#" class="back-arroworg" style="display:none" data-heading="00016000275287"></a>
+                    <h4 id="all-allergens-title" class="nav-back" style="display: none;">
+                    </h4>
+                    <h4 id="all-ingredients-title" class="nav-back" style="display: none;">
+                    </h4>
+                    <h4 id="all-other-title" class="nav-back" style="display: none;">
+                    </h4>
+                    <h4 id="all-image-title" style="display: none;">
+                        <div class="row"><img src="/Content/themes/base/images/smart_label_logo_New.jpg" class="logo-image" width="180px" height="40px" /></div>
+                    </h4>
+                    <a class="navbar-brand"><img src="/Content/themes/base/images/smart_label_logo_New.jpg" class="logo-image" width="180px" height="40px" /></a>
+                </div>
+                <!-- Collect the nav links, forms, and other content for toggling -->
+                <div class="collapse navbar-collapse" id="navbar-collapse-1">
+                </div>
+            </div><!-- /.container-fluid -->
+        </nav>
+        <!-- Search -->
+        <div id="search-area" class="padding-horizontal-10 padding-vertical-10" style="display: none;">
+            <input type="text" id="search-products" class="form-control" placeholder="Search Products" />
+        </div>
+
+
+
+
+        <div class="primary-nav">
+
+
+            <input id="hdnGTINId" name="hdnGTINId" type="hidden" value="00016000275287" />
+
+            <div id='div-product-header'></div>
+            <div class="headerNavContainer">
+                <div id="sections-container">
+                    <ul class="mainMenuList">
+                        <li class=menuActive>
+                            <a id="menuClickgal" data-heading="Index~BMN~00016000275287">
+                                <div id="section-nutrition" class="text-align-center section text-nutrition">
+                                    <div class="section-icon"><i class="fa fa-cutlery sub-header"></i></div>
+                                    <div class="section-label sub-header">
+                                        <div class="row margin-right-0 margin-left-0">Nutrition</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                        <li>
+                            <a id="menuClickgal" data-heading="Ingredients~BMN~00016000275287">
+                                <div id="section-ingredients" class="text-align-center section text-ingredients">
+                                    <div class="section-icon"><i class="fa fa-list sub-header"></i></div>
+                                    <div class="section-label sub-header">
+                                        <div class="row margin-right-0 margin-left-0">Ingredients</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                        <li>
+                            <a id="menuClickgal" data-heading="Allergens~BMN~00016000275287">
+                                <div id="section-allergens" class="text-align-center section text-allergens">
+                                    <div class="section-icon"><i class="fa fa-exclamation-triangle sub-header"></i></div>
+                                    <div class="section-label sub-header">
+                                        <div class="row margin-right-0 margin-left-0">Allergens</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                        <li id="uidInformation">
+                            <a id="menuClickgal" data-heading="Information~BMN~00016000275287">
+                                <div id="section-other" class="text-align-center section text-other">
+                                    <div class="section-icon"><i class="fa fa-info-circle sub-header"></i></div>
+                                    <div class="section-label sub-header">
+                                        <div class="row margin-right-0 margin-left-0">About this Product</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                        <li>
+                            <a id="menuClickgal" data-heading="CompanyBrand~BMN~00016000275287">
+                                <div id="section-company" class="text-align-center section">
+                                    <div class="section-icon"><i class="fa fa-share-square sub-header"></i></div>
+                                    <div class="section-label sub-header">
+                                        <div class="row margin-right-0 margin-left-0">Company,</div>
+                                        <div class="row margin-right-0 margin-left-0">Brand &</div>
+                                        <div class="row margin-right-0 margin-left-0">Sustainability</div>
+                                        <div class="row margin-right-0 margin-left-0">&nbsp;</div>
+                                    </div>
+                                </div>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container-fluid content-section">
+        <div class="contentBody">
+            
+
+
+<input id="hdnServingSizeCount" name="hdnServingSizeCount" type="hidden" value="0" />
+<input id="hdnGTINId" name="hdnGTINId" type="hidden" value="00016000275287" />
+<div class="nutritional-container">
+</div>
+<script>
+    $(document).ready(function () {
+        loadIngredientDetails();
+        $(document).on('change', '#ddlServingSize', loadIngredientDetails);
+    });
+</script>
+        </div>
+        <div id="onlyDispValue" style="display: none;">
+        </div>
+        <div id="div-product-footer">
+        </div>
+        <div id="leaving-modal" class="modal fade">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <input id="modal-link" value="" type="hidden" />
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                        <h4 class="modal-title">Leaving SmartLabel</h4>
+                    </div>
+                    <div class="modal-body">
+                        <p>You are about to leave SmartLabel and go to a branded site.  Would you like to continue?</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" data-dismiss="modal" onclick="OpenUrl()">Continue</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+
+
+       
+        function OpenUrl() {
+            window.open($('#modal-link').val());
+        }
+            $(document).ready(function () {
+            $(document).on("click", ".allerClickgal", function (e) {
+                $(".back-arrow").css('display', 'block');
+                e.preventDefault();
+                var data = $(this).attr("data-heading");
+                var arr = data.split('~');
+                // Analytics for Menu click
+                //ga('send', 'event', 'site', 'TopNavigation', arr[0]);
+                $('.contentBody').load("/GTIN/" + arr[0],
+                    { id: arr[1] });
+            });
+        })
+    </script>
+    <script src="/Scripts/custom-onetrust.js"></script>
+    <!-- OneTrust Cookies Consent Notice start for generalmills.com -->
+    <script src="https://cdn.cookielaw.org/scripttemplates/otSDKStub.js" data-document-language="true" type="text/javascript" charset="UTF-8" data-domain-script="12ff17d4-5a86-4b89-829d-5f70a80ec68a"></script>    
+    <script type="text/javascript">
+        function OptanonWrapper()
+        {
+            // reusable function from custom-onetrust.js
+            refreshPageOnOneTrustConsentClickByUser();
+        }
+    </script>
+    <!-- OneTrust Cookies Consent Notice end for generalmills.com -->
+</body>
+</html>

@@ -1,7 +1,44 @@
 # GrocerEZ server
 
-Right now this package only contains the database layer (Prisma schema, migrations, seed).
-The Express API is added on top of it by `plan/backend/`.
+Express 5 + TypeScript API (`src/`), Socket.IO realtime, daily openFDA recall job, and the database layer
+(Prisma schema, migrations, seed). API contract: `plan/backend/README.md`; deviations: `plan/backend/DECISIONS.md`.
+
+## Run it from a fresh clone
+
+```bash
+cd server
+npm install
+cp .env.example .env              # set JWT_SECRET (openssl rand -hex 32); the rest can stay as-is locally
+npm run db:up                     # Postgres 16 on :5432
+npx prisma migrate deploy         # or npm run db:migrate
+npm run db:generate
+npm run db:seed                   # demo group + 4 users
+npm run dev                       # http://localhost:3000/api/health
+```
+
+Sign in without Google during development: `curl -X POST localhost:3000/api/dev/login-as/00000000-0000-4000-8000-000000000101`
+returns `{token, user}` (seeded users `...0101`–`...0104`; disabled in production unless `DEMO_KEY` is set).
+Without `ANTHROPIC_API_KEY` / AWS settings the AI and upload routes answer `503 NOT_CONFIGURED`; everything else works.
+
+## Tests
+
+```bash
+npm run db:test:setup             # once: CREATE DATABASE grocerez_test (never touches the dev database)
+npm test                          # vitest + supertest against grocerez_test (migrated + re-seeded on every run)
+npm run typecheck
+```
+
+External services (Google, Claude, S3, Open Food Facts, SmartLabel, openFDA, Resend) are stubbed in tests through
+`google.verifyIdToken`, `ai.call`, `s3.*`, `http.fetch`, `mailer.send`.
+
+## Other scripts
+
+| Script | What it does |
+|---|---|
+| `build` / `start` | `tsc` → `dist/`, then `node dist/src/index.js` |
+| `job:recalls` | run the openFDA recall import + matching once (the server runs it daily at 06:00 when `ENABLE_JOBS=true`) |
+
+Docker: `docker build -t grocerez-api .` (runs `prisma migrate deploy` then the API on port 3000).
 
 ## Database workflow
 

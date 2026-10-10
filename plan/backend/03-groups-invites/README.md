@@ -51,7 +51,7 @@
 
 ## Done when
 
-- [ ] A member invites `will@…`, and Will signs in with that Google account, sees the invite, accepts, and is in the group
-- [ ] Signing in with any other account never shows or accepts that invite
-- [ ] The owner sees pending invites and can revoke them
-- [ ] A non-member can't read any `/groups/:groupId/*` route
+- [x] A member invites `will@…`, and Will signs in with that Google account, sees the invite, accepts, and is in the group
+- [x] Signing in with any other account never shows or accepts that invite
+- [x] The owner sees pending invites and can revoke them
+- [x] A non-member can't read any `/groups/:groupId/*` route
