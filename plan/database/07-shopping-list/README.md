@@ -34,5 +34,5 @@
 
 ## Done when
 
-- [ ] Running generation twice in a row changes nothing (it upserts and doesn't duplicate)
-- [ ] Toggling `checked` sets and clears `checked_by` and `checked_at`
+- [x] Running generation twice in a row changes nothing (it upserts and doesn't duplicate)
+- [x] Toggling `checked` sets and clears `checked_by` and `checked_at`

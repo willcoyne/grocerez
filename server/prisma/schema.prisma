@@ -27,22 +27,24 @@ enum Allergen {
 }
 
 model User {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  googleSub     String         @unique @map("google_sub")
-  email         String         @unique // lower-cased by the app
-  displayName   String         @map("display_name")
-  avatarUrl     String?        @map("avatar_url")
-  avatarKey     String?        @map("avatar_s3_key") // backend/11; presigned into the API's avatarUrl
-  zipCode       String?        @map("zip_code")
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  googleSub     String             @unique @map("google_sub")
+  email         String             @unique // lower-cased by the app
+  displayName   String             @map("display_name")
+  avatarUrl     String?            @map("avatar_url")
+  avatarKey     String?            @map("avatar_s3_key") // backend/11; presigned into the API's avatarUrl
+  zipCode       String?            @map("zip_code")
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz
   allergens     UserAllergen[]
   diets         UserDiet[]
-  groupsCreated Group[]        @relation("GroupCreator")
+  groupsCreated Group[]            @relation("GroupCreator")
   memberships   GroupMember[]
   invitesSent   GroupInvite[]
   itemsCreated  Item[]
   cabinetAdded  CabinetItem[]
+  listChecked   ShoppingListItem[] @relation("ListCheckedBy")
+  listAdded     ShoppingListItem[] @relation("ListAddedBy")
 
   @@map("users")
 }
@@ -84,15 +86,16 @@ enum InviteStatus {
 }
 
 model Group {
-  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
-  createdBy String?       @map("created_by") @db.Uuid
-  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz
-  creator   User?         @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  createdBy String?            @map("created_by") @db.Uuid
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+  creator   User?              @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: SetNull)
   members   GroupMember[]
   invites   GroupInvite[]
   cabinet   CabinetItem[]
+  list      ShoppingListItem[]
 
   @@map("groups")
 }
@@ -130,18 +133,19 @@ model GroupInvite {
 
 // database/04-item-catalog-fuzzy-matching. normalize_item_name() and the category CHECK live in the migration SQL.
 model Item {
-  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name             String
-  normalizedName   String        @unique @map("normalized_name")
+  normalizedName   String             @unique @map("normalized_name")
   category         String?
-  defaultAllergens Allergen[]    @default([]) @map("default_allergens")
-  shelfLifeDays    Int?          @map("shelf_life_days")
-  createdBy        String?       @map("created_by") @db.Uuid
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  creator          User?         @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  defaultAllergens Allergen[]         @default([]) @map("default_allergens")
+  shelfLifeDays    Int?               @map("shelf_life_days")
+  createdBy        String?            @map("created_by") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  creator          User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   aliases          ItemAlias[]
   preferences      Preference[]
   cabinetItems     CabinetItem[]
+  listItems        ShoppingListItem[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], map: "items_name_trgm", type: Gin)
   @@map("items")
@@ -221,4 +225,37 @@ model CabinetItem {
   @@unique([groupId, itemId])
   @@index([groupId, expiresAt])
   @@map("cabinet_items")
+}
+
+// database/07-shopping-list. scanned_product_id gets its FK to products when database/08 lands.
+enum ListReason {
+  preference
+  manual
+
+  @@map("list_reason")
+}
+
+model ShoppingListItem {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String     @map("group_id") @db.Uuid
+  itemId           String     @map("item_id") @db.Uuid
+  reason           ListReason
+  wantedBy         String[]   @default([]) @map("wanted_by") @db.Uuid
+  quantityText     String?    @map("quantity_text")
+  allergenFlags    Json       @default("[]") @map("allergen_flags")
+  checked          Boolean    @default(false)
+  checkedBy        String?    @map("checked_by") @db.Uuid
+  checkedAt        DateTime?  @map("checked_at") @db.Timestamptz
+  scannedProductId String?    @map("scanned_product_id") @db.Uuid
+  addedBy          String?    @map("added_by") @db.Uuid
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  group            Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item             Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  checker          User?      @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
+  adder            User?      @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, itemId])
+  @@index([groupId, checked])
+  @@map("shopping_list_items")
 }

@@ -30,6 +30,8 @@ export type CabinetWrite = {
   expiresAt?: Date | null;
   expirationSource?: "manual" | "estimated" | null;
   photoKey?: string | null;
+  purchasedAt?: Date | null; // finish trip (backend/06)
+  productId?: string | null;
 };
 
 // A row deleted/moved between our read and write (P2025) is reported as "not found".

@@ -5,6 +5,7 @@ import { closeGroupRoom, emitGroup, emitUser, kickFromGroup } from "../../lib/re
 import type { GroupRole } from "@prisma/client";
 import type { Group, GroupDetail, Invite, MyInvite } from "../../contracts/groups.js";
 import { toUser } from "../users/service.js";
+import { generate } from "../shopping-list/service.js";
 import { groupsRepo } from "./repo.js";
 
 const inviteNotFound = () => new AppError(404, "INVITE_NOT_FOUND", "Invite not found");
@@ -87,9 +88,11 @@ export async function acceptInvite(inviteId: string, userId: string): Promise<Gr
     // Re-checked under the lock: a concurrent revoke / member removal wins.
     if (!(await groupsRepo.setInviteStatus({ id: inviteId, email }, "pending", "accepted", tx))) throw inviteNotFound();
     await tx.groupMember.createMany({ data: [{ groupId: found.groupId, userId }], skipDuplicates: true });
+    await generate(found.groupId, tx); // the new member's allergens get flagged
     return groupsRepo.get(found.groupId, (await groupsRepo.role(found.groupId, userId, tx))!, tx);
   });
   emitGroup(group.id, "group:changed", userId);
+  emitGroup(group.id, "shopping-list:changed", userId);
   emitUser(userId, "invites:changed");
   return group;
 }
@@ -107,10 +110,15 @@ async function dropMember(groupId: string, userId: string, by: string, revokeInv
   const { groupDeleted } = await prisma.$transaction(async (tx) => {
     await groupsRepo.lock(tx, groupId);
     if (revokeInvite) await groupsRepo.revokeByEmail(tx, groupId, await myEmail(userId));
-    return groupsRepo.removeMember(tx, groupId, userId);
+    const res = await groupsRepo.removeMember(tx, groupId, userId);
+    if (!res.groupDeleted) await generate(groupId, tx); // their preferences and allergen flags are gone
+    return res;
   });
   await kickFromGroup(groupId, userId);
-  if (!groupDeleted) emitGroup(groupId, "group:changed", by);
+  if (!groupDeleted) {
+    emitGroup(groupId, "group:changed", by);
+    emitGroup(groupId, "shopping-list:changed", by);
+  }
   emitUser(userId, "group:changed", { groupId, by }); // their own group list changed too
 }
 

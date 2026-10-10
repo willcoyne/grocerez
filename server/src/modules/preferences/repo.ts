@@ -15,6 +15,7 @@ const select = {
   item: { select: { id: true, name: true, category: true, defaultAllergens: true, shelfLifeDays: true } },
   member: { select: { user: { select: { displayName: true } } } },
 } as const;
+type Db = Prisma.TransactionClient | typeof prisma;
 type Row = Prisma.PreferenceGetPayload<{ select: typeof select }>;
 
 const toPreference = ({ member: _, item, createdAt, updatedAt, ...p }: Row): Preference => ({
@@ -42,9 +43,9 @@ export const preferencesRepo = {
   owner: async (groupId: string, id: string): Promise<string | null> =>
     (await prisma.preference.findFirst({ where: { id, groupId }, select: { userId: true } }))?.userId ?? null,
 
-  upsert: async (groupId: string, userId: string, { itemId, ...data }: CreatePreferenceBody): Promise<Preference> =>
+  upsert: async (groupId: string, userId: string, { itemId, ...data }: CreatePreferenceBody, db: Db = prisma): Promise<Preference> =>
     toPreference(
-      await prisma.preference.upsert({
+      await db.preference.upsert({
         where: { groupId_userId_itemId: { groupId, userId, itemId } },
         create: { groupId, userId, itemId, ...data },
         update: data,
@@ -52,8 +53,8 @@ export const preferencesRepo = {
       }),
     ),
 
-  update: async (groupId: string, id: string, data: UpdatePreferenceBody): Promise<Preference> =>
-    toPreference(await prisma.preference.update({ where: { id, groupId }, data, select })),
+  update: async (groupId: string, id: string, data: UpdatePreferenceBody, db: Db = prisma): Promise<Preference> =>
+    toPreference(await db.preference.update({ where: { id, groupId }, data, select })),
 
-  delete: (groupId: string, id: string) => prisma.preference.delete({ where: { id, groupId } }),
+  delete: (groupId: string, id: string, db: Db = prisma) => db.preference.delete({ where: { id, groupId } }),
 };

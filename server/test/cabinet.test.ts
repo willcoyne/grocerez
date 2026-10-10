@@ -44,6 +44,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await prisma.cabinetItem.deleteMany({ where: { groupId: g.id } });
+  await prisma.shoppingListItem.deleteMany({ where: { groupId: g.id } });
   await prisma.preference.deleteMany({ where: { groupId: g.id } });
   emit.mockClear();
 });
@@ -163,7 +164,7 @@ describe("cabinet", () => {
     expect(await cabinetRepo.haveItemIds(g.id)).toContain(milk.id);
   });
 
-  it("ran out, nobody wants it: requeued false; DELETE removes without requeueing", async () => {
+  it("ran out, nobody wants it: requeued false; DELETE of a wanted item regenerates (back on the list now)", async () => {
     const e = await add(owner, { itemId: eggs.id });
     emit.mockClear();
     expect((await api().post(`${base()}/${e.id}/ran-out`).set(member.auth).expect(200)).body).toEqual({ requeued: false });
@@ -172,9 +173,11 @@ describe("cabinet", () => {
     await api().post(`/api/groups/${g.id}/preferences`).set(member.auth).send({ itemId: milk.id }).expect(200);
     const m = await add(owner, { itemId: milk.id });
     emit.mockClear();
+    expect(await prisma.shoppingListItem.count({ where: { groupId: g.id, itemId: milk.id } })).toBe(0);
     await api().delete(`${base()}/${m.id}`).set(member.auth).expect(204);
-    expect(events()).toEqual(["cabinet:changed"]);
+    expect(events()).toEqual(["cabinet:changed", "shopping-list:changed"]);
     expect(await prisma.cabinetItem.count({ where: { groupId: g.id } })).toBe(0);
+    expect(await prisma.shoppingListItem.count({ where: { groupId: g.id, itemId: milk.id } })).toBe(1);
     await api().delete(`${base()}/${m.id}`).set(member.auth).expect(404);
   });
 });

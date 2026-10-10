@@ -325,3 +325,58 @@ Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud reso
 - **Frontend must update:** `DELETE /groups/:groupId/cabinet/:id` (204) added to the contract table (it was in 05's README
   but missing from the table). `PATCH cabinet` accepts `photoKey` (from `POST /uploads/presign {purpose: "item-photo"}`, or
   `null`), and `CabinetItem` has `photoUrl`, which expires after 1 hour.
+
+## 06-shopping-list-engine
+
+- **Schema:** new migration `20261011030000_shopping_list` per `database/07` (`list_reason`, `shopping_list_items`,
+  `UNIQUE (group_id, item_id)`, index `(group_id, checked)`), plus a CHECK that `checked_by`/`checked_at` are null when
+  unchecked. `checked_by`/`added_by` are `ON DELETE SET NULL`, `item_id` `RESTRICT`, `group_id` `CASCADE`.
+  **`scanned_product_id` is a plain nullable uuid with no FK** (`products` isn't on this branch). The 08 merge must add
+  `FOREIGN KEY (scanned_product_id) REFERENCES products(id) ON DELETE SET NULL` (same as `cabinet_items.product_id`) and
+  validate `scannedProductId` in PATCH (`404 PRODUCT_NOT_FOUND`). Applied with `migrate deploy`; `migrate diff` DB vs
+  schema shows only the other agent's `products` table. `database/07` boxes ticked (both covered by `test/shopping-list.test.ts`).
+- **One generator:** `generate(groupId, tx)` in `modules/shopping-list/service.ts`, called inside the caller's transaction by:
+  POST `/generate`, manual add, list DELETE, finish trip, cabinet POST / PATCH status / ran-out / DELETE, preference
+  POST / PATCH / DELETE, `PUT /me/dietary` (each of the user's groups), invite accept, leave / member removal, `DELETE /me`.
+  Callers emit `shopping-list:changed` after commit. The set math is a pure `setMath()` covered by a fast-check property test.
+  Idempotent: rows are only written when `wantedBy` / `quantityText` / `allergenFlags` actually change.
+- **Concurrency:** every list-changing transaction goes through `inListTx`, which takes the **group row lock**
+  (`groupsRepo.lock`, `SELECT … FOR UPDATE`, the lock 03 already uses for membership) **first**, so list, cabinet,
+  preference and membership writers serialize per group with one lock order. Finish trip additionally selects the checked
+  rows `FOR UPDATE`, so a racing un-check waits and then 404s if the row was moved (or wins and stays unchecked). PATCH
+  (check-off) doesn't take the group lock: it's a single-row last-write-wins update.
+- **Generation details:** `quantityText` on preference rows = distinct members' quantity notes joined with `", "`; manual rows
+  keep their own. `wantedBy` and `allergenFlags` are refreshed on **every** surviving row (manual and checked too), since
+  they're facts about the group, not in-progress state; `reason`, `checked*`, `scanned_product_id` are never touched.
+  Allergen flags use `items.default_allergens` only (no `products` table here, marked `ponytail:` in `shopping-list/repo.ts`;
+  08 merge: use the scanned product's `allergens ∪ may_contain` when `scanned_product_id` is set). Exact enum match
+  (`wheat` doesn't imply `gluten`).
+- **Manual add** (`POST /shopping-list`) is an upsert returning **200** (like preferences/cabinet). An item already listed by
+  preference becomes `reason='manual'` (so it survives losing its preference); `quantityText` is overwritten only when sent.
+  Unknown `itemId` → `404 ITEM_NOT_FOUND`.
+- **PATCH** `{checked: true}` sets `checked_by`/`checked_at` (re-checking by someone else overwrites them) and sets
+  `scanned_product_id` when sent. `{checked: false}` clears all three unless a `scannedProductId` is sent. Unknown id or a row
+  in another group → `404 LIST_ITEM_NOT_FOUND`.
+- **DELETE** `/shopping-list/:id`: manual rows → 204 (and regenerate, so a manual row for an item someone wants comes back as
+  a preference row). Preference rows → `409 LIST_ITEM_IS_PREFERENCE` **only while someone still wants the item**; an orphaned
+  checked preference row (preference removed while checked) can be deleted.
+- **Finish trip:** checked rows → cabinet upsert with `status='in_stock'`, `purchased_at=now()`,
+  `expires_at = estimateExpiration(item, now)` / `expiration_source='estimated'` (both null when there is no basis, e.g.
+  household). This overwrites an older hand-set date (it's a new purchase). `product_id` is set only when the row was
+  scanned, so an unscanned re-buy keeps the known product. `one_time` preferences for moved items are deleted (staples
+  stay, so ran out requeues them). Emits `cabinet:changed`, `preferences:changed` and `shopping-list:changed` when anything
+  moved. `{movedToCabinet: 0}` when nothing is checked.
+- **05 follow-up decided:** `DELETE /cabinet/:id` now regenerates too (and emits `shopping-list:changed`): since the list is
+  `preferences − have`, a wanted item comes back immediately instead of at some later regeneration. Ran out now always
+  regenerates (`requeued` still = someone wants it).
+- **Regeneration on membership changes** (beyond the plan): accept, leave, removal and `DELETE /me` regenerate inside the
+  existing locked transaction, so a new member's allergens are flagged and a leaver's preferences drop off the list.
+- **`ShoppingListItem`** (`contracts/shoppingList.ts`) = `{id, groupId, item: Item, reason, wantedBy: {userId, displayName}[],
+  quantityText, allergenFlags: {userId, displayName, allergen}[], checked, checkedBy: {userId, displayName} | null,
+  checkedAt, scannedProductId, addedBy: {userId, displayName} | null, createdAt, updatedAt}`. GET sorts by aisle
+  (produce, bakery, meat, seafood, dairy, frozen, pantry, snacks, beverages, household, other/none), then name.
+- **Seeded demo test:** `database/10`'s seed doesn't exist on this branch, so `test/shopping-list.test.ts` builds the same
+  4-user group (prefs, allergens, Cheerios in stock, Oreos running low) in `beforeEach` and asserts Tostitos, Lay's, Oreos.
+- **Frontend must update:** `DELETE /cabinet/:id` of an item someone wants now puts it back on the list (expect
+  `shopping-list:changed`). `ShoppingListItem` shape above (names are included, no member lookup needed). Manual add returns
+  200, not 201. List DELETE on a wanted preference row is `409 LIST_ITEM_IS_PREFERENCE` (tell the user to remove the preference).
