@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
 import type { GoogleIdentity } from "../../lib/google.js";
 import type { UpdateMeBody, User } from "../../contracts/auth.js";
+import type { Dietary } from "../../contracts/dietary.js";
 
 const select = { id: true, email: true, displayName: true, avatarUrl: true, avatarKey: true, zipCode: true } as const;
 // API User plus the stored S3 key; users/service toUser() turns the key into a presigned avatarUrl.
@@ -29,4 +30,21 @@ export const usersRepo = {
 
   delete: (id: string, db: Prisma.TransactionClient | typeof prisma = prisma): Promise<UserRow> =>
     db.user.delete({ where: { id }, select }),
+
+  dietary: async (userId: string): Promise<Dietary> => {
+    const u = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { diets: { select: { diet: true }, orderBy: { diet: "asc" } }, allergens: { select: { allergen: true }, orderBy: { allergen: "asc" } } },
+    });
+    return { diets: u.diets.map((d) => d.diet as Dietary["diets"][number]), allergens: u.allergens.map((a) => a.allergen) };
+  },
+
+  // Replaces both sets in one transaction.
+  setDietary: (userId: string, { diets, allergens }: Dietary) =>
+    prisma.$transaction([
+      prisma.userDiet.deleteMany({ where: { userId } }),
+      prisma.userAllergen.deleteMany({ where: { userId } }),
+      prisma.userDiet.createMany({ data: diets.map((diet) => ({ userId, diet })) }),
+      prisma.userAllergen.createMany({ data: allergens.map((allergen) => ({ userId, allergen })) }),
+    ]),
 };

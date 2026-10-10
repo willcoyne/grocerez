@@ -227,3 +227,40 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
   their personal `user:<id>` room so their group list refreshes. `invites:changed` has an empty payload `{}`.
 - **Member objects go through `toUser` in `users/service.ts`** (the single DB-row to public-User mapping that backend/11 extends with presigned avatar URLs), then are narrowed to `{id, displayName, email, avatarUrl, role}`.
 - **Skipped:** redis adapter (07 step 7, single instance). The polling fallback (07 step 6) needs no API work.
+## 04-preferences
+
+- **Schema created here** (no database branch existed), two new migrations, nothing earlier touched:
+  - `20261011000000_item_catalog`: `items`, `item_aliases`, the two GIN `gin_trgm_ops` indexes and SQL
+    `normalize_item_name()` per `database/04`, plus CHECKs for the category list and non-empty normalized names.
+    `items.created_by` is `ON DELETE SET NULL`. No seed (that's `database/10`); tests create the items they need.
+  - `20261011000100_preferences`: `recurrence` enum and `preferences` per `database/05`, except the group/user FKs are one
+    **composite FK `(group_id, user_id) → group_members ON DELETE CASCADE`** instead of separate FKs to `groups`/`users`.
+    Leave, removal, `DELETE /me` and group delete all already delete the membership row in a transaction, so preferences
+    go with it and no extra backend code is needed (`database/05` step 4 asked for a backend delete). `item_id` is
+    `ON DELETE RESTRICT`. Applied with `prisma migrate deploy`; `prisma migrate diff` against the schema shows no drift.
+  - `database/04` and `database/05` checkboxes are left for the database builder (EXPLAIN / timing not checked).
+- **Normalization rules** (`lib/normalize.ts` = SQL function, checked by `test/normalize.test.ts`): lowercase, strip every
+  char that isn't a letter/digit/whitespace/`&` (so `Ice-Cream` → `icecream`, `2% Milk` → `2 milk`), collapse whitespace,
+  trim, then de-pluralize only the last word: kept if ≤ 3 chars, ending in `ss`/`us`, or in the exceptions list
+  (`hummus, asparagus, swiss, couscous, molasses, citrus, octopus, species`); `-es` is dropped after `ss|x|z|ch|sh|o`
+  (`tomatoes` → `tomato`, `peaches` → `peach`), otherwise just `-s` (`oranges` → `orange`, `cheeses` → `cheese`).
+- **Fuzzy search** uses `normalized_name % q` (same as `similarity > 0.3`, but it can use the GIN index), items only (not
+  aliases). Suggestion threshold: levenshtein ≤ 2, or ≤ 1 when the normalized query is under 5 characters. `q` is capped
+  at 100 chars (fuzzystrmatch's `levenshtein` rejects inputs over 255). A `q` that normalizes to empty is 400.
+- **`POST /items`** returns **200** (not 201), because a name that already resolves exactly (item or alias) returns the
+  existing item; creation is an `ON CONFLICT` upsert so a race returns the same row. With `aliasOf`, an unknown item is
+  `404 ITEM_NOT_FOUND`; if the typed text already resolves exactly, no alias is added. `category` must be one of the
+  `database/04` list (400 otherwise).
+- **Preferences:** `POST` is an upsert on `(group, user, item)` and returns **200**; unknown `itemId` is
+  `404 ITEM_NOT_FOUND`. `PATCH`/`DELETE` on another member's row is `403 FORBIDDEN`; an id not in this group is
+  `404 PREFERENCE_NOT_FOUND`. `quantityText`/`note` accept `null` to clear. `?userId=all` returns every member's rows,
+  each with `wantedBy: string[]` (display names of all members wanting that item); `me` (default) omits `wantedBy`.
+  `Preference = {id, groupId, userId, item: Item, quantityText, recurrence, note, createdAt, updatedAt, wantedBy?}`,
+  `Item = {id, name, category, defaultAllergens, shelfLifeDays}`. Every write emits `preferences:changed`.
+- **Dietary:** `PUT /me/dietary` requires both arrays (strict), dedupes them, and replaces both sets in one transaction.
+  Enums in `contracts/dietary.ts` (allergens taken from the Prisma enum, diets equal to the `user_diets` CHECK list).
+- **Not done: shopping-list regeneration** (step 4 and the dietary part of step 5). `generate(groupId)` belongs to backend/06,
+  which doesn't exist yet; the call sites are marked with `ponytail:` comments in `preferences/service.ts` and
+  `users/service.ts`. The second "Done when" box stays unticked until 06.
+- **Allergen keyword tables not consolidated:** 04 needed no keyword logic (items carry `default_allergens`), so the
+  duplicate tables in `products/common.ts` and `ai/allergens.ts` were left alone.
