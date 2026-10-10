@@ -5,7 +5,9 @@ import { pinoHttp } from "pino-http";
 import { config } from "./config.js";
 import { logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { requireAuth } from "./middleware/auth.js";
 import { healthRouter } from "./modules/health/router.js";
+import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
 /** Builds the Express app (no network listener; index.ts adds the HTTP server and Socket.IO). */
 export function createApp() {
@@ -32,7 +34,13 @@ export function createApp() {
   );
 
   const api = Router();
+  // Public routes.
   api.use(healthRouter);
+  api.use(authRouter);
+  api.use(devRouter());
+  // Everything below needs a valid app JWT.
+  api.use(requireAuth);
+  api.use(meRouter);
   app.use("/api", api);
 
   app.use(notFoundHandler);

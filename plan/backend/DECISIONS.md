@@ -29,3 +29,21 @@ Format: date · folder · what the plan said · what was done · why.
   `test/globalSetup.ts` runs `prisma migrate deploy` + `prisma db seed` on it before every run and refuses any URL that isn't a `*_test` database.
   Files run serially (`fileParallelism: false`). Tests create their own users/groups with random ids, except the engine test,
   which reads the seeded demo group.
+
+### 2026-10-10 · 02 · Profile refresh on login
+- **Plan said:** upsert by `google_sub`, "update email, name, and picture on each login".
+- **Did:** email (trimmed + lower-cased, required by the DB CHECK) and picture refresh on every login; `displayName` is set from
+  Google only when the user is created (fallback: the part of the email before `@`).
+- **Why:** otherwise a name changed through `PATCH /me` would be overwritten at every sign-in.
+
+### 2026-10-10 · 02 · Auth details
+- An unverified Google email returns `401 EMAIL_NOT_VERIFIED` (bad/expired token: `401 UNAUTHENTICATED`). No user row is written.
+- `requireAuth` also checks the user row still exists, so tokens of a deleted account (`DELETE /me`) stop working immediately.
+  It is mounted once for every `/api` route after `/health`, `/auth/google` and `/dev/*`, so unknown `/api/*` paths answer 401 to anonymous callers.
+- `DELETE /me` runs in one transaction: delete the user (memberships + preferences cascade; the `owner_handoff` trigger promotes the
+  longest-standing member), delete groups left with no members, regenerate the remaining groups' lists; then emits
+  `group:changed` / `preferences:changed` / `shopping-list:changed` and disconnects the user's sockets.
+- `PATCH /me` accepts `zipCode: null` to clear it; ZIP must be 5 digits (the `price_estimates` CHECK uses the same rule).
+- `POST /api/dev/login-as/:userId` returns `{token, user}` like `/auth/google`. Mounted when `NODE_ENV !== "production"`; in production
+  only when `DEMO_KEY` is set, and then it requires header `x-demo-key` (backend/12 step 4). Seeded ids: `00000000-0000-4000-8000-000000000101`…`0104`.
+- Google verification lives in `src/lib/google.ts` (`google.verifyIdToken`), which tests stub with `vi.spyOn`.

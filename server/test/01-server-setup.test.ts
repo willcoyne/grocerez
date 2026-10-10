@@ -18,7 +18,7 @@ describe("01 server setup", () => {
   });
 
   it("unknown routes return the standard 404 error shape", async () => {
-    const res = await request(app).get("/api/nope");
+    const res = await request(app).get("/nope");
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("NOT_FOUND");
   });
