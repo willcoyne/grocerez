@@ -24,5 +24,11 @@
 
 ## Done when
 
-- [ ] Marking Oreos "ran out" removes them from the cabinet and they appear on the List tab
-- [ ] Marking an item "running low" keeps it in the cabinet and adds it to the list
+- [x] Marking Oreos "ran out" removes them from the cabinet and they appear on the List tab — Jest: row removed, `requeued:false` prompt → manual list add; the server requeue + List tab refresh **needs live/device check**
+- [x] Marking an item "running low" keeps it in the cabinet and adds it to the list — Jest: row stays with "Low · on list"; list side is the server's regeneration (List invalidated)
+
+## Status (2026-10-10)
+
+Cabinet tab grouped by location with filter chips (All / Fridge / Freezer / Pantry / Other / Expiring soon / Low stock), expiration pills,
+row menu (long-press or "⋯"): Running low / Back in stock / Ran out (+ Undo snackbar, + "add anyway?") / Details / Remove;
+"Map out" ItemPicker in quick-add-many mode with a location selector and "Scan instead"; empty state; socket `cabinet:changed` invalidates.

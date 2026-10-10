@@ -24,6 +24,13 @@
 
 ## Done when
 
-- [ ] Recipe suggestions return and respect a member's peanut allergy in the demo group
-- [ ] "Add missing to list" puts items on the List tab
-- [ ] The price estimate for the demo list renders with a total range
+- [ ] Recipe suggestions return and respect a member's peanut allergy in the demo group — filtering is server-side; needs `ANTHROPIC_API_KEY` → **needs live check**
+- [x] "Add missing to list" puts items on the List tab — Jest: `itemId` rows added directly, `itemId:null` names created with `POST /items` first, then `POST shopping-list`
+- [x] The price estimate for the demo list renders with a total range — Jest with the contract's response shape; real Claude call **needs live check**
+
+## Status (2026-10-10)
+
+`recipes` modal (Group tab "What can we cook?" and Alerts "Find recipes"): expiring-first toggle, explicit "Find recipes" button, skeleton,
+cards with time/servings/Uses (expiring highlighted ⏰)/Missing/steps, "Safe for: …" line, error copy for AI_UNAVAILABLE / NOT_CONFIGURED /
+CABINET_EMPTY / 429. `prices` modal (List header chip): inline ZIP prompt (`PATCH /me {zipCode}`), total range, per-item ranges, sources,
+"No estimate for …" (`missingItemIds`), Refresh. AI content is marked with ✨ labels.
