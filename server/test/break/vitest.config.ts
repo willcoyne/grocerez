@@ -29,6 +29,9 @@ export default defineConfig({
       AWS_ACCESS_KEY_ID: "",
       AWS_SECRET_ACCESS_KEY: "",
       RESEND_API_KEY: "",
+      // Never call the real Akamai API from tests (server/.env may hold a real key).
+      AKAMAI_API_KEY: "",
+      AKAMAI_EMBEDDING_URL: "",
       OPENFDA_API_KEY: "",
     },
   },
