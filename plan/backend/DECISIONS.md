@@ -208,3 +208,35 @@ Format: date · folder · what the plan said · what was done · why.
   ≤ 5 MB, `image/*`) is copied to `products/{productId}.jpg` and stored in `products.image_s3_key`. Failures only log.
 - Not done (needs the AWS account): creating the bucket with Block Public Access, the IAM policy, and bucket CORS. Both "Done when" boxes need a real
   bucket to verify, so they are left unticked; the code path is covered by offline presigning tests.
+
+### 2026-10-10 · 10 · Claude integration (`src/lib/anthropic.ts`)
+- `@anthropic-ai/sdk` 0.133, model `claude-opus-5-5`, `client.beta.messages.parse` with `betaZodOutputFormat(schema)` (structured outputs),
+  `thinking: {type: "adaptive"}`, explicit `output_config.effort` (`low` recipes, `medium` prices), and the server-side refusal fallback
+  `betas: ["server-side-fallback-2026-07-01"]` + `fallbacks: "default"`. Client timeout 60 s, 1 retry. The output is validated again with the same zod schema.
+- `stop_reason` is checked before reading anything: `refusal` → `422 AI_REFUSED`; `max_tokens` → `503 AI_UNAVAILABLE`; `pause_turn` (long web-search
+  turns) → the assistant turn is appended and the request resumed (max 4 rounds); invalid output → `502 AI_BAD_OUTPUT`; SDK errors
+  (`RateLimitError`, `APIError`, connection/timeout) → `503 AI_UNAVAILABLE`; no `ANTHROPIC_API_KEY` → `503 NOT_CONFIGURED`.
+  Web-search error blocks (`web_search_tool_result` whose `content` is an object) are collected and logged.
+- Tests stub the single call site `ai.call`; nothing was run against the real API (no key). **Not verified live:** the "under 30 seconds" price
+  check (left unticked) and the combination of the web search tool with structured outputs in one request.
+
+### 2026-10-10 · 10 · Recipes
+- **Schema change vs plan:** Claude also returns `ingredients[]` (with quantities), because the deterministic allergen re-check (step 3) needs
+  the full ingredient list. The response `Recipe` adds `usesExpiring[]` (computed by the server) and `missingItems` becomes
+  `[{name, itemId|null, itemName|null, match}]` (mapped with the `/items/search` logic; no catalog items are created from AI output: an unmatched
+  name has `itemId: null` and the app can `POST /items` first). All of the plan's fields are present.
+  **Frontend must update:** use `missingItems[].itemId` for "Add missing to list" (`POST /groups/:groupId/shopping-list`).
+- Recipes conflicting with the group's combined allergens (keyword table from 08) or diets (`src/lib/diets.ts`: meat/fish words for
+  vegetarian/vegan/pescatarian, milk for dairy_free, gluten/wheat for gluten_free, pork for halal/kosher, starch words for keto) are
+  **dropped**. With `mustUseExpiring` and expiring items present, a recipe that uses none of them is dropped too.
+- Empty cabinet → `400 CABINET_EMPTY`. `maxRecipes` 1–5 (default 3). 10 requests/hour per group (`429`).
+
+### 2026-10-10 · 10 · Prices
+- ZIP: body → the caller's profile → `400 ZIP_REQUIRED`. All list rows (checked or not) are priced. Cached `price_estimates` younger than
+  24 h are reused; the rest go to one Claude request with `web_search_20260209` (`max_uses: 5`). The SDK's `user_location` has no postal-code
+  field (`city/region/country/timezone`), so it is `{type: "approximate", country: "US"}` and the ZIP is in the prompt.
+- Claude must echo our `itemId`; rows for items we didn't ask about, negative values, `low > high`, or `typical` outside `[low, high]` are discarded.
+  Only `http(s)` source URLs are kept (max 5). Upserted with `model = "claude-opus-5-5"`.
+- **Response:** `{zipCode, items:[{itemId, name, lowCents, highCents, typicalCents, unit, sources, estimate:true, cached, fetchedAt}], missingItemIds,
+  totalLowCents, totalHighCents}` (the contract's three fields plus extras). An empty list returns zeros without calling Claude.
+  20 requests/hour per group (not in the plan; caps web-search cost).

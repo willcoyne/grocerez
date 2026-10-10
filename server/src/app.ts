@@ -7,6 +7,7 @@ import { logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
+import { aiRouter } from "./modules/ai/router.js";
 import { cabinetRouter } from "./modules/cabinet/router.js";
 import { dietaryRouter } from "./modules/dietary/router.js";
 import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
@@ -62,6 +63,7 @@ export function createApp() {
   group.use(groupScopedRouter);
   group.use(preferencesRouter);
   group.use(cabinetRouter);
+  group.use(aiRouter);
   group.use(shoppingListRouter);
   group.use(alertsRouter);
   api.use("/groups/:groupId", requireGroupMember, group);
