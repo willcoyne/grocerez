@@ -63,6 +63,13 @@ Format: date · folder · what the plan said · what was done · why.
   (green/amber/red) are a display-only reading of `expiresAt`.
 - Undo after ran-out/remove = `POST cabinet` with the same item, location and quantity; a manual date is re-sent, an estimated one is re-estimated.
 
+### 2026-10-10 · 06 · Shopping list
+- "✓ by Carson" names come from `GET /groups/:groupId` members (`checkedBy` is a user id); the current user shows as "you".
+- Check-offs share one mutation key per group; the list is only re-fetched when the last pending check-off settles, so a slow response
+  can't flip a newer tap back. A failed check-off (after retries) rolls back and shows a toast.
+- Swipe-to-delete for manual rows is a "✕" icon button. Finish trip is not retried automatically (it's a one-shot transaction).
+- The price chip reads the cached `POST …/prices` result (a TanStack query shared with the Prices modal); before an estimate exists it says "Est. price".
+
 ## Needs backend change
 
 - **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no
