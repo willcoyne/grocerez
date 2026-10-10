@@ -272,6 +272,7 @@ model CabinetItem {
   /// Target of recall_matches' composite FK (keeps a match's group equal to its cabinet item's group).
   @@unique([id, groupId])
   @@index([groupId, expiresAt])
+  @@index([productId])
   @@map("cabinet_items")
 }
 
@@ -315,6 +316,7 @@ model ShoppingListItem {
 
   @@unique([groupId, itemId])
   @@index([groupId, checked])
+  @@index([scannedProductId])
   @@map("shopping_list_items")
 }
 

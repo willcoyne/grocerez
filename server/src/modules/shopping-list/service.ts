@@ -73,10 +73,15 @@ export const shoppingListService = {
 
   /** Check / uncheck (the DB trigger stamps checked_at; unchecking clears checked_by/at) and link a scanned product. */
   async check(groupId: string, userId: string, id: string, body: CheckListItemBody): Promise<ShoppingListItem> {
-    if (!(await shoppingListRepo.find(prisma, groupId, id))) throw notFound("List item");
+    const row = await shoppingListRepo.find(prisma, groupId, id);
+    if (!row) throw notFound("List item");
     if (body.scannedProductId) {
-      const p = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true } });
+      const p = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true, itemId: true } });
       if (!p) throw notFound("Product");
+      // DB-04: the database rejects a product of another catalog item (its allergens would replace this item's).
+      if (p.itemId !== row.itemId) {
+        throw conflict("The scanned product belongs to a different item than this list row", "PRODUCT_ITEM_MISMATCH");
+      }
     }
     await withRegeneration(groupId, userId, ["shopping-list:changed"], (tx) =>
       shoppingListRepo.setChecked(tx, groupId, id, {
