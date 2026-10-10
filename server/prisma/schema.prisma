@@ -8,3 +8,58 @@ datasource db {
   provider   = "postgresql"
   extensions = [pgcrypto, pg_trgm, fuzzystrmatch]
 }
+
+// ─── 02 Users, diets & allergens ───────────────────────────────────────────────
+
+/// 9 major U.S. allergens + gluten.
+enum Allergen {
+  milk
+  eggs
+  fish
+  shellfish
+  tree_nuts
+  peanuts
+  wheat
+  soy
+  sesame
+  gluten
+
+  @@map("allergen")
+}
+
+model User {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Google's stable user ID (`sub` claim). Never key on email.
+  googleSub   String   @unique @map("google_sub")
+  /// Google-verified email, lower-cased and trimmed (CHECK enforced).
+  email       String   @unique
+  displayName String   @map("display_name")
+  avatarUrl   String?  @map("avatar_url")
+  zipCode     String?  @map("zip_code")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  allergens UserAllergen[]
+  diets     UserDiet[]
+
+  @@map("users")
+}
+
+model UserAllergen {
+  userId   String   @map("user_id") @db.Uuid
+  allergen Allergen
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, allergen])
+  @@map("user_allergens")
+}
+
+/// `diet` is CHECK-constrained to: vegetarian, vegan, pescatarian, keto, halal, kosher, low_sodium, dairy_free, gluten_free.
+model UserDiet {
+  userId String @map("user_id") @db.Uuid
+  diet   String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, diet])
+  @@map("user_diets")
+}

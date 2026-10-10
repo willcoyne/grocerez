@@ -37,3 +37,13 @@ Format: date · folder · what the plan said · what was done · why.
 - Host port 5432 was free, so the container uses the planned `5432` and `DATABASE_URL` is unchanged.
   If a teammate already runs Postgres locally, change the left side of `ports:` in `docker-compose.yml` (e.g. `"5433:5432"`) and the port in `.env`.
 
+### 2026-10-10 · 02 · Email CHECK on users
+- **Plan said:** `users.email` is "lower-cased" (no constraint listed).
+- **Did:** added `CHECK (email = lower(btrim(email)))` on `users`, same rule as `group_invites`. The backend must
+  `trim().toLowerCase()` Google's email before writing it.
+- **Why:** invite matching (03) is `group_invites.email = users.email`; both sides must be normalized the same way or matching silently fails.
+
+### 2026-10-10 · 02 · `src/db.ts`
+- **Did:** added `server/src/db.ts` (the PrismaClient singleton named in `backend/01`) because the Prisma 7 client needs the
+  `@prisma/adapter-pg` driver adapter and the seed/checks needed one. The backend builder can keep or move it.
+
