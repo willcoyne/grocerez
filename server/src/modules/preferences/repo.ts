@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
+import { orNull } from "../../lib/errors.js";
 import type { Item } from "../../contracts/items.js";
 import type { CreatePreferenceBody, Preference, UpdatePreferenceBody } from "../../contracts/preferences.js";
 
@@ -53,8 +54,11 @@ export const preferencesRepo = {
       }),
     ),
 
-  update: async (groupId: string, id: string, data: UpdatePreferenceBody, db: Db = prisma): Promise<Preference> =>
-    toPreference(await db.preference.update({ where: { id, groupId }, data, select })),
+  // null = the row was deleted concurrently (another device, or finish trip removing a one_time row).
+  update: async (groupId: string, id: string, data: UpdatePreferenceBody, db: Db = prisma): Promise<Preference | null> => {
+    const row = await orNull(db.preference.update({ where: { id, groupId }, data, select }));
+    return row && toPreference(row);
+  },
 
-  delete: (groupId: string, id: string, db: Db = prisma) => db.preference.delete({ where: { id, groupId } }),
+  delete: (groupId: string, id: string, db: Db = prisma) => orNull(db.preference.delete({ where: { id, groupId } })),
 };

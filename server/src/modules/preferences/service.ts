@@ -28,22 +28,30 @@ export async function upsert(groupId: string, userId: string, body: CreatePrefer
   return pref;
 }
 
+const prefNotFound = () => new AppError(404, "PREFERENCE_NOT_FOUND", "Preference not found");
+
 // Own rows only: someone else's row in this group is 403, a row not in this group is 404.
 async function assertOwn(groupId: string, id: string, userId: string) {
   const owner = await preferencesRepo.owner(groupId, id);
-  if (!owner) throw new AppError(404, "PREFERENCE_NOT_FOUND", "Preference not found");
+  if (!owner) throw prefNotFound();
   if (owner !== userId) throw new AppError(403, "FORBIDDEN", "You can only change your own preferences");
 }
 
 export async function update(groupId: string, id: string, userId: string, body: UpdatePreferenceBody): Promise<Preference> {
   await assertOwn(groupId, id, userId);
-  const pref = await withList(groupId, (tx) => preferencesRepo.update(groupId, id, body, tx));
+  const pref = await withList(groupId, async (tx) => {
+    const p = await preferencesRepo.update(groupId, id, body, tx);
+    if (!p) throw prefNotFound();
+    return p;
+  });
   changed(groupId, userId);
   return pref;
 }
 
 export async function remove(groupId: string, id: string, userId: string) {
   await assertOwn(groupId, id, userId);
-  await withList(groupId, (tx) => preferencesRepo.delete(groupId, id, tx));
+  await withList(groupId, async (tx) => {
+    if (!(await preferencesRepo.delete(groupId, id, tx))) throw prefNotFound();
+  });
   changed(groupId, userId);
 }

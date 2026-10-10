@@ -14,7 +14,8 @@ describe("catalog aliases across households", () => {
     const sug = await api().get("/api/items/search").query({ q: text }).set(mallory.auth).expect(200);
     expect(sug.body.results.map((r: { id: string }) => r.id)).not.toContain(apples.id);
 
-    await api().post("/api/items").set(mallory.auth).send({ name: text, aliasOf: apples.id });
+    const res = await api().post("/api/items").set(mallory.auth).send({ name: text, aliasOf: apples.id });
+    expect([res.status, res.body.error?.code]).toEqual([400, "ALIAS_NOT_SUGGESTED"]); // fix (DECISIONS M2)
 
     // backend/04 step 3: aliasOf means "the user confirmed a suggestion". The server should only accept an alias for an
     // item the search actually suggested for that text (or otherwise refuse it).

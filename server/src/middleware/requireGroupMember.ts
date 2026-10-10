@@ -17,7 +17,7 @@ const notFound = () => new AppError(404, "NOT_FOUND", "Group not found");
 // Mounted on /api/groups/:groupId in app.ts, so every /groups/:groupId/* route passes through it.
 // Non-members get 404 so they can't tell whether the group exists.
 export const requireGroupMember: RequestHandler = async (req, _res, next) => {
-  const groupId = req.params.groupId as string;
+  const groupId = (req.params.groupId as string).toLowerCase(); // canonical id for everything downstream (rooms, logs)
   if (!z.uuid().safeParse(groupId).success) throw notFound();
   const role = await groupsRepo.role(groupId, req.userId);
   if (!role) throw notFound();

@@ -10,16 +10,20 @@ cross-household isolation held on every route and path variant tried.
 
 ## Summary
 
-| ID | Severity | Area | Title | Test file |
-|---|---|---|---|---|
-| M2-06 | Medium | Realtime (07) | Upper-case group ids split Socket.IO rooms: members miss events, and a removed member keeps receiving them | `realtime.test.ts` |
-| M2-07 | Medium | Catalog (04) | Any user can alias any unrelated text to any item, for every household | `catalog.test.ts` |
-| M2-01 | Medium | Validation | A NUL byte in any stored string gives `500 INTERNAL` (7 routes) | `validation.test.ts` |
-| M2-02 | Medium | Concurrency (04) | Concurrent DELETE/PATCH of one preference gives `500` (P2025 not handled) | `concurrency.test.ts` |
-| M2-08 | Low | Validation (06) | An unknown `scannedProductId` gives `500` once the products FK exists (it does in the shared DB now) | `validation.test.ts` |
-| M2-04 | Low | Concurrency (04) | Two concurrent `PUT /me/dietary` from one user: one gets `409 CONFLICT` | `concurrency.test.ts` |
-| M2-05 | Low | Cabinet (05/11) | `photoKey` regex has an unescaped `.`, so keys that `/uploads/presign` never issued are accepted | `validation.test.ts` |
-| M2-03 | Low | List engine (06) | Allergen flag `displayName` goes stale after `PATCH /me` | `engine.property.test.ts` |
+Fix pass: all 57 M2 tests pass on the fix branch (full suite 446/446). The fix pass also found a check-off vs
+regenerate race: the "check-off racing a cabinet add" guard test failed once. It's fixed by making `generate()`'s delete
+re-check `checked = false`. Details are in `plan/backend/DECISIONS.md` under "M2 break fixes".
+
+| ID | Severity | Area | Title | Test file | Status |
+|---|---|---|---|---|---|
+| M2-06 | Medium | Realtime (07) | Upper-case group ids split Socket.IO rooms: members miss events, and a removed member keeps receiving them | `realtime.test.ts` | Fixed: canonical lower-case group id in `requireGroupMember` and one `room()` helper in `lib/realtime.ts` |
+| M2-07 | Medium | Catalog (04) | Any user can alias any unrelated text to any item, for every household | `catalog.test.ts` | Fixed: `aliasOf` must be a fuzzy suggestion for the text, else `400 ALIAS_NOT_SUGGESTED` |
+| M2-01 | Medium | Validation | A NUL byte in any stored string gives `500 INTERNAL` (7 routes) | `validation.test.ts` | Already fixed on `will` (M1 B-04, central control-char rejection) |
+| M2-02 | Medium | Concurrency (04) | Concurrent DELETE/PATCH of one preference gives `500` (P2025 not handled) | `concurrency.test.ts` | Fixed: shared `orNull` in preferences repo, so the service returns `404 PREFERENCE_NOT_FOUND` |
+| M2-08 | Low | Validation (06) | An unknown `scannedProductId` gives `500` once the products FK exists (it does in the shared DB now) | `validation.test.ts` | Already fixed on `will` (06x08: `404 PRODUCT_NOT_FOUND`) |
+| M2-04 | Low | Concurrency (04) | Two concurrent `PUT /me/dietary` from one user: one gets `409 CONFLICT` | `concurrency.test.ts` | Fixed: lock the user row (`FOR UPDATE`) in the dietary transaction |
+| M2-05 | Low | Cabinet (05/11) | `photoKey` regex has an unescaped `.`, so keys that `/uploads/presign` never issued are accepted | `validation.test.ts` | Fixed: escaped `.` in the photoKey regex (avatarKey was already right) |
+| M2-03 | Low | List engine (06) | Allergen flag `displayName` goes stale after `PATCH /me` | `engine.property.test.ts` | Fixed: flag names resolved at read time in `listRepo.load` |
 
 ---
 

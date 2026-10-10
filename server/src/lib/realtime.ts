@@ -10,6 +10,9 @@ export type UserEvent = "invites:changed" | "group:changed";
 
 let io: Server | null = null;
 
+// Postgres compares uuids case-insensitively, so room names must be canonical (lower case) or rooms split.
+const room = (groupId: string) => `group:${groupId.toLowerCase()}`;
+
 const JoinBody = z.object({ groupId: z.uuid() });
 type Ack = (res: { ok: boolean }) => void;
 
@@ -30,13 +33,13 @@ export function attachRealtime(server: HttpServer, corsOrigins: string[]): Serve
     socket.on("group:join", async (body: unknown, ack?: Ack) => {
       const parsed = JoinBody.safeParse(body);
       const ok = parsed.success && (await groupsRepo.role(parsed.data.groupId, userId).catch(() => null)) !== null;
-      if (ok) socket.join(`group:${parsed.data.groupId}`);
+      if (ok) socket.join(room(parsed.data.groupId));
       if (typeof ack === "function") ack({ ok });
     });
 
     socket.on("group:leave", (body: unknown, ack?: Ack) => {
       const parsed = JoinBody.safeParse(body);
-      if (parsed.success) socket.leave(`group:${parsed.data.groupId}`);
+      if (parsed.success) socket.leave(room(parsed.data.groupId));
       if (typeof ack === "function") ack({ ok: parsed.success });
     });
   });
@@ -46,7 +49,7 @@ export function attachRealtime(server: HttpServer, corsOrigins: string[]): Serve
 
 // Call these only after the transaction has committed. No-ops when Socket.IO isn't attached (REST-only tests).
 export function emitGroup(groupId: string, event: GroupEvent, by: string) {
-  io?.to(`group:${groupId}`).emit(event, { groupId, by });
+  io?.to(room(groupId)).emit(event, { groupId: groupId.toLowerCase(), by });
 }
 
 export function emitUser(userId: string, event: UserEvent, payload: object = {}) {
@@ -56,11 +59,11 @@ export function emitUser(userId: string, event: UserEvent, payload: object = {})
 // Removed/left members stop receiving the group's events (backend/07 step 5).
 export async function kickFromGroup(groupId: string, userId: string) {
   if (!io) return;
-  const room = `group:${groupId}`;
-  for (const s of await io.in(room).fetchSockets()) if (s.data.userId === userId) s.leave(room);
+  const r = room(groupId);
+  for (const s of await io.in(r).fetchSockets()) if (s.data.userId === userId) s.leave(r);
 }
 
 // Deleted group: empty the room.
 export function closeGroupRoom(groupId: string) {
-  io?.in(`group:${groupId}`).socketsLeave(`group:${groupId}`);
+  io?.in(room(groupId)).socketsLeave(room(groupId));
 }

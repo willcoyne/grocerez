@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
+import { orNull } from "../../lib/errors.js";
 import type { Item } from "../../contracts/items.js";
 import type { CabinetQuery } from "../../contracts/cabinet.js";
 
@@ -34,13 +35,6 @@ export type CabinetWrite = {
   purchasedAt?: Date | null; // finish trip (backend/06)
   productId?: string | null;
 };
-
-// A row deleted/moved between our read and write (P2025) is reported as "not found".
-const orNull = <T>(p: Promise<T>) =>
-  p.catch((e) => {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") return null;
-    throw e;
-  });
 
 // Every function is scoped by groupId.
 export const cabinetRepo = {
