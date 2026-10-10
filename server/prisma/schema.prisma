@@ -41,6 +41,7 @@ model User {
   groupsCreated Group[]        @relation("GroupCreator")
   memberships   GroupMember[]
   invitesSent   GroupInvite[]
+  itemsCreated  Item[]
 
   @@map("users")
 }
@@ -95,12 +96,13 @@ model Group {
 }
 
 model GroupMember {
-  groupId  String    @map("group_id") @db.Uuid
-  userId   String    @map("user_id") @db.Uuid
-  role     GroupRole @default(member)
-  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz
-  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupId     String       @map("group_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  role        GroupRole    @default(member)
+  joinedAt    DateTime     @default(now()) @map("joined_at") @db.Timestamptz
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferences Preference[]
 
   @@id([groupId, userId])
   @@index([userId])
@@ -122,4 +124,94 @@ model GroupInvite {
   @@unique([groupId, email])
   @@index([email, status])
   @@map("group_invites")
+}
+
+// database/04-item-catalog-fuzzy-matching. normalize_item_name() and the category CHECK live in the migration SQL.
+model Item {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  normalizedName   String       @unique @map("normalized_name")
+  category         String?
+  defaultAllergens Allergen[]   @default([]) @map("default_allergens")
+  shelfLifeDays    Int?         @map("shelf_life_days")
+  createdBy        String?      @map("created_by") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  creator          User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases          ItemAlias[]
+  preferences      Preference[]
+  products         Product[]
+
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], map: "items_name_trgm", type: Gin)
+  @@map("items")
+}
+
+model ItemAlias {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId          String @map("item_id") @db.Uuid
+  aliasNormalized String @unique @map("alias_normalized")
+  item            Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([aliasNormalized(ops: raw("gin_trgm_ops"))], map: "item_aliases_trgm", type: Gin)
+  @@map("item_aliases")
+}
+
+// database/05-preferences
+enum Recurrence {
+  staple
+  one_time
+
+  @@map("recurrence")
+}
+
+// FK (group_id, user_id) -> group_members ON DELETE CASCADE: leaving/removal deletes the member's preferences.
+model Preference {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId      String      @map("group_id") @db.Uuid
+  userId       String      @map("user_id") @db.Uuid
+  itemId       String      @map("item_id") @db.Uuid
+  quantityText String?     @map("quantity_text")
+  recurrence   Recurrence  @default(staple)
+  note         String?
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  member       GroupMember @relation(fields: [groupId, userId], references: [groupId, userId], onDelete: Cascade)
+  item         Item        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, userId, itemId])
+  @@index([groupId, itemId])
+  @@map("preferences")
+}
+
+// database/08-product-data-cache: global, one row per scanned product.
+enum ProductSource {
+  smartlabel
+  openfoodfacts
+  manual
+
+  @@map("product_source")
+}
+
+// CHECK products_identifier (in SQL): gtin or smartlabel_url is set, unless source = 'manual'.
+model Product {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId             String?       @map("item_id") @db.Uuid
+  gtin               String?       @unique
+  smartlabelUrl      String?       @unique @map("smartlabel_url")
+  brand              String?
+  name               String
+  servingSize        String?       @map("serving_size")
+  caloriesPerServing Decimal?      @map("calories_per_serving") @db.Decimal
+  nutrition          Json?
+  ingredients        String?
+  allergens          Allergen[]    @default([])
+  mayContain         Allergen[]    @default([]) @map("may_contain")
+  healthScore        String?       @map("health_score")
+  imageS3Key         String?       @map("image_s3_key")
+  source             ProductSource
+  raw                Json?
+  fetchedAt          DateTime      @map("fetched_at") @db.Timestamptz
+  item               Item?         @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@map("products")
 }

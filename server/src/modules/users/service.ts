@@ -4,6 +4,7 @@ import { emitGroup, kickFromGroup } from "../../lib/realtime.js";
 import { groupsRepo } from "../groups/repo.js";
 import { presignGet } from "../../lib/s3.js";
 import type { UpdateMeBody, User } from "../../contracts/auth.js";
+import type { Dietary } from "../../contracts/dietary.js";
 import { usersRepo, type UserRow } from "./repo.js";
 
 // An uploaded avatar wins over the Google picture; the stored key is never exposed, only a 1-hour GET URL.
@@ -42,4 +43,12 @@ export async function deleteMe(userId: string): Promise<User> {
     emitGroup(groupId, "group:changed", userId);
   }
   return toUser(user);
+}
+
+export const getDietary = (userId: string) => usersRepo.dietary(userId);
+
+// ponytail: backend/06 also regenerates the list of every group the user is in here (allergen flags change).
+export async function setDietary(userId: string, body: Dietary): Promise<Dietary> {
+  await usersRepo.setDietary(userId, body);
+  return usersRepo.dietary(userId);
 }

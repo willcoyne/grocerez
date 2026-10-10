@@ -9,6 +9,9 @@ import { authRouter, devRouter } from "./modules/auth/router.js";
 import { usersRouter } from "./modules/users/router.js";
 import { groupsRouter } from "./modules/groups/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
+import { itemsRouter } from "./modules/items/router.js";
+import { preferencesRouter } from "./modules/preferences/router.js";
+import { productsRouter } from "./modules/products/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -17,6 +20,8 @@ import { config } from "./config.js";
 export const EXPO_DEV_ORIGINS = ["http://localhost:8081"];
 
 export const app = express();
+// Behind a host proxy, req.ip (used by the rate limiters) must come from X-Forwarded-For.
+if (config.TRUST_PROXY) app.set("trust proxy", config.TRUST_PROXY);
 
 app.use(helmet());
 app.use(cors({ origin: EXPO_DEV_ORIGINS }));
@@ -47,6 +52,9 @@ app.use("/api/groups/:groupId", requireGroupMember);
 app.use("/api", usersRouter);
 app.use("/api", groupsRouter);
 app.use("/api", uploadsRouter);
+app.use("/api", itemsRouter);
+app.use("/api", preferencesRouter);
+app.use("/api", productsRouter);
 
 app.use(notFound);
 app.use(errorHandler);
