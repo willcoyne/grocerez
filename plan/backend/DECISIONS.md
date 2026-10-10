@@ -134,3 +134,31 @@ Format: date · folder · what the plan said · what was done · why.
   `group:changed {groupId, by}` (you were removed, the group was deleted) so the app can refresh its group switcher.
 - Leaving, removal and group deletion make the affected sockets leave the group room (`fetchSockets()`); `DELETE /me` disconnects the user's sockets.
 - Single instance only (no Redis adapter), per step 7.
+
+### 2026-10-10 · 08 · SmartLabel reality check (step 8) and parsers
+- **robots.txt (checked 2026-10-10):** `smartlabel.org` allows all user agents (`Disallow:` empty, `Crawl-delay: 10`).
+  `smartlabel.generalmills.com/robots.txt` returns the app's HTML page (no robots rules). `smartlabel.labelinsight.com` has no robots.txt (404).
+  We fetch one page per scan, cache for 30 days, and identify as `GrocerEZ/0.1 (+CONTACT_EMAIL)`.
+- **Real pages are JavaScript shells:** the General Mills SmartLabel page (`smartlabel.generalmills.com/<GTIN-14>`) contains no label data in
+  its HTML; nutrition is loaded by scripts. It does contain the GTIN (`#hdnGTINId` and the URL path). Saved as
+  `server/test/fixtures/smartlabel/generalmills-shell-00016000275287.html`. The parser returns `template: "gtin-only"` and the scan continues
+  with the barcode path (plan step 3.5), so scanning a General Mills cereal QR returns calories + allergens from Open Food Facts
+  (verified live: Cheerios → 140 kcal/serving, `gluten`). The product row keeps both `smartlabel_url` and `gtin`.
+- **Template parsers:** `jsonld` (schema.org `Product` + `NutritionInformation`) and `sections` (server-rendered page with a nutrition
+  table and Contains/May contain lines). No real server-rendered SmartLabel page was found, so their fixtures are **synthetic** (marked in
+  the files). Add a saved real page + parser when one is found.
+- **Host allowlist:** `smartlabel.org`, `www.smartlabel.org`, any `*.smartlabel.org`, `smartlabel.labelinsight.com`, `smartlabel.generalmills.com`
+  (`src/lib/smartlabel.ts`). QR links may be `http`; they are canonicalized to `https` (no port, credentials or fragment) and that string is the cache key.
+  Redirects are followed **manually** (max 5) and every hop must be https on an allowlisted host; anything else → `400 HOST_NOT_ALLOWED`.
+  Response bodies are capped at 2 MB, 5 s timeout.
+- **GTINs are stored as GTIN-14** (left-padded) so UPC-A, EAN-13 and SmartLabel GTIN-14 scans of the same product share one cache row.
+  Open Food Facts is queried with the EAN-13 form.
+- **Errors:** both or neither of `qrUrl`/`gtin` → 400; unknown product → `404 PRODUCT_NOT_FOUND`; Open Food Facts / SmartLabel unreachable →
+  `502 UPSTREAM_UNAVAILABLE` (a stale cached row is returned instead when there is one); more than 30 scans/min/user → 429.
+- **Response:** `Product = {id, itemId, item:{id,name,category}, gtin, smartlabelUrl, brand, name, servingSize, caloriesPerServing, nutrition, ingredients,
+  allergens, mayContain, healthScore, imageUrl, source, fetchedAt}`. `nutrition` keys: `basis` ("serving" or "100g"), `fat_g`, `sat_fat_g`, `sodium_mg`,
+  `carbs_g`, `sugar_g`, `protein_g`, `fiber_g` when known. `imageUrl` is the S3 copy when present (11), else the Open Food Facts image URL.
+- **Item linking (step 5):** exact match on the full name, then the brand (the catalog has brand items like Cheerios/Oreos), then shorter word
+  runs (longest, rightmost first), then the full name's "suggested" match; otherwise a new item is created with the category guessed from
+  `categories_tags`. Open Food Facts `en:corn` and other non-major allergens are ignored; OFF `en:nuts` → `tree_nuts`.
+- The allergen keyword table (`src/lib/allergens.ts`) excludes phrases such as "peanut butter", "coconut milk", "nutmeg", "rice flour".

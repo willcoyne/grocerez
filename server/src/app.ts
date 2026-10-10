@@ -12,6 +12,7 @@ import { dietaryRouter } from "./modules/dietary/router.js";
 import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
 import { itemsRouter } from "./modules/items/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
+import { productsRouter } from "./modules/products/router.js";
 import { healthRouter } from "./modules/health/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
 import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
@@ -51,6 +52,7 @@ export function createApp() {
   api.use(dietaryRouter);
   api.use(groupsRouter);
   api.use(itemsRouter);
+  api.use(productsRouter);
 
   // /groups/:groupId/* : membership is checked once here for every group-scoped feature router.
   const group = Router({ mergeParams: true });
