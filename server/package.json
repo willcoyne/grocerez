@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "db:check:normalize": "tsx prisma/checks/normalize-sql.ts",
     "db:check:demo": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/seed/check-demo-list.sql",
-    "db:app-role": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/sql/app-role.sql"
+    "db:app-role": "docker compose exec -T postgres psql -U grocerez -d grocerez -v ON_ERROR_STOP=1 < prisma/sql/app-role.sql",
+    "test:db-break": "vitest run --config test/db-break/vitest.config.ts"
   },
   "license": "ISC",
   "type": "module",
@@ -20,7 +21,8 @@
     "@types/node": "26.6.5",
     "prisma": "7.10.0",
     "tsx": "4.23.15",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.10.0",
