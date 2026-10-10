@@ -38,7 +38,7 @@ export const itemsService = {
   },
 
   /** Items closest to what was typed by cosine similarity (Akamai embeddings). Never fails the search: errors → []. */
-  async related(typed: string, excludeIds: string[], db: Db = prisma, anchorItemId: string | null = null, limit = 6) {
+  async related(typed: string, excludeIds: string[], db: Db = prisma, anchorItemId: string | null = null, limit = 8) {
     if (!embeddingsConfigured()) return [];
     try {
       if (anchorItemId) {
