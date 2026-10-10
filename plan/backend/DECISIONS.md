@@ -185,3 +185,26 @@ Format: date · folder · what the plan said · what was done · why.
 - Dismiss is idempotent (204 again); a match from another group → 404. New matches and dismissals emit `cabinet:changed` (by `null` for the job).
 - Fixture `server/test/fixtures/openfda/enforcement-page.json` holds two real openFDA records plus one **synthetic** record (`SYNTH-0001`, marked in its text).
 - Expiration stretch (Claude vision for printed dates) was not built.
+
+### 2026-10-10 · 11 · Schema change: S3 key columns (migration `20261010230000_s3_keys`)
+- **Plan said:** the app sends the uploaded `key` to `PATCH /me {avatarKey}` or `PATCH cabinet {photoKey}`; the schema had no column for either
+  (`users.avatar_url` holds Google's picture URL, which is refreshed on every login).
+- **Did:** new nullable columns `users.avatar_s3_key` and `cabinet_items.photo_s3_key`, each with a CHECK on the key format
+  (`avatar/<uuid>/<uuid>.(jpg|png|webp)`, `item-photo/<uuid>/<uuid>.(jpg|png|webp)`). Hand-written migration; `prisma migrate diff` against the
+  schema reports no drift. Applied to `grocerez_test` only; run `npx prisma migrate deploy` (or `npm run db:migrate`) on the dev database.
+- **Frontend must update:** `PATCH /me` accepts `avatarKey` (string or `null`); `PATCH /groups/:groupId/cabinet/:id` accepts `photoKey`;
+  `CabinetItem` has a new `photoUrl` field. `User.avatarUrl` is now the presigned S3 avatar when one was uploaded, else the Google picture.
+  (API contract table updated.)
+
+### 2026-10-10 · 11 · Uploads details
+- `POST /uploads/presign {contentType: image/jpeg|png|webp, purpose: avatar|item-photo}` → `{uploadUrl, key}`; key = `${purpose}/${userId}/${uuid}.${ext}`;
+  the PUT URL expires in 5 minutes and is signed for that `Content-Type`, so the app must send the same header. 30/min per user.
+  Without AWS settings → `503 NOT_CONFIGURED`.
+- A key sent back must match the caller's own id and the right purpose (`400 INVALID_UPLOAD_KEY`), so a user can't attach someone else's file.
+  The API doesn't check that the object exists (no `HeadObject`; the IAM policy only grants Put/Get).
+- Every image in a response (`User.avatarUrl`, `Member.avatarUrl`, `CabinetItem.photoUrl`, `CabinetItem.product.imageUrl`, `Product.imageUrl`)
+  is a presigned GET valid for 1 hour.
+- Product images: after a scan, the Open Food Facts image (https, `images.openfoodfacts.org` / `static.openfoodfacts.org` only, no redirects,
+  ≤ 5 MB, `image/*`) is copied to `products/{productId}.jpg` and stored in `products.image_s3_key`. Failures only log.
+- Not done (needs the AWS account): creating the bucket with Block Public Access, the IAM policy, and bucket CORS. Both "Done when" boxes need a real
+  bucket to verify, so they are left unticked; the code path is covered by offline presigning tests.

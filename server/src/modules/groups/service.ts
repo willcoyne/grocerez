@@ -1,6 +1,7 @@
 import { prisma } from "../../db.js";
 import type { Group, GroupDetail, Invite, MyInvite } from "../../contracts/groups.js";
 import { sendInviteEmail } from "../../lib/email.js";
+import { images } from "../../lib/images.js";
 import { AppError, badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
 import { emitGroup, emitUser, evictFromGroupRoom } from "../../lib/realtime.js";
 import { lockGroup, regenerate } from "../shopping-list/engine.js";
@@ -61,14 +62,16 @@ export const groupsService = {
     if (!g) throw notFound("Group");
     return {
       ...toGroup(g, role),
-      members: g.members.map((m) => ({
-        id: m.user.id,
-        displayName: m.user.displayName,
-        email: m.user.email,
-        avatarUrl: m.user.avatarUrl,
-        role: m.role,
-        joinedAt: m.joinedAt.toISOString(),
-      })),
+      members: await Promise.all(
+        g.members.map(async (m) => ({
+          id: m.user.id,
+          displayName: m.user.displayName,
+          email: m.user.email,
+          avatarUrl: (await images.urlFor(m.user.avatarS3Key)) ?? m.user.avatarUrl,
+          role: m.role,
+          joinedAt: m.joinedAt.toISOString(),
+        })),
+      ),
     };
   },
 

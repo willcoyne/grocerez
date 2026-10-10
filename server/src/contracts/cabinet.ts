@@ -26,6 +26,8 @@ export const UpdateCabinetBody = z.object({
   expiresAt: CalendarDate.nullable().optional(),
   location: Location.nullable().optional(),
   quantityText: z.string().trim().max(100).nullable().optional(),
+  /** `key` from POST /uploads/presign {purpose:"item-photo"} (11). null removes the photo. */
+  photoKey: z.string().max(200).nullable().optional(),
 });
 export type UpdateCabinetBody = z.infer<typeof UpdateCabinetBody>;
 
@@ -50,6 +52,8 @@ export const CabinetItem = z.object({
   /** YYYY-MM-DD */
   expiresAt: z.string().nullable(),
   expirationSource: ExpirationSource.nullable(),
+  /** Presigned S3 GET URL of an uploaded item photo (11), or null. */
+  photoUrl: z.string().nullable(),
   addedBy: z.uuid().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

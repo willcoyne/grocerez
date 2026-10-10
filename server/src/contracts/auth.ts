@@ -22,6 +22,8 @@ export const UpdateMeBody = z
     displayName: z.string().trim().min(1).max(80).optional(),
     /** 5-digit US ZIP, or null to clear. */
     zipCode: z.string().regex(/^\d{5}$/, "must be a 5-digit ZIP code").nullable().optional(),
+    /** `key` from POST /uploads/presign {purpose:"avatar"} after the PUT succeeded (11). null removes the upload. */
+    avatarKey: z.string().max(200).nullable().optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof UpdateMeBody>;

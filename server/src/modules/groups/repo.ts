@@ -25,7 +25,7 @@ export const groupsRepo = {
       where: { id: groupId },
       include: {
         members: {
-          include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true } } },
+          include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true, avatarS3Key: true } } },
           orderBy: [{ joinedAt: "asc" }, { userId: "asc" }],
         },
         _count: { select: { members: true } },

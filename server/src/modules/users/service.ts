@@ -1,6 +1,7 @@
 import { prisma } from "../../db.js";
 import type { AuthResponse, UpdateMeBody, User } from "../../contracts/auth.js";
-import { AppError, notFound } from "../../lib/errors.js";
+import { uploadKeyPattern } from "../../contracts/uploads.js";
+import { AppError, badRequest, notFound } from "../../lib/errors.js";
 import { google } from "../../lib/google.js";
 import { signAppToken } from "../../lib/jwt.js";
 import { emitGroup, getIo, userRoom } from "../../lib/realtime.js";
@@ -29,25 +30,29 @@ export const usersService = {
       displayName: displayName.slice(0, 80),
       picture: identity.picture ?? null,
     });
-    return { token: signAppToken(user.id), user: toUser(user) };
+    return { token: signAppToken(user.id), user: await toUser(user) };
   },
 
   /** Dev/demo only: a session for an existing (seeded) user. */
   async loginAs(userId: string): Promise<AuthResponse> {
     const user = await usersRepo.findById(prisma, userId);
     if (!user) throw notFound("User");
-    return { token: signAppToken(user.id), user: toUser(user) };
+    return { token: signAppToken(user.id), user: await toUser(user) };
   },
 
   async getMe(userId: string): Promise<User> {
     const user = await usersRepo.findById(prisma, userId);
     if (!user) throw notFound("User");
-    return toUser(user);
+    return await toUser(user);
   },
 
   async updateMe(userId: string, body: UpdateMeBody): Promise<User> {
-    const user = await usersRepo.update(prisma, userId, body);
-    return toUser(user);
+    const { avatarKey, ...rest } = body;
+    if (avatarKey && !uploadKeyPattern("avatar", userId).test(avatarKey)) {
+      throw badRequest("avatarKey must be a key from POST /uploads/presign (purpose avatar)", "INVALID_UPLOAD_KEY");
+    }
+    const user = await usersRepo.update(prisma, userId, { ...rest, ...(avatarKey !== undefined ? { avatarS3Key: avatarKey } : {}) });
+    return await toUser(user);
   },
 
   /**

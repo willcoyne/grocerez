@@ -16,6 +16,7 @@ import { productsRouter } from "./modules/products/router.js";
 import { healthRouter } from "./modules/health/router.js";
 import { alertsRouter } from "./modules/recalls/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
+import { uploadsRouter } from "./modules/uploads/router.js";
 import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
 /** Builds the Express app (no network listener; index.ts adds the HTTP server and Socket.IO). */
@@ -54,6 +55,7 @@ export function createApp() {
   api.use(groupsRouter);
   api.use(itemsRouter);
   api.use(productsRouter);
+  api.use(uploadsRouter);
 
   // /groups/:groupId/* : membership is checked once here for every group-scoped feature router.
   const group = Router({ mergeParams: true });

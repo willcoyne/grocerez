@@ -2,7 +2,10 @@ import { prisma } from "../../db.js";
 import type { Allergen } from "../../contracts/dietary.js";
 import type { Product, ScanBody } from "../../contracts/products.js";
 import { AppError, badRequest } from "../../lib/errors.js";
+import { http, USER_AGENT } from "../../lib/http.js";
 import { images } from "../../lib/images.js";
+import { logger } from "../../lib/logger.js";
+import { s3 } from "../../lib/s3.js";
 import { normalizeGtin, openFoodFacts, type OffProduct } from "../../lib/openfoodfacts.js";
 import { canonicalSmartLabelUrl, hasLabelData, parseSmartLabel, smartlabel } from "../../lib/smartlabel.js";
 import { itemsService } from "../items/service.js";
@@ -72,9 +75,37 @@ export async function linkItem(name: string, category: string, createdBy: string
   return created.item.id;
 }
 
-/** Hook for 11: copy the product image into S3 after a product is saved. */
+const IMAGE_HOSTS = new Set(["images.openfoodfacts.org", "static.openfoodfacts.org"]);
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * backend/11 step 5: download the Open Food Facts image on the server and PutObject it under products/{id}.jpg,
+ * so the app doesn't hotlink. Only https on the OFF image hosts, no redirects, ≤ 5 MB, image/* only.
+ * No-op without S3 or when the product already has a copy. Failures are logged, never fail the scan.
+ */
+export async function copyProductImage(productId: string, imageUrl: string | null): Promise<void> {
+  if (!imageUrl || !s3.isConfigured()) return;
+  try {
+    const url = new URL(imageUrl);
+    if (url.protocol !== "https:" || !IMAGE_HOSTS.has(url.hostname)) return;
+    const existing = await prisma.product.findUnique({ where: { id: productId }, select: { imageS3Key: true } });
+    if (existing?.imageS3Key) return;
+    const res = await http.fetch(url.toString(), { redirect: "error", headers: { "User-Agent": USER_AGENT() }, signal: AbortSignal.timeout(5000) });
+    const type = res.headers.get("content-type") ?? "";
+    if (!res.ok || !type.startsWith("image/")) return;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return;
+    const key = `products/${productId}.jpg`;
+    await s3.putObject(key, bytes, type);
+    await prisma.product.update({ where: { id: productId }, data: { imageS3Key: key } });
+  } catch (err) {
+    logger.warn({ err: String(err), productId }, "product image copy failed");
+  }
+}
+
+/** Runs after a product is saved (overridable in tests). */
 export const productHooks = {
-  afterSave: async (_productId: string, _imageUrl: string | null): Promise<void> => {},
+  afterSave: (productId: string, imageUrl: string | null): Promise<void> => copyProductImage(productId, imageUrl),
 };
 
 type ProductData = {

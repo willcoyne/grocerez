@@ -1,7 +1,8 @@
 import { prisma } from "../../db.js";
 import type { AddCabinetBody, CabinetItem, UpdateCabinetBody } from "../../contracts/cabinet.js";
 import { estimateExpiration, fromCalendarDate, toCalendarDate } from "../../lib/expiration.js";
-import { notFound } from "../../lib/errors.js";
+import { uploadKeyPattern } from "../../contracts/uploads.js";
+import { badRequest, notFound } from "../../lib/errors.js";
 import { images } from "../../lib/images.js";
 import { emitGroup } from "../../lib/realtime.js";
 import { withRegeneration } from "../shopping-list/engine.js";
@@ -24,6 +25,7 @@ export async function toCabinetItem(c: Row): Promise<CabinetItem> {
     purchasedAt: c.purchasedAt?.toISOString() ?? null,
     expiresAt: toCalendarDate(c.expiresAt),
     expirationSource: c.expirationSource,
+    photoUrl: await images.urlFor(c.photoS3Key),
     addedBy: c.addedBy,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
@@ -82,8 +84,12 @@ export const cabinetService = {
   /** running_low ↔ in_stock regenerates the list; a hand-set expiresAt becomes 'manual'; null clears it. */
   async update(groupId: string, userId: string, id: string, body: UpdateCabinetBody): Promise<CabinetItem> {
     if (!(await cabinetRepo.find(prisma, groupId, id))) throw notFound("Cabinet item");
+    if (body.photoKey && !uploadKeyPattern("item-photo", userId).test(body.photoKey)) {
+      throw badRequest("photoKey must be a key from POST /uploads/presign (purpose item-photo)", "INVALID_UPLOAD_KEY");
+    }
     const { result } = await withRegeneration(groupId, userId, ["cabinet:changed"], (tx) =>
       cabinetRepo.update(tx, groupId, id, {
+        ...(body.photoKey !== undefined ? { photoS3Key: body.photoKey } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.location !== undefined ? { location: body.location } : {}),
         ...(body.quantityText !== undefined ? { quantityText: body.quantityText } : {}),

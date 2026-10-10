@@ -29,7 +29,7 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 |---|---|---|---|---|
 | GET | `/health` | — | `{ok:true}` | 01 |
 | POST | `/auth/google` | `{idToken}` | `{token, user}` | 02 |
-| GET / PATCH / DELETE | `/me` | `{displayName?, zipCode?}` | `User` | 02 |
+| GET / PATCH / DELETE | `/me` | `{displayName?, zipCode?, avatarKey?}` | `User` | 02, 11 |
 | GET / PUT | `/me/dietary` | `{diets[], allergens[]}` | `{diets, allergens}` | 04 |
 | GET / POST | `/groups` | `{name}` | `Group[]` / `Group` | 03 |
 | GET | `/groups/:groupId` | — | `Group & {members[]}` | 03 |
@@ -47,7 +47,7 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/groups/:groupId/preferences` | `{itemId, quantityText?, recurrence?, note?}` | `Preference` | 04 |
 | PATCH / DELETE | `/groups/:groupId/preferences/:id` | (own rows only) | `Preference` / 204 | 04 |
 | GET / POST | `/groups/:groupId/cabinet` | `{itemId, location?, expiresAt?, quantityText?}` | `CabinetItem[]` / `CabinetItem` | 05 |
-| PATCH | `/groups/:groupId/cabinet/:id` | `{status?, expiresAt?, location?, quantityText?}` | `CabinetItem` | 05 |
+| PATCH | `/groups/:groupId/cabinet/:id` | `{status?, expiresAt?, location?, quantityText?, photoKey?}` | `CabinetItem` | 05, 11 |
 | POST | `/groups/:groupId/cabinet/:id/ran-out` | — | `{requeued: boolean}` | 05 |
 | GET | `/groups/:groupId/shopping-list` | — | `ShoppingListItem[]` | 06 |
 | POST | `/groups/:groupId/shopping-list/generate` | — | `ShoppingListItem[]` | 06 |
