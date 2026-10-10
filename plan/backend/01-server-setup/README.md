@@ -38,6 +38,6 @@
 
 ## Done when
 
-- [ ] `npm run dev` serves `/api/health`
-- [ ] A missing env variable stops startup with a clear message
-- [ ] An invalid body returns `400 {error:{code:"VALIDATION_ERROR"}}`
+- [x] `npm run dev` serves `/api/health`
+- [x] A missing env variable stops startup with a clear message
+- [x] An invalid body returns `400 {error:{code:"VALIDATION_ERROR"}}`

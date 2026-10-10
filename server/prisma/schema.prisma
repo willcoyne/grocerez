@@ -1,0 +1,9 @@
+// Owned by plan/database. Models are added by the database folders.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
