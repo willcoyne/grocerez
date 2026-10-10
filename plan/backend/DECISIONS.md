@@ -263,3 +263,25 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
     `64:ff9b:1::/48` (local NAT64) and `2002::/16` (6to4).
 - **Deferred:** B-01, B-03, B-14 (allergen keyword tables and recipe diet checks) wait for the allergen consolidation
   happening on `main`.
+
+## Allergen consolidation (B-01, B-03, B-14)
+
+- **One table:** `src/lib/allergens.ts` keeps the only allergen keyword table, keyed by the `allergen` enum
+  (`contracts/ai.ts`). `mapAllergens(text)` (08 scan parsing: SmartLabel `Contains:` and Open Food Facts tags) and
+  `findAllergens(texts, forbidden)` (10 recipe re-check) share one matcher. `products/common.ts` no longer has its own
+  `ALLERGENS`/`mapAllergens` (it re-exports the `Allergen` type). `modules/ai/allergens.ts` is deleted.
+- **Matching:** whole words plus an optional plural, case- and accent-insensitive. "X-free" phrases are ignored. Plant
+  milks and butters keep only the plant word ("nut butter" becomes tree nuts, "peanut butter" becomes peanuts, and
+  neither counts as dairy). Wheat words also count as gluten. Compound words (buttermilk, crabmeat, catfish, cheesecake)
+  and derived foods (custard, aioli, pesto, Nutella, hummus, teriyaki, seitan, panko, Worcestershire, Caesar, satay, ...)
+  are listed explicitly rather than matched as substrings, so "eggplant", "butternut" and "crabapple" don't match.
+  The table errs toward flagging: "rice flour" counts as wheat, "pesto" as milk and tree nuts, and "soy sauce"/"teriyaki"
+  as wheat. 08's old table only flagged milk for "butter", so a `Contains:` line saying "peanut butter" is now peanuts only.
+- **Diets in code (B-14):** `findDietConflicts(texts, diets)` drops recipes for vegetarian (meat, poultry, gelatin, lard),
+  vegan (the same plus honey), halal (pork, lard, gelatin) and kosher (pork; kosher also implies the `shellfish`
+  exclusion). The implied allergens from before still apply (vegan: milk, eggs, fish, shellfish; vegetarian: fish,
+  shellfish). Keto, low_sodium, halal alcohol rules and kosher meat/dairy mixing are still prompt-only.
+- **Not done:** using the table on SmartLabel ingredient text as a fallback when there's no `Contains:` line (B-02
+  follow-up). With "flour", "cream" and similar words it would mislabel many products ("rice flour", "cream of tartar"),
+  so `allergens` stays tied to the label's declared statement. Recipes for vegan households that say "vegan butter" or
+  "vegan mayo" are still dropped; neutralizing "vegan X" phrases can be added if that shows up.

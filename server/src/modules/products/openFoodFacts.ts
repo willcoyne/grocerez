@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
-import { FETCH_TIMEOUT_MS, USER_AGENT, mapAllergens, readCapped, safeImageUrl, upstreamError, type ProductData } from "./common.js";
+import { FETCH_TIMEOUT_MS, USER_AGENT, readCapped, safeImageUrl, upstreamError, type ProductData } from "./common.js";
+import { mapAllergens } from "../../lib/allergens.js";
 
 const FIELDS = [
   "code", "product_name", "brands", "serving_size", "nutriments", "ingredients_text", "allergens_tags", "traces_tags",

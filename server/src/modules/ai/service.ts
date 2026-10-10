@@ -5,7 +5,7 @@ import {
   type PricedItem,
   type Recipe,
 } from "../../contracts/ai.js";
-import { DIET_EXCLUSIONS, findAllergens } from "./allergens.js";
+import { DIET_EXCLUSIONS, findAllergens, findDietConflicts } from "../../lib/allergens.js";
 import { aiUnavailable, callStructured, getAiClient, type AiClient } from "./client.js";
 import type { BetaWebSearchToolResultBlock } from "@anthropic-ai/sdk/resources/beta/messages/messages.js";
 
@@ -82,14 +82,11 @@ export async function suggestRecipes(input: RecipeInput, client: AiClient = getA
       const fake = r.usesCabinetItems.filter((n) => !cabinet.has(n.toLowerCase()));
       return { ...r, usesCabinetItems: uses.map((n) => cabinet.get(n.toLowerCase())!), missingItems: [...r.missingItems, ...fake] };
     })
-    // Deterministic safety re-check: drop any recipe that mentions a forbidden allergen anywhere.
-    .filter(
-      (r) =>
-        findAllergens(
-          [r.title, r.summary, ...r.usesCabinetItems, ...r.missingItems, ...r.steps, ...r.allergenWarnings],
-          ctx.allergens,
-        ).length === 0,
-    )
+    // Deterministic safety re-check: drop any recipe that mentions a forbidden allergen or diet-breaking food anywhere.
+    .filter((r) => {
+      const text = [r.title, r.summary, ...r.usesCabinetItems, ...r.missingItems, ...r.steps, ...r.allergenWarnings];
+      return findAllergens(text, ctx.allergens).length === 0 && findDietConflicts(text, ctx.diets).length === 0;
+    })
     .filter((r) => !input.mustUseExpiring || expiring.size === 0 || r.usesCabinetItems.some((n) => expiring.has(n.toLowerCase())))
     .slice(0, input.maxRecipes);
 }

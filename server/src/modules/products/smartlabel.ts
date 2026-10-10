@@ -3,8 +3,9 @@ import { BlockList, isIP } from "node:net";
 import * as cheerio from "cheerio";
 import { AppError } from "../../lib/errors.js";
 import {
-  FETCH_TIMEOUT_MS, USER_AGENT, mapAllergens, readCapped, safeImageUrl, upstreamError, type ProductData,
+  FETCH_TIMEOUT_MS, USER_AGENT, readCapped, safeImageUrl, upstreamError, type ProductData,
 } from "./common.js";
+import { mapAllergens } from "../../lib/allergens.js";
 
 // ---------- SSRF guard ----------
 

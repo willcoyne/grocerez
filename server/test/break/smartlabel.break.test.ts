@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { mapAllergens } from "../../src/modules/products/common.js";
+import { mapAllergens } from "../../src/lib/allergens.js";
 import { allowedSmartLabelUrl, fetchSmartLabelPage, isPrivateAddress, parseSmartLabel } from "../../src/modules/products/smartlabel.js";
 
 const publicDns = async () => [{ address: "93.184.216.34" }];

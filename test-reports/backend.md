@@ -13,15 +13,15 @@ external calls were made.
 
 | ID | Severity | Area | Title | Test file | Status |
 |---|---|---|---|---|---|
-| B-01 | High | AI (10) | Allergen re-check misses common allergen-containing foods (buttermilk, pesto, hummus, aioli, teriyaki, seitan, panko, crabmeat, ...) | `server/test/break/ai.break.test.ts` | Deferred (allergen consolidation on main) |
+| B-01 | High | AI (10) | Allergen re-check misses common allergen-containing foods (buttermilk, pesto, hummus, aioli, teriyaki, seitan, panko, crabmeat, ...) | `server/test/break/ai.break.test.ts` | Fixed |
 | B-02 | High | SmartLabel (08) | `Contains:` allergen line is missed when an earlier "Contains 2% or less of" line exists, or when it shares a paragraph with the ingredients | `server/test/break/smartlabel.break.test.ts` | Fixed |
 | B-16 | High | Uploads (11) | Presigned PUT URL includes the CRC32 checksum of an empty body (`x-amz-checksum-crc32=AAAAAA==`), so every real upload will fail | `server/test/break/uploads.break.test.ts` | Fixed |
 | B-04 | Medium | Input validation (02) | `PATCH /me` with a NUL byte in `displayName` returns 500 INTERNAL | `server/test/break/me.break.test.ts` | Fixed |
 | B-06 | Medium | SSRF (08/11) | Parser passes the page's `og:image`/JSON-LD image URL through unchecked (`http://169.254.169.254/...`, `file://`), and plan 11 step 5 has the server download it | `server/test/break/smartlabel.break.test.ts` | Fixed |
 | B-13 | Medium | SmartLabel (08) | 25 KB of nested `<div>`s crashes `parseSmartLabel` with `RangeError: Maximum call stack size exceeded` | `server/test/break/smartlabel.break.test.ts` | Fixed |
-| B-14 | Medium | AI (10) | Vegetarian/vegan households get meat recipes (beef, chicken, bacon); no deterministic diet check | `server/test/break/ai.break.test.ts` | Deferred (allergen consolidation on main) |
+| B-14 | Medium | AI (10) | Vegetarian/vegan households get meat recipes (beef, chicken, bacon); no deterministic diet check | `server/test/break/ai.break.test.ts` | Fixed |
 | B-15 | Medium | Uploads (11) | Uploads router reads `req.user.id`, but `requireAuth` sets `req.userId`, so mounting it per plan returns 401 for every user | `server/test/break/uploads.break.test.ts` | Fixed (already on `will`; test passes) |
-| B-03 | Low | SmartLabel (08) | `mapAllergens` misses compound words (`buttermilk`, `crabmeat`); the 08 and 10 keyword tables have diverged | `server/test/break/smartlabel.break.test.ts` | Deferred (allergen consolidation on main) |
+| B-03 | Low | SmartLabel (08) | `mapAllergens` misses compound words (`buttermilk`, `crabmeat`); the 08 and 10 keyword tables have diverged | `server/test/break/smartlabel.break.test.ts` | Fixed |
 | B-05 | Low | Auth (02) | Concurrent `DELETE /me` (or `PATCH` racing `DELETE`) returns 500 | `server/test/break/me.break.test.ts` | Fixed |
 | B-07 | Low | Auth (02) | `/dev/login-as` can impersonate any user, not only seeded demo users | `server/test/break/me.break.test.ts` | Fixed |
 | B-08 | Low | Auth (02) | Google sign-in returns 409 (permanent lockout) when the account's email is held by another (stale) row | `server/test/break/me.break.test.ts` | Fixed |
@@ -32,12 +32,16 @@ external calls were made.
 
 No Critical findings. Cross-household access can't be tested yet because no group routes exist.
 
-**Fix pass (`fix: M1 break findings`):** 13 of 16 fixed; B-01, B-03 and B-14 deferred because the allergen keyword
+**Fix pass (`fix: M1 break findings`):** 13 of 16 fixed; B-01, B-03 and B-14 were deferred because the allergen keyword
 tables and diet checks are being consolidated on `main` by another change. Full suite after the fix pass: 282 passed,
 16 failed (all 16 are the deferred `[DEFECT B-01/B-03/B-14]` tests). Fix notes are in `plan/backend/DECISIONS.md`
 under "M1 break fixes". Two test changes: `test/auth.test.ts` dev-login test now uses a `seed-` user (it asserted the
 B-07 behavior), and `auth.google.break.test.ts` counts only its own users (a global `user.count()` raced with other
 test files on the shared DB and failed a random case each run).
+
+**Allergen fix pass (`fix: consolidate allergens, B-01/B-03/B-14`):** the 08 and 10 keyword tables are merged into
+`server/src/lib/allergens.ts`, which adds derived foods and compound words (B-01, B-03) and code-level diet checks
+(B-14). Full suite: 299 passed, 0 failed (the 16 deferred tests plus one new unit test). No break tests were changed.
 
 ## Findings
 
