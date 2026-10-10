@@ -30,7 +30,20 @@ Expo (SDK 57) React Native app. Thin client: all logic lives in `../server`. See
    npx expo start
    ```
 
-The first screen calls `GET /api/health` and shows whether the server is reachable.
+## Mock mode (no backend)
+
+`npm run mock` (phone) or `npm run web:mock` (browser) runs the whole app against an in-memory server
+seeded with the board's example household. Sign in with "Continue with Google" → you're Ian with an invite from Carson.
+
+## Docker (web build, mock mode)
+
+```bash
+docker build -t grocerez-web:mock .                    # or: docker buildx build --platform linux/amd64,linux/arm64 -t grocerez-web:mock --load .
+docker run --rm -p 8080:80 grocerez-web:mock           # → http://localhost:8080
+```
+
+From a shared image file: `docker load -i grocerez-web-mock.tar.gz`, then the `docker run` line above.
+Data lives in the browser tab; reloading resets it to the seed.
 
 ## Checks
 
