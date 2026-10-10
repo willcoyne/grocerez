@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
+import { orNull } from "../../lib/errors.js";
 import type { Item } from "../../contracts/items.js";
 import type { AllergenFlag, ShoppingListItem } from "../../contracts/shoppingList.js";
 
@@ -30,19 +31,14 @@ const AISLE = ["produce", "bakery", "meat", "seafood", "dairy", "frozen", "pantr
 const aisle = (c: string | null) => AISLE.indexOf(c ?? "other");
 const toPerson = (u: { id: string; displayName: string } | null) => (u ? { userId: u.id, displayName: u.displayName } : null);
 
-// A row moved/deleted between our read and write (P2025) is reported as "not found".
-const orNull = <T>(p: Promise<T>) =>
-  p.catch((e) => {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") return null;
-    throw e;
-  });
-
 // Every function is scoped by groupId.
 export const listRepo = {
   // Mapped API rows, sorted by aisle then name.
   load: async (db: Db, groupId: string, id?: string): Promise<ShoppingListItem[]> => {
     const rows = await db.shoppingListItem.findMany({ where: { groupId, id }, select });
-    const ids = [...new Set(rows.flatMap((r) => r.wantedBy))];
+    // Names are resolved live (wantedBy and allergen flags), so a PATCH /me rename shows up without a regenerate.
+    const flagsOf = (r: (typeof rows)[number]) => r.allergenFlags as AllergenFlag[];
+    const ids = [...new Set(rows.flatMap((r) => [...r.wantedBy, ...flagsOf(r).map((f) => f.userId)]))];
     const names = new Map(
       (await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true } })).map((u) => [u.id, u]),
     );
@@ -51,7 +47,7 @@ export const listRepo = {
         ...r,
         item: item as Item,
         wantedBy: wantedBy.flatMap((u) => (names.has(u) ? [toPerson(names.get(u)!)!] : [])),
-        allergenFlags: allergenFlags as AllergenFlag[],
+        allergenFlags: (allergenFlags as AllergenFlag[]).map((f) => ({ ...f, displayName: names.get(f.userId)?.displayName ?? f.displayName })),
         checkedBy: toPerson(checker),
         checkedAt: checkedAt?.toISOString() ?? null,
         addedBy: toPerson(adder),

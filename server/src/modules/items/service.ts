@@ -9,6 +9,9 @@ function normalizeOr400(name: string) {
   return q;
 }
 
+// "Did you mean" threshold: Levenshtein distance from the typed (normalized) text.
+const maxDistance = (q: string) => ([...q].length < 5 ? 1 : 2);
+
 export async function search(input: string): Promise<ItemSearchResponse> {
   const q = normalizeOr400(input);
   const exact = await itemsRepo.findExact(q);
@@ -16,8 +19,7 @@ export async function search(input: string): Promise<ItemSearchResponse> {
 
   const candidates = await itemsRepo.fuzzy(q);
   const results = candidates.map(({ distance: _, ...item }) => item);
-  const maxDistance = [...q].length < 5 ? 1 : 2;
-  return { match: candidates[0] && candidates[0].distance <= maxDistance ? "suggested" : "none", results };
+  return { match: candidates[0] && candidates[0].distance <= maxDistance(q) ? "suggested" : "none", results };
 }
 
 export async function create(body: CreateItemBody, userId: string): Promise<Item> {
@@ -27,7 +29,11 @@ export async function create(body: CreateItemBody, userId: string): Promise<Item
     const target = await itemsRepo.find(body.aliasOf);
     if (!target) throw new AppError(404, "ITEM_NOT_FOUND", "Item not found");
     // Text that already resolves exactly (to this or another item) needs no alias.
-    if (!(await itemsRepo.findExact(normalized))) await itemsRepo.addAlias(target.id, normalized);
+    if (await itemsRepo.findExact(normalized)) return target;
+    // Aliases are global and permanent, so only an item search would suggest for this text can be confirmed.
+    const suggested = (await itemsRepo.fuzzy(normalized)).some((c) => c.id === target.id && c.distance <= maxDistance(normalized));
+    if (!suggested) throw new AppError(400, "ALIAS_NOT_SUGGESTED", "aliasOf must be an item suggested for this name");
+    await itemsRepo.addAlias(target.id, normalized);
     return target;
   }
 

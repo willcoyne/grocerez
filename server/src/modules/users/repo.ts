@@ -56,12 +56,13 @@ export const usersRepo = {
     return { diets: u.diets.map((d) => d.diet as Dietary["diets"][number]), allergens: u.allergens.map((a) => a.allergen) };
   },
 
-  // Replaces both sets in one transaction.
+  // Replaces both sets in one transaction. The user row lock serializes concurrent PUTs (last write wins, no P2002).
   setDietary: (userId: string, { diets, allergens }: Dietary) =>
-    prisma.$transaction([
-      prisma.userDiet.deleteMany({ where: { userId } }),
-      prisma.userAllergen.deleteMany({ where: { userId } }),
-      prisma.userDiet.createMany({ data: diets.map((diet) => ({ userId, diet })) }),
-      prisma.userAllergen.createMany({ data: allergens.map((allergen) => ({ userId, allergen })) }),
-    ]),
+    prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+      await tx.userDiet.deleteMany({ where: { userId } });
+      await tx.userAllergen.deleteMany({ where: { userId } });
+      await tx.userDiet.createMany({ data: diets.map((diet) => ({ userId, diet })) });
+      await tx.userAllergen.createMany({ data: allergens.map((allergen) => ({ userId, allergen })) });
+    }),
 };

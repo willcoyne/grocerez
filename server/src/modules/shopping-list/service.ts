@@ -79,7 +79,9 @@ export async function generate(groupId: string, tx: Tx): Promise<void> {
     allergenFlags: flags(itemId),
   });
 
-  if (remove.length) await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: [...removed] } } });
+  // `checked: false` is re-evaluated by Postgres at delete time (READ COMMITTED), so a lock-free check-off that commits
+  // after our read above is never deleted.
+  if (remove.length) await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: [...removed] }, checked: false } });
   if (create.length) {
     await tx.shoppingListItem.createMany({
       data: create.map((itemId) => ({ groupId, itemId, reason: "preference" as const, ...target(itemId) })),

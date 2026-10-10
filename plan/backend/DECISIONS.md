@@ -567,3 +567,28 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
 - **Checked live once** (not in the suite): `fetchRecalls` for the last 30 days returned 62 real recalls.
 - **Frontend must update:** `RecallAlert` shape above; dismiss can return `404 RECALL_MATCH_NOT_FOUND`. Show recall alerts
   as "possible match, check your package"; `link` is the openFDA API query for that recall number (no human page exists).
+
+## M2 break fixes (test-reports/backend-m2.md)
+
+- **M2-01, M2-08:** already fixed on `will` before this pass (central control-char rejection from M1 B-04; 06x08 returns
+  `404 PRODUCT_NOT_FOUND`). The break tests pass unchanged.
+- **M2-06 group id casing:** `requireGroupMember` lower-cases `:groupId` into `req.membership.groupId`, and every Socket.IO
+  room name goes through one `room()` helper in `lib/realtime.ts` that lower-cases (join, leave, emit, kick, close).
+  Event payloads carry the lower-case `groupId`.
+- **M2-07 aliases:** `POST /items {aliasOf}` only stores an alias if `aliasOf` is one of the fuzzy candidates for that text
+  within the same "Did you mean" distance threshold `search` uses. Otherwise `400 ALIAS_NOT_SUGGESTED`, nothing written.
+  Text that already resolves exactly still returns the `aliasOf` item without writing. Aliases stay global (GAPS #10);
+  per-group or moderated aliases weren't built.
+- **M2-02 preference races:** `preferencesRepo.update/delete` map P2025 to null (shared `orNull` in `lib/errors.ts`, which
+  cabinet and list repos now use too), and the service answers `404 PREFERENCE_NOT_FOUND`. The global P2025 to
+  `404 NOT_FOUND` mapping in `errorHandler` stays as the fallback.
+- **M2-04 `PUT /me/dietary`:** an interactive transaction takes `SELECT ... FOR UPDATE` on the user row first, so concurrent
+  PUTs serialize: last write wins, no 409.
+- **M2-05:** cabinet `photoKey` regex now escapes the `.` (`\.` in the template literal). `avatarKey` was already right.
+- **M2-03:** allergen flag `displayName` is resolved at read time from `userId` (like `wantedBy`). The stored JSON keeps
+  its snapshot name, which is used only if the user no longer exists.
+- **Check-off vs regenerate race (found while running the M2 suite, not in the report):** `generate()` deleted rows it
+  had read as unchecked, so a lock-free check-off that committed in between was deleted after returning 200. The delete
+  now also filters on `checked: false`, which Postgres re-checks at delete time.
+- **Frontend must update:** `POST /items {name, aliasOf}` can return `400 ALIAS_NOT_SUGGESTED`. Send `aliasOf` only for the
+  item the search suggested for exactly that typed text. If you get this error, fall back to the "add as new" flow.

@@ -55,7 +55,7 @@ export async function add(groupId: string, userId: string, { itemId, expiresAt, 
 export async function update(groupId: string, id: string, userId: string, body: UpdateCabinetBody): Promise<CabinetItem> {
   const { expiresAt, photoKey, ...rest } = body;
   // Exactly the shape /uploads/presign issues to this caller, so nobody can attach another user's object.
-  const ownKey = new RegExp(`^item-photo/${userId}/[0-9a-f-]{36}\.(jpg|png|webp)$`);
+  const ownKey = new RegExp(`^item-photo/${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`);
   if (photoKey != null && !ownKey.test(photoKey)) {
     throw new AppError(400, "VALIDATION_ERROR", "photoKey must be an item-photo key issued to you by /uploads/presign");
   }
