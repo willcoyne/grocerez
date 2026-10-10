@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
 import type { GoogleIdentity } from "../../lib/google.js";
 import type { UpdateMeBody, User } from "../../contracts/auth.js";
@@ -24,5 +25,6 @@ export const usersRepo = {
 
   update: (id: string, data: UpdateMeBody): Promise<User> => prisma.user.update({ where: { id }, data, select }),
 
-  delete: (id: string): Promise<User> => prisma.user.delete({ where: { id }, select }),
+  delete: (id: string, db: Prisma.TransactionClient | typeof prisma = prisma): Promise<User> =>
+    db.user.delete({ where: { id }, select }),
 };

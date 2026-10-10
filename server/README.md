@@ -17,3 +17,6 @@ Tests use stub values from `vitest.config.ts` and never need real secrets.
 
 Dev sign-in without Google: `POST /api/dev/login-as/:userId` returns `{token, user}` for an existing user
 (not mounted when `NODE_ENV=production`).
+
+Realtime: Socket.IO on the same port. Connect with `io(url, { auth: { token: appJwt } })`, then
+`socket.emit("group:join", { groupId }, ack)`; see `src/lib/realtime.ts` for events and emit helpers.

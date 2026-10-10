@@ -27,16 +27,19 @@ enum Allergen {
 }
 
 model User {
-  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  googleSub   String         @unique @map("google_sub")
-  email       String         @unique // lower-cased by the app
-  displayName String         @map("display_name")
-  avatarUrl   String?        @map("avatar_url")
-  zipCode     String?        @map("zip_code")
-  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz
-  allergens   UserAllergen[]
-  diets       UserDiet[]
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  googleSub     String         @unique @map("google_sub")
+  email         String         @unique // lower-cased by the app
+  displayName   String         @map("display_name")
+  avatarUrl     String?        @map("avatar_url")
+  zipCode       String?        @map("zip_code")
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  allergens     UserAllergen[]
+  diets         UserDiet[]
+  groupsCreated Group[]        @relation("GroupCreator")
+  memberships   GroupMember[]
+  invitesSent   GroupInvite[]
 
   @@map("users")
 }
@@ -58,4 +61,64 @@ model UserDiet {
 
   @@id([userId, diet])
   @@map("user_diets")
+}
+
+// database/03-groups-invites
+enum GroupRole {
+  owner
+  member
+
+  @@map("group_role")
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  declined
+  revoked
+
+  @@map("invite_status")
+}
+
+model Group {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  createdBy String?       @map("created_by") @db.Uuid
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  creator   User?         @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  members   GroupMember[]
+  invites   GroupInvite[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  String    @map("group_id") @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  role     GroupRole @default(member)
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+// email is CHECK-constrained to lower case in SQL (see groups_and_invites migration).
+model GroupInvite {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String       @map("group_id") @db.Uuid
+  email       String
+  invitedBy   String?      @map("invited_by") @db.Uuid
+  status      InviteStatus @default(pending)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  respondedAt DateTime?    @map("responded_at") @db.Timestamptz
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter     User?        @relation(fields: [invitedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, email])
+  @@index([email, status])
+  @@map("group_invites")
 }

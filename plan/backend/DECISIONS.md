@@ -164,3 +164,46 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
 - Rate limit: 10 recipe requests per hour per group.
 - Map `missingItems` to catalog items through the `/items/search` logic ("Add missing to list").
 - Ticking the README boxes, and route tests with supertest.
+## 03-groups-invites + 07-realtime-sync
+
+- **Schema created here** (no database branch existed): migration `*_groups_and_invites` with `groups`, `group_members`,
+  `group_invites`, enums `group_role` / `invite_status`, the indexes and `UNIQUE (group_id, email)` from `database/03`, plus
+  `CHECK (email = lower(email))` added by hand to the SQL. `groups.created_by` is nullable with `ON DELETE SET NULL` (the plan
+  gives no delete rule; without one, deleting a user who created a group would fail). `database/03` checkboxes are left for
+  the database builder to verify.
+- **`requireGroupMember` is mounted once in `app.ts` on `/api/groups/:groupId`**, before every router, so routers added
+  later (04-06, 09, 10) are covered without remembering to add it. Non-members and malformed ids both get
+  `404 NOT_FOUND "Group not found"`. It sets `req.membership = {groupId, role}`. `requireOwner` returns `403 FORBIDDEN`.
+- **Status codes / error codes** (the contract table doesn't list them): `POST /groups` and `POST /groups/:groupId/invites`
+  return **201**. Revoking by someone who is neither owner nor inviter is `403 FORBIDDEN`; revoking a non-pending invite is
+  `409 INVITE_NOT_PENDING`; an invite id from another group is `404 INVITE_NOT_FOUND`. Removing yourself via
+  `DELETE /members/:userId` is `400 VALIDATION_ERROR` (use `/leave`); removing a non-member is `404 NOT_FOUND`.
+  Invite rate limit (20/h per user, in-memory) returns `429 RATE_LIMITED`.
+- **Response shapes** (`contracts/groups.ts`): `Group = {id, name, role, memberCount, createdAt}` (role = caller's role),
+  `GroupDetail = Group & {members: [{id, displayName, email, avatarUrl, role}]}`,
+  `Invite = {id, groupId, email, status, invitedBy: {id, displayName} | null, createdAt, respondedAt}`,
+  `/me/invites` items add `group: {id, name, memberCount}`. Nothing in `Invite` depends on whether the email has an account.
+- **Invite email is trimmed before validation**, then lower-cased (the plan validates first). No Gmail dot/`+tag` stripping.
+- **Accept / revoke / decline use conditional updates** (`WHERE status = 'pending'`), and accept, leave, remove and
+  `DELETE /me` take a `SELECT ... FOR UPDATE` lock on the group row. A revoke or member removal that commits first makes a
+  concurrent accept return 404, and two owners leaving at once can't leave the group ownerless.
+- **Removing a member** sets their invite row (any status) to `revoked`. Re-inviting resets the same row to `pending`.
+- **Leave/remove preference cleanup is deferred to backend/04**: `preferences` doesn't exist yet. 04 should give the table a
+  composite FK `(group_id, user_id) → group_members ON DELETE CASCADE`, so the existing membership delete removes them in the
+  same transaction with no extra code.
+- **`DELETE /me` owner handover** (deferred from 02) is done: in one transaction it runs the same `removeMember` as leave for
+  each of the user's groups (promote the longest-standing member if they were the last owner, delete the group if they were
+  the last member), then deletes the user.
+- **Invite email (step 13) is done** in `lib/email.ts` via Resend's HTTP API (no SDK). No-op without `RESEND_API_KEY`; errors
+  are logged, never returned. Sender is Resend's shared `onboarding@resend.dev`, which only delivers to the Resend account
+  owner; a verified sending domain is needed for real use.
+- **Realtime** (`lib/realtime.ts`): `attachRealtime(server, origins)` in `index.ts`; handshake uses the same
+  `userIdFromToken` as `requireAuth` (extracted in `middleware/auth.ts`), failing with `connect_error` `"UNAUTHENTICATED"`.
+  Helpers for later steps: `emitGroup(groupId, event, byUserId)`, `emitUser(userId, event, payload)`,
+  `kickFromGroup(groupId, userId)`, `closeGroupRoom(groupId)`. All are no-ops when Socket.IO isn't attached (REST tests).
+- **Frontend notes (additive, not contract changes):** `group:join` / `group:leave` accept an optional ack callback that
+  receives `{ok: boolean}` (`ok: false` for non-members or a bad id). Invites created/revoked and membership changes also emit
+  `group:changed` to the group room (so invite lists refresh). A removed or leaving user gets `group:changed {groupId, by}` in
+  their personal `user:<id>` room so their group list refreshes. `invites:changed` has an empty payload `{}`.
+- **Member objects go through `toUser` in `users/service.ts`** (the single DB-row to public-User mapping that backend/11 extends with presigned avatar URLs), then are narrowed to `{id, displayName, email, avatarUrl, role}`.
+- **Skipped:** redis adapter (07 step 7, single instance). The polling fallback (07 step 6) needs no API work.
