@@ -89,6 +89,7 @@ export function RootNavigator() {
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="create-group" options={{ presentation: "modal", title: "Create a household" }} />
         <Stack.Screen name="invites" options={{ presentation: "modal", title: "My invites" }} />
+        <Stack.Screen name="invite" options={{ presentation: "modal", title: "Invite by email" }} />
       </Stack.Protected>
     </Stack>
   );

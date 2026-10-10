@@ -38,6 +38,14 @@ Format: date · folder · what the plan said · what was done · why.
 - Demo users list shows in `__DEV__`, or when `EXPO_PUBLIC_DEMO_KEY` is set (sent as `x-demo-key`, backend/12).
 - Google sign-in config plugin is added in `app.config.ts` using `EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME`, so no client IDs are committed.
 
+### 2026-10-10 · 03 · Groups UI
+- Swipe actions (revoke invite, remove member) are plain "Revoke"/"Remove" buttons on the row (with a confirm for remove). Same permissions
+  as the plan (revoke: owner or inviter; remove: owner, not yourself). Avoids a gesture library dependency and works on web and with screen readers.
+- The invites banner is rendered at the top of the tab screens (not above the navigator) so it doesn't collide with the header's safe area.
+- Confirmations use `src/lib/confirm.ts` (Alert on phones, `window.confirm` on web).
+
 ## Needs backend change
 
-_None yet._
+- **Member allergens (frontend/03 step 6, frontend/09 "Safe for" line):** `GET /groups/:groupId` members have no `allergens`/`diets`, and no
+  endpoint returns other members' dietary profiles. Proposal: add `allergens: Allergen[]` and `diets: Diet[]` to `Member` in
+  `contracts/groups.ts`. The app already renders `member.allergens` chips if the field appears.

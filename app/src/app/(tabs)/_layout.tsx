@@ -2,6 +2,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Tabs } from "expo-router/js-tabs";
 import type { ColorValue } from "react-native";
 
+import { GroupSwitcher } from "@/components/GroupSwitcher";
+
 import { colors } from "@/theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -21,6 +23,7 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: colors.textMuted,
         headerTitleStyle: { fontWeight: "700" },
         sceneStyle: { backgroundColor: colors.background },
+        headerTitle: () => <GroupSwitcher />,
       }}
     >
       <Tabs.Screen name="index" options={{ title: "List", tabBarIcon: icon("checkbox-outline") }} />
