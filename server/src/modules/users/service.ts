@@ -2,27 +2,30 @@ import { prisma } from "../../db.js";
 import { AppError } from "../../lib/errors.js";
 import { emitGroup, kickFromGroup } from "../../lib/realtime.js";
 import { groupsRepo } from "../groups/repo.js";
+import { presignGet } from "../../lib/s3.js";
 import type { UpdateMeBody, User } from "../../contracts/auth.js";
-import { usersRepo } from "./repo.js";
+import { usersRepo, type UserRow } from "./repo.js";
 
-type UserRow = { id: string; email: string; displayName: string; avatarUrl: string | null; zipCode: string | null };
-
-// The one place a DB user row becomes the public User (backend/11 extends it with presigned avatar URLs).
-export const toUser = (row: UserRow): User => ({
-  id: row.id,
-  email: row.email,
-  displayName: row.displayName,
-  avatarUrl: row.avatarUrl,
-  zipCode: row.zipCode,
-});
+// An uploaded avatar wins over the Google picture; the stored key is never exposed, only a 1-hour GET URL.
+export async function toUser({ avatarKey, ...user }: UserRow): Promise<User> {
+  return avatarKey ? { ...user, avatarUrl: await presignGet(avatarKey) } : user;
+}
 
 export async function getMe(userId: string): Promise<User> {
   const user = await usersRepo.find(userId);
   if (!user) throw new AppError(404, "NOT_FOUND", "User not found");
-  return user;
+  return toUser(user);
 }
 
-export const updateMe = (userId: string, data: UpdateMeBody) => usersRepo.update(userId, data);
+export async function updateMe(userId: string, data: UpdateMeBody): Promise<User> {
+  // Exactly the shape presignUpload generates for this user (userId is a UUID, checked by requireAuth),
+  // so nobody can claim another user's object.
+  const ownKey = new RegExp(`^avatar/${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`);
+  if (data.avatarKey != null && !ownKey.test(data.avatarKey)) {
+    throw new AppError(400, "VALIDATION_ERROR", "avatarKey must be an avatar key issued to you by /uploads/presign");
+  }
+  return toUser(await usersRepo.update(userId, data));
+}
 
 // Leaves every group first (owner handover / empty-group cleanup, database/11), then deletes the user. One transaction.
 export async function deleteMe(userId: string): Promise<User> {
@@ -38,5 +41,5 @@ export async function deleteMe(userId: string): Promise<User> {
     await kickFromGroup(groupId, userId);
     emitGroup(groupId, "group:changed", userId);
   }
-  return user;
+  return toUser(user);
 }

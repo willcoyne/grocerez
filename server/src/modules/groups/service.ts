@@ -19,10 +19,10 @@ export const createGroup = (userId: string, name: string) => groupsRepo.create(n
 
 export async function getGroup(groupId: string, role: GroupRole): Promise<GroupDetail> {
   const [group, rows] = await Promise.all([groupsRepo.get(groupId, role), groupsRepo.members(groupId)]);
-  const members = rows.map((r) => {
-    const { id, displayName, email, avatarUrl } = toUser(r.user); // single User mapping (avatar URLs, backend/11)
+  const members = await Promise.all(rows.map(async (r) => {
+    const { id, displayName, email, avatarUrl } = await toUser(r.user); // single User mapping (avatar URLs, backend/11)
     return { id, displayName, email, avatarUrl, role: r.role };
-  });
+  }));
   return { ...group, members };
 }
 

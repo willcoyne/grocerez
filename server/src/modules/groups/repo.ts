@@ -59,7 +59,7 @@ export const groupsRepo = {
     prisma.groupMember.findMany({
       where: { groupId },
       orderBy: { joinedAt: "asc" },
-      select: { role: true, user: { select: { id: true, displayName: true, email: true, avatarUrl: true, zipCode: true } } },
+      select: { role: true, user: { select: { id: true, displayName: true, email: true, avatarUrl: true, avatarKey: true, zipCode: true } } },
     }),
 
   create: (name: string, userId: string) =>

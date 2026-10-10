@@ -14,7 +14,7 @@ function setup(userId: string | null = USER) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    if (userId) (req as unknown as { user: { id: string } }).user = { id: userId };
+    if (userId) req.userId = userId;
     next();
   });
   app.use("/api", createUploadsRouter(presign));

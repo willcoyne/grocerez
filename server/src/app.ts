@@ -8,6 +8,7 @@ import { healthRouter } from "./modules/health/router.js";
 import { authRouter, devRouter } from "./modules/auth/router.js";
 import { usersRouter } from "./modules/users/router.js";
 import { groupsRouter } from "./modules/groups/router.js";
+import { uploadsRouter } from "./modules/uploads/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -33,6 +34,7 @@ app.use("/api", requireAuth);
 app.use("/api/groups/:groupId", requireGroupMember);
 app.use("/api", usersRouter);
 app.use("/api", groupsRouter);
+app.use("/api", uploadsRouter);
 
 app.use(notFound);
 app.use(errorHandler);
