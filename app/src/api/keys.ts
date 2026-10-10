@@ -1,0 +1,21 @@
+/**
+ * Query keys. Everything that belongs to a household is under ["group", groupId, ...] so
+ * (1) switching groups can never show another group's cached data and (2) a socket event for a group
+ * can invalidate exactly that group's queries.
+ */
+export const keys = {
+  me: ["me"] as const,
+  dietary: ["me", "dietary"] as const,
+  myInvites: ["me", "invites"] as const,
+  groups: ["groups"] as const,
+  group: (groupId: string) => ["group", groupId] as const,
+  groupDetail: (groupId: string) => ["group", groupId, "detail"] as const,
+  groupInvites: (groupId: string) => ["group", groupId, "invites"] as const,
+  preferences: (groupId: string, userId: "me" | "all") => ["group", groupId, "preferences", userId] as const,
+  preferencesAll: (groupId: string) => ["group", groupId, "preferences"] as const,
+  cabinet: (groupId: string) => ["group", groupId, "cabinet"] as const,
+  shoppingList: (groupId: string) => ["group", groupId, "shopping-list"] as const,
+  alerts: (groupId: string) => ["group", groupId, "alerts"] as const,
+  prices: (groupId: string) => ["group", groupId, "prices"] as const,
+  itemSearch: (q: string) => ["items", "search", q] as const,
+};
