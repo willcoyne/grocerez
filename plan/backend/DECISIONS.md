@@ -88,3 +88,35 @@ Built while 02 was in progress, so nothing is mounted and no checkboxes are tick
   users can't claim each other's objects. Add DB columns for stored keys (`users.avatar_s3_key`, cabinet `photo_s3_key`,
   product image key) if the schema doesn't have them. Also still to do: step 5 (copy Open Food Facts images to
   `products/{productId}.jpg`), step 6 (swap keys for presigned GET URLs in responses), and AWS bucket/IAM/CORS setup (steps 1-2).
+## 08 (partial, parallel)
+
+Built in a separate worktree while 02-07 were in progress, so only the standalone external-service layer exists. No
+route, model, migration, or `app.ts` change. README boxes stay unticked.
+
+Done (`server/src/modules/products/`, tests in `server/test/products.clients.test.ts`, no network):
+- `common.ts`: `ProductData` (matches the `products` columns), `ALLERGENS`, `mapAllergens()` keyword table, capped body
+  reader. `"wheat"` maps to both `wheat` and `gluten`; barley/rye/spelt map to `gluten`.
+- `smartlabel.ts`: `fetchSmartLabelPage(url, {fetch, lookup})` and `parseSmartLabel(html)`.
+  - SSRF: https only, no credentials, default port only, no IP-literal hosts, host must be `smartlabel.org`,
+    `*.smartlabel.org` or `smartlabel.labelinsight.com`. Redirects use `redirect: "manual"` and every hop (max 5) is
+    re-checked against the allowlist and a DNS check that refuses private/loopback/link-local/CGNAT/multicast/
+    IPv4-mapped addresses. 5 s timeout for the whole chain, 2 MB body cap.
+  - Known gap: fetch re-resolves DNS after the check (rebinding window). Low risk with a hostname allowlist; pin the IP
+    via an undici dispatcher if needed.
+  - Parser is one generic parser (schema.org JSON-LD first, then label-text heuristics), not one per template, because no
+    real SmartLabel pages could be saved yet (step 8, robots.txt/terms, not done). The fixture
+    `server/test/fixtures/smartlabel/generic-cereal.html` is hand-written. Returns `{product: null, gtin}` when the page
+    isn't a usable label, so the service can fall back to Open Food Facts.
+- `openFoodFacts.ts`: `lookupOpenFoodFacts(gtin, {fetch})`. GTIN must be 8-14 digits (checked before fetching). Response
+  validated with zod. Per-serving values when OFF has `energy-kcal_serving`, otherwise per 100 g with
+  `servingSize: "100 g"`. OFF grams are converted for `_mg` keys. Nutri-Score letter goes to `healthScore`. Unknown
+  barcode (404 or `status: 0`) or no product name returns `null`.
+- Errors: a disallowed `qrUrl` or malformed `gtin` is `400 VALIDATION_ERROR`. Upstream failures (timeout, non-2xx,
+  disallowed redirect, private IP, oversized or malformed body) are `502 UPSTREAM_ERROR`, a new code that the frontend
+  should show as "couldn't fetch product info".
+
+Remaining for 08: `POST /products/scan` route + zod contract (exactly one of `qrUrl`/`gtin`), 30 req/min per-user rate
+limit (`express-rate-limit`), the `products` cache table/migration (database/08) and repo with the 30-day `fetched_at`
+check, linking to a catalog item via `/items/search` logic (category from `categoriesTags`), S3 image copy (11), saving
+`raw`, robots.txt/terms check, real-page fixtures plus brand hosts for the allowlist, and the "Done when" checks.
+Needed from the team: a contact email for the User-Agent (`GrocerEZ/0.1 (+email)`); it's currently just `GrocerEZ/0.1`.
