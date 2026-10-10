@@ -99,8 +99,7 @@ Built standalone while 02-07 were in progress elsewhere. No routes, models, migr
 - **Remaining:**
   - Cabinet `photoKey` (`PATCH cabinet {photoKey}`, `item-photo/<userId>/` check, `photo_s3_key` column, presigned GET in
     cabinet responses) belongs with backend/05 (cabinet doesn't exist yet).
-  - Step 5, copying Open Food Facts images to `products/{productId}.jpg`, belongs with backend/08 (no `products` table or
-    scan route yet).
+  - Step 5, copying Open Food Facts images to `products/{productId}.jpg`: done in backend/08 (see that section).
   - Steps 1-2 (bucket, IAM, CORS) are manual AWS setup; instructions are in `server/README.md`.
   - "Done when" boxes are unticked: the member list doesn't exist until 03 (and needs `toUser()`), and "bucket not
     publicly readable" can only be checked once the real bucket exists.
@@ -108,38 +107,67 @@ Built standalone while 02-07 were in progress elsewhere. No routes, models, migr
   applied a groups migration this branch doesn't have yet. Applied this migration with `npx prisma migrate deploy`
   instead (no reset). After merging, `migrate dev` works again.
 
-## 08 (partial, parallel)
+## 08-smartlabel-product-data
 
-Built in a separate worktree while 02-07 were in progress, so only the standalone external-service layer exists. No
-route, model, migration, or `app.ts` change. README boxes stay unticked.
+Client layer (`common.ts`, `smartlabel.ts`, `openFoodFacts.ts`, tests in `test/products.clients.test.ts`) was built
+first in a parallel worktree; the route, table and image copy were added on top. A separate fix pass owns the
+SmartLabel parser (break findings B-02, B-06, B-12, B-13), so this step did not touch `smartlabel.ts`/`common.ts`.
 
-Done (`server/src/modules/products/`, tests in `server/test/products.clients.test.ts`, no network):
-- `common.ts`: `ProductData` (matches the `products` columns), `ALLERGENS`, `mapAllergens()` keyword table, capped body
-  reader. `"wheat"` maps to both `wheat` and `gluten`; barley/rye/spelt map to `gluten`.
-- `smartlabel.ts`: `fetchSmartLabelPage(url, {fetch, lookup})` and `parseSmartLabel(html)`.
-  - SSRF: https only, no credentials, default port only, no IP-literal hosts, host must be `smartlabel.org`,
-    `*.smartlabel.org` or `smartlabel.labelinsight.com`. Redirects use `redirect: "manual"` and every hop (max 5) is
-    re-checked against the allowlist and a DNS check that refuses private/loopback/link-local/CGNAT/multicast/
-    IPv4-mapped addresses. 5 s timeout for the whole chain, 2 MB body cap.
-  - Known gap: fetch re-resolves DNS after the check (rebinding window). Low risk with a hostname allowlist; pin the IP
-    via an undici dispatcher if needed.
-  - Parser is one generic parser (schema.org JSON-LD first, then label-text heuristics), not one per template, because no
-    real SmartLabel pages could be saved yet (step 8, robots.txt/terms, not done). The fixture
-    `server/test/fixtures/smartlabel/generic-cereal.html` is hand-written. Returns `{product: null, gtin}` when the page
-    isn't a usable label, so the service can fall back to Open Food Facts.
-- `openFoodFacts.ts`: `lookupOpenFoodFacts(gtin, {fetch})`. GTIN must be 8-14 digits (checked before fetching). Response
-  validated with zod. Per-serving values when OFF has `energy-kcal_serving`, otherwise per 100 g with
-  `servingSize: "100 g"`. OFF grams are converted for `_mg` keys. Nutri-Score letter goes to `healthScore`. Unknown
-  barcode (404 or `status: 0`) or no product name returns `null`.
-- Errors: a disallowed `qrUrl` or malformed `gtin` is `400 VALIDATION_ERROR`. Upstream failures (timeout, non-2xx,
-  disallowed redirect, private IP, oversized or malformed body) are `502 UPSTREAM_ERROR`, a new code that the frontend
-  should show as "couldn't fetch product info".
+- **Schema:** new migration `20261011020000_products` (enum `product_source`, table `products` exactly per
+  database/08, `CHECK products_identifier`: `gtin` or `smartlabel_url` set unless `source = 'manual'`). Applied with
+  `npx prisma migrate deploy` on the shared DB (no reset). `item_id` is **nullable, `ON DELETE SET NULL`**: a product
+  whose name has no letters/digits can't be linked, and deleting a catalog item shouldn't delete cached scans.
+  `allergens`/`may_contain` are `NOT NULL DEFAULT '{}'` like `items.default_allergens`.
+- **Route:** `POST /api/products/scan` in `modules/products/{router,service,repo}.ts`, contract
+  `src/contracts/products.ts` (`ScanProductBody`, `Product`), mounted behind `requireAuth`. Body is strict; exactly one
+  of `qrUrl` (max 2048) / `gtin` (8-14 digits), else `400 VALIDATION_ERROR`. 30 requests/min per user
+  (`express-rate-limit`, keyed on `req.userId`, runs before validation so junk requests count) -> `429 RATE_LIMITED`.
+- **Flow:** `qrUrl` is checked against the SmartLabel allowlist first (400, nothing fetched), then the cache is read by
+  the normalized URL (`new URL().toString()`), `gtin` by digits. A row with `fetched_at` under 30 days is returned as-is.
+  Otherwise SmartLabel page -> parser; if the parser returns no product but found a GTIN -> Open Food Facts; nothing
+  usable -> `404 PRODUCT_NOT_FOUND` (new code). Upstream failures stay `502 UPSTREAM_ERROR`, **except when a stale row
+  exists: then the stale row is returned** (better than an error for a 30-day cache).
+- **One row per product:** upsert keyed by `gtin` when known, else `smartlabel_url`. A QR scan that resolves to a GTIN
+  stores both, so a later barcode scan of the same product is a cache hit. If an older GTIN-less row holds the same
+  URL, it is deleted in the same transaction (keeps `smartlabel_url` unique). A refresh never clears an existing
+  `smartlabel_url` or `item_id`.
+- **Item link (step 5):** product name (cut to 100 chars) through `items/service.search()`; `exact` or `suggested` ->
+  first result; otherwise `items/service.create()` with a category guessed from OFF `categories_tags` (keyword rules,
+  most specific tag first, `en:plant-based-foods-and-beverages` ignored, default `other`). Only done when the product
+  has no `item_id` yet. Created items have `created_by` = the scanning user.
+- **`raw`:** the OFF JSON as received; for SmartLabel `{url, html}` with the HTML cut to 100,000 chars (enough to
+  debug a parser miss without storing 2 MB per row). `raw` is never returned by the API.
+- **Product images (11 step 5):** `modules/products/image.ts`. `fetchProductImage()` allows only https, no credentials,
+  default port, no IP literals, host `openfoodfacts.org` / `*.openfoodfacts.org`; every redirect hop is re-checked and
+  must resolve only to public addresses (same `isPrivateAddress()` BlockList as SmartLabel); 5 s timeout; jpeg/png/webp
+  only; 5 MB cap. Then `lib/s3.putObject("products/{productId}.jpg", ...)` and `image_s3_key` is set. Best effort: a
+  failed copy is logged and the scan still succeeds with `imageUrl: null`. SmartLabel `og:image` URLs (brand CDNs) are
+  not on the image allowlist, so SmartLabel products have no image until a brand CDN is added. `imageUrl` in `Product` is
+  a presigned GET (1 hour), never the key.
+  - `guardedFetch()` in `image.ts` duplicates the redirect/DNS loop in `fetchSmartLabelPage` (left untouched because of
+    the parallel parser fix). Follow-up: make `fetchSmartLabelPage` call `guardedFetch` after that merges.
+- **robots.txt (step 8):** `smartlabel.org/robots.txt` is `User-agent: * / Disallow:` (crawling allowed) with
+  `Crawl-delay: 10`; one fetch per URL per 30 days is well under that. `smartlabel.labelinsight.com/robots.txt` is a 404
+  (no restrictions stated). Terms of use not reviewed; someone on the team should read them before the demo.
+- **Tests:** `test/products.test.ts` (29, real app + Postgres; global `fetch`, `node:dns/promises` and S3 stubbed):
+  validation, auth, non-SmartLabel/IP/http `qrUrl` refused without fetching, OFF path with item creation + S3 copy,
+  exact-match item link, cache hit (no fetch, one row), 30-day refresh and stale fallback, 404/502, SmartLabel page +
+  cache, SmartLabel -> OFF fallback (then barcode scan is a cache hit), SSRF redirect refused, image copy skipped for
+  off-host / redirected / private-DNS images, rate limit per user, `guessCategory`, `fetchProductImage` guard cases.
+  Also checked live once (not in the suite): `lookupOpenFoodFacts("0016000275287")` returned Cheerios with 140 kcal and
+  the image downloaded through `fetchProductImage`.
+- **Done when:** "plain UPC returns OFF data" (live OFF lookup + route tests) and "second scan is cached" are ticked.
+  "Real SmartLabel QR returns calories + allergens" is **not** ticked: no real SmartLabel page has been saved as a
+  fixture yet and brand hosts haven't been added to the allowlist; that needs a real box scanned by the team.
+- **Frontend must update:** `Product` shape is now defined in `src/contracts/products.ts` (`id, itemId, gtin,
+  smartlabelUrl, brand, name, servingSize, caloriesPerServing, nutrition, ingredients, allergens, mayContain,
+  healthScore, imageUrl, source, fetchedAt`). New error codes on `/products/scan`: `404 PRODUCT_NOT_FOUND` (show "no
+  info for this product, add it manually"), `502 UPSTREAM_ERROR` ("couldn't fetch product info, try again"),
+  `429 RATE_LIMITED`. The contract table row itself is unchanged.
+- **Needed from the team:** a contact email for the User-Agent (`GrocerEZ/0.1 (+email)`), real SmartLabel QR scans
+  (save the HTML into `server/test/fixtures/smartlabel/` and add any brand hosts to `ALLOWED_HOSTS`), and the real S3
+  bucket (see 11) for image copies to land.
 
-Remaining for 08: `POST /products/scan` route + zod contract (exactly one of `qrUrl`/`gtin`), 30 req/min per-user rate
-limit (`express-rate-limit`), the `products` cache table/migration (database/08) and repo with the 30-day `fetched_at`
-check, linking to a catalog item via `/items/search` logic (category from `categoriesTags`), S3 image copy (11), saving
-`raw`, robots.txt/terms check, real-page fixtures plus brand hosts for the allowlist, and the "Done when" checks.
-Needed from the team: a contact email for the User-Agent (`GrocerEZ/0.1 (+email)`); it's currently just `GrocerEZ/0.1`.
 ## 10 (partial, parallel)
 
 Built only the standalone AI layer while 02–07 are built elsewhere. No routes, models, migrations, or changes to
