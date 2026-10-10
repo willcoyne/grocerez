@@ -10,6 +10,7 @@ import {
   embedQuery,
   itemEmbeddingText,
   toVectorLiteral,
+  type ItemSemantics,
 } from "../../lib/embeddings.js";
 import { config } from "../../config.js";
 import { logger } from "../../lib/logger.js";
@@ -19,6 +20,10 @@ import { itemsRepo, searchRowToItem, toItem } from "./repo.js";
 /** Background embeds in flight (tests await them with `waitForItemEmbeds`). */
 const pendingEmbeds = new Set<Promise<void>>();
 export const waitForItemEmbeds = () => Promise.all([...pendingEmbeds]);
+
+/** Keeps only rows within SEMANTIC_RELATIVE_GAP of the closest one (rows are sorted by distance). */
+const closest = <T extends { distance: number }>(rows: T[]) =>
+  rows.filter((r) => r.distance <= rows[0].distance + config.SEMANTIC_RELATIVE_GAP);
 
 const emptyName = () => badRequest("Item name is empty after normalization", "VALIDATION_ERROR");
 
@@ -42,14 +47,14 @@ export const itemsService = {
     if (!embeddingsConfigured()) return [];
     try {
       if (anchorItemId) {
-        const rows = await itemsRepo.relatedToItem(db, anchorItemId, excludeIds, config.SEMANTIC_MAX_DISTANCE, limit);
+        const rows = await itemsRepo.relatedToItem(db, anchorItemId, excludeIds, config.SEMANTIC_ITEM_MAX_DISTANCE, limit);
         if (rows.length > 0) return rows.map(searchRowToItem);
       }
       const vector = await embedQuery(typed);
       const rows = await itemsRepo.related(
         db, toVectorLiteral(vector), vector.length, embeddingModel(), excludeIds, config.SEMANTIC_MAX_DISTANCE, limit,
       );
-      return rows.map(searchRowToItem);
+      return closest(rows).map(searchRowToItem);
     } catch (err) {
       logger.warn({ err: String(err) }, "semantic item search failed");
       return [];
@@ -60,17 +65,23 @@ export const itemsService = {
    * Describes (Akamai chat) then embeds items, saving both. A failed description falls back to "name (category)";
    * a failed embedding throws so callers can decide (startup backfill retries on the next start).
    */
-  async describeAndEmbed(items: { id: string; name: string; category: string | null; description: string | null }[]) {
-    const undescribed = items.filter((i) => !i.description).map((i) => i.name);
-    const descriptions = await describeItems(undescribed).catch((err) => {
+  async describeAndEmbed(
+    items: { id: string; name: string; category: string | null; description: string | null; productType: string | null }[],
+  ) {
+    const undescribed = items.filter((i) => !i.description || !i.productType).map((i) => i.name);
+    const semantics = await describeItems(undescribed).catch((err) => {
       logger.warn({ err: String(err) }, "item descriptions failed; embedding names only");
-      return new Map<string, string>();
+      return new Map<string, ItemSemantics>();
     });
-    const withText = items.map((i) => ({ ...i, description: i.description ?? descriptions.get(i.name) ?? null }));
+    const withText = items.map((i) => ({
+      ...i,
+      description: i.description ?? semantics.get(i.name)?.description ?? null,
+      productType: i.productType ?? semantics.get(i.name)?.productType ?? null,
+    }));
     const vectors = await embed(withText.map(itemEmbeddingText));
     for (const [k, item] of withText.entries()) {
       await itemsRepo.setDescriptionAndEmbedding(
-        prisma, item.id, item.description, toVectorLiteral(vectors[k]), embeddingModel(),
+        prisma, item.id, item.productType, item.description, toVectorLiteral(vectors[k]), embeddingModel(),
       );
     }
   },
@@ -79,7 +90,7 @@ export const itemsService = {
   async embedItem(item: { id: string; name: string; category: string | null }) {
     if (!embeddingsConfigured()) return;
     try {
-      await this.describeAndEmbed([{ ...item, description: null }]);
+      await this.describeAndEmbed([{ ...item, description: null, productType: null }]);
     } catch (err) {
       logger.warn({ err: String(err), itemId: item.id }, "item embedding failed");
     }

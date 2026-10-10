@@ -16,13 +16,16 @@ const fakeVector = (text: string) => {
 };
 
 /** Fake hackathon-chat: brand names get a generic description, everything else "grocery item". */
-const fakeDescription = (name: string) => (/oreo|chips ahoy|biscotti/i.test(name) ? "sweet cookies" : "grocery item");
+const fakeSemantics = (name: string) =>
+  /oreo|chips ahoy|biscotti|cookie/i.test(name)
+    ? { type: "cookies", description: "sweet cookies" }
+    : { type: "groceries", description: "grocery item" };
 
 const fakeAkamai = async (url: string, init?: RequestInit) => {
   const body = JSON.parse(String(init!.body));
   if (url.endsWith("/chat/completions")) {
     const names: string[] = JSON.parse(body.messages[1].content);
-    const content = JSON.stringify(Object.fromEntries(names.map((n) => [n, fakeDescription(n)])));
+    const content = JSON.stringify(Object.fromEntries(names.map((n) => [n, fakeSemantics(n)])));
     return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
   }
   const input: string[] = body.input;
@@ -48,7 +51,7 @@ afterAll(async () => {
   vi.restoreAllMocks();
   config.AKAMAI_API_KEY = original.key;
   config.AKAMAI_BASE_URL = original.url;
-  await prisma.$executeRaw`UPDATE items SET description = NULL, embedding = NULL, embedding_model = NULL, embedded_at = NULL`;
+  await prisma.$executeRaw`UPDATE items SET description = NULL, product_type = NULL, embedding = NULL, embedding_model = NULL, embedded_at = NULL`;
 });
 
 describe("semantic item search (Akamai embeddings)", () => {
@@ -60,8 +63,9 @@ describe("semantic item search (Akamai embeddings)", () => {
     expect(call[0]).toBe("https://akamai.test/v1/embeddings");
     expect((call[1]!.headers as Record<string, string>).Authorization).toBe("Bearer test-akamai-key");
     expect(JSON.parse(String(call[1]!.body)).model).toBe("hackathon-embedding");
-    const [oreos] = await prisma.$queryRaw<{ description: string }[]>`SELECT description FROM items WHERE name = 'Oreos'`;
-    expect(oreos.description).toBe("sweet cookies");
+    const [oreos] = await prisma.$queryRaw<{ description: string; product_type: string }[]>`
+      SELECT description, product_type FROM items WHERE name = 'Oreos'`;
+    expect(oreos).toEqual({ description: "sweet cookies", product_type: "cookies" });
     expect(JSON.parse(String(chatCall![1]!.body)).model).toBe("hackathon-chat");
   });
 

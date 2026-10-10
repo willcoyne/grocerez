@@ -62,16 +62,19 @@ export const itemsRepo = {
   },
 
   /** Stores an item's description and embedding (vector literal from toVectorLiteral). */
-  setDescriptionAndEmbedding: (db: Db, itemId: string, description: string | null, vector: string, model: string) =>
+  setDescriptionAndEmbedding: (
+    db: Db, itemId: string, productType: string | null, description: string | null, vector: string, model: string,
+  ) =>
     db.$executeRaw`
       UPDATE items SET description = COALESCE(${description}, description),
+        product_type = COALESCE(${productType}, product_type),
         embedding = ${vector}::vector, embedding_model = ${model}, embedded_at = now()
       WHERE id = ${itemId}::uuid`,
 
   /** Items with no embedding for `model` yet (new items, or the model changed). */
   missingEmbeddings: (db: Db, model: string, limit: number) =>
-    db.$queryRaw<{ id: string; name: string; category: string | null; description: string | null }[]>`
-      SELECT id, name, category, description FROM items
+    db.$queryRaw<{ id: string; name: string; category: string | null; description: string | null; productType: string | null }[]>`
+      SELECT id, name, category, description, product_type AS "productType" FROM items
       WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM ${model}
       ORDER BY created_at, id LIMIT ${limit}::int`,
 
@@ -90,7 +93,10 @@ export const itemsRepo = {
       ORDER BY embedding <=> ${vector}::vector
       LIMIT ${limit}::int`,
 
-  /** Nearest items to another item's stored embedding (cosine), e.g. Oreos → Chips Ahoy, Cookies. */
+  /**
+   * Items related to another item: same product type first (Oreos → Chips Ahoy, Cookies), then other types
+   * within maxDistance; each group ordered by cosine distance between stored embeddings.
+   */
   relatedToItem: (db: Db, itemId: string, excludeIds: string[], maxDistance: number, limit: number) =>
     db.$queryRaw<(Omit<SearchRow, "match" | "similarity"> & { distance: number })[]>`
       SELECT b.id AS item_id, b.name, b.normalized_name, b.category, b.default_allergens::text[] AS default_allergens,
@@ -99,8 +105,8 @@ export const itemsRepo = {
         ON b.embedding_model = a.embedding_model AND vector_dims(b.embedding) = vector_dims(a.embedding)
       WHERE a.id = ${itemId}::uuid AND a.embedding IS NOT NULL AND b.id <> a.id
         AND NOT (b.id = ANY(${excludeIds}::uuid[]))
-        AND (b.embedding <=> a.embedding) <= ${maxDistance}::float8
-      ORDER BY b.embedding <=> a.embedding
+        AND (b.product_type = a.product_type OR (b.embedding <=> a.embedding) <= ${maxDistance}::float8)
+      ORDER BY (b.product_type = a.product_type) IS TRUE DESC, b.embedding <=> a.embedding
       LIMIT ${limit}::int`,
 
   /** Adds alias → itemId. Returns the item id the alias points at (an existing alias wins). */

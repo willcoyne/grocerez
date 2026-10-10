@@ -11,12 +11,21 @@ export const embeddingsConfigured = () => Boolean(config.AKAMAI_API_KEY && confi
 
 export const embeddingModel = () => config.AKAMAI_EMBEDDING_MODEL;
 
+export type ItemSemantics = { productType: string | null; description: string | null };
+
 /**
- * Text embedded for a catalog item. The description says what the item *is* ("Oreos: chocolate sandwich
- * cookies"), which a small embedding model can't infer from a brand name alone.
+ * Text embedded for a catalog item: "product type: description" ("cookies: Chocolate sandwich cookies").
+ * The small embedding model can't infer what a brand is, and leading with the generic type keeps cookies
+ * apart from candy and chips. Falls back to the name when the chat model gave nothing.
  */
-export const itemEmbeddingText = (item: { name: string; category: string | null; description?: string | null }) =>
-  item.description ? `${item.name}: ${item.description}` : item.category ? `${item.name} (${item.category})` : item.name;
+export const itemEmbeddingText = (item: { name: string; category: string | null } & Partial<ItemSemantics>) =>
+  item.productType && item.description
+    ? `${item.productType}: ${item.description}`
+    : item.description
+      ? `${item.name}: ${item.description}`
+      : item.category
+        ? `${item.name} (${item.category})`
+        : item.name;
 
 /** pgvector literal, e.g. "[0.1,0.2]". */
 export const toVectorLiteral = (v: number[]) => `[${v.join(",")}]`;
@@ -71,13 +80,15 @@ export async function embed(texts: string[], opts: { retries?: number } = {}): P
 }
 
 const DESCRIBE_PROMPT =
-  "You describe grocery catalog items for a search index. For each item, write a short plain description " +
-  "(at most 10 words) of what kind of product it is, using generic words a shopper might search for " +
-  '(e.g. Oreos -> chocolate sandwich cookies). Reply with only a JSON object mapping each item name exactly as given to its description.';
+  "You describe grocery catalog items for a search index. For each item give: " +
+  '"type": its product type, the generic noun a shopper would use for that kind of product, 1-3 words, plural, ' +
+  "no brand, no flavors (e.g. Oreos -> cookies, Doritos -> tortilla chips, M&M's -> candy, Cheerios -> breakfast cereal); " +
+  '"description": a short plain description of the product, at most 10 words, generic words (e.g. chocolate sandwich cookies). ' +
+  'Reply with only a JSON object mapping each item name exactly as given to {"type": ..., "description": ...}.';
 
-/** Writes short generic descriptions for item names with Akamai's chat model. Missing/invalid entries are left out. */
-export async function describeItems(names: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+/** Product type + description for item names from Akamai's chat model. Missing/invalid entries are left out. */
+export async function describeItems(names: string[]): Promise<Map<string, ItemSemantics>> {
+  const out = new Map<string, ItemSemantics>();
   if (names.length === 0) return out;
   const res = await akamaiPost(
     "/chat/completions",
@@ -103,9 +114,15 @@ export async function describeItems(names: string[]): Promise<Map<string, string
     return out;
   }
   if (!parsed || typeof parsed !== "object") return out;
+  const clean = (v: unknown, max: number) =>
+    typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ").slice(0, max) : null;
   for (const name of names) {
-    const d = (parsed as Record<string, unknown>)[name];
-    if (typeof d === "string" && d.trim()) out.set(name, d.trim().replace(/\s+/g, " ").slice(0, 120));
+    const entry = (parsed as Record<string, unknown>)[name];
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const productType = clean(e.type, 40)?.toLowerCase() ?? null;
+    const description = clean(e.description, 120);
+    if (productType || description) out.set(name, { productType, description });
   }
   return out;
 }

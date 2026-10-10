@@ -271,3 +271,11 @@ not required by the contract.
   (Oreos → Chips Ahoy, M&M's, …, Cookies). With no match, the typed text is embedded with a Qwen-style instruction.
 - Config: `AKAMAI_BASE_URL` (…/v1) replaces `AKAMAI_EMBEDDING_URL`; `AKAMAI_CHAT_MODEL=hackathon-chat`.
   Akamai limits: 16 inputs per embeddings request, and rate limiting (429) — the client batches and retries.
+
+### 2026-10-11 update — product types
+
+- `hackathon-chat` now also gives each item a generic **product type** (`items.product_type`, migration
+  `20261011001000_item_product_type`): Oreos/Chips Ahoy/Cookies → "cookies", M&M's → "candy", Doritos → "tortilla chips".
+- Embedding text is "product type: description". Related items for a matched item: **same product type first**,
+  then other types within `SEMANTIC_ITEM_MAX_DISTANCE` (0.24), each ordered by cosine similarity.
+  "oreos" → Chips Ahoy, Cookies, Graham Crackers, Snickers (was M&M's, Doritos, Snickers above Cookies).

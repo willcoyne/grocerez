@@ -46,6 +46,10 @@ const schema = z.object({
   AKAMAI_CHAT_MODEL: z.string().trim().min(1).default("hackathon-chat"),
   /** Cosine distance cutoff for "related" items (0 = identical, 2 = opposite). */
   SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.35),
+  /** For a matched item: other-type items must be at least this close (same product type always qualifies). */
+  SEMANTIC_ITEM_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.24),
+  /** For a typed query: related items must be within this distance of the closest one (drops the noisy tail). */
+  SEMANTIC_RELATIVE_GAP: z.coerce.number().positive().max(2).default(0.08),
   CONTACT_EMAIL: z.string().default("team@grocerez.app"),
   /** If set in production, /api/dev/login-as is mounted and requires header `x-demo-key: <DEMO_KEY>`. */
   DEMO_KEY: optional,
