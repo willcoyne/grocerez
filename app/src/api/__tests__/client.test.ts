@@ -14,6 +14,7 @@ function respond(status: number, body?: unknown) {
 const onUnauthorized = jest.fn();
 
 beforeEach(() => {
+  process.env.EXPO_PUBLIC_USE_MOCK = '0'; // these tests cover the real fetch path
   fetchMock.mockReset();
   onUnauthorized.mockReset();
   setAuthHandlers({ getToken: () => 'jwt-123', onUnauthorized });

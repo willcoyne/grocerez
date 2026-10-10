@@ -4,3 +4,8 @@ export const config = {
   googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
   googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
 };
+
+/** EXPO_PUBLIC_USE_MOCK=1 routes every API call to the in-memory mock server (src/api/mock). */
+export function isMockApi(): boolean {
+  return process.env.EXPO_PUBLIC_USE_MOCK === '1';
+}

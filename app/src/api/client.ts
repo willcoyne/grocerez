@@ -1,15 +1,9 @@
-import { config } from '@/config';
+import { config, isMockApi } from '@/config';
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+import { ApiError } from './errors';
+import { mockRequest } from './mock/handler';
+
+export { ApiError };
 
 type AuthHandlers = {
   getToken: () => string | null;
@@ -26,6 +20,15 @@ export function setAuthHandlers(handlers: AuthHandlers) {
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export async function api<T>(path: string, opts: { method?: Method; body?: unknown } = {}): Promise<T> {
+  if (isMockApi()) {
+    try {
+      return (await mockRequest(opts.method ?? 'GET', path, opts.body, auth.getToken())) as T;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) auth.onUnauthorized();
+      throw e;
+    }
+  }
+
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   const token = auth.getToken();

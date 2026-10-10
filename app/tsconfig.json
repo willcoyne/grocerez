@@ -10,7 +10,7 @@
         "./assets/*"
       ],
       "@contracts/*": [
-        "../server/src/contracts/*"
+        "./src/contracts/*"
       ]
     },
     "types": [
