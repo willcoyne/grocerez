@@ -36,4 +36,6 @@
 ## Done when
 
 - [ ] The app launches on a phone and shows `/api/health` OK from the laptop's server
+  — **needs device check** (and a running server; `server/` doesn't exist yet). Web export renders the health screen.
 - [ ] Teammates can run the app from a fresh clone using the instructions in `app/README.md`
+  — instructions written; **needs a teammate to try it**. Dev build not built yet (no CocoaPods / Android SDK on this machine).
