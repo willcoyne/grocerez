@@ -1,0 +1,29 @@
+{
+  "name": "grocerez-server",
+  "version": "1.0.0",
+  "description": "GrocerEZ API server (database layer set up by database-builder)",
+  "scripts": {
+    "db:up": "docker compose up -d --wait",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:reset": "prisma migrate reset --force",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "prisma": "7.10.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "dotenv": "18.0.7",
+    "pg": "8.23.1"
+  },
+  "private": true
+}
