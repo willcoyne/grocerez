@@ -168,25 +168,57 @@ SmartLabel parser (break findings B-02, B-06, B-12, B-13), so this step did not 
   (save the HTML into `server/test/fixtures/smartlabel/` and add any brand hosts to `ALLOWED_HOSTS`), and the real S3
   bucket (see 11) for image copies to land.
 
-## 10 (partial, parallel)
+## 10-agentic-ai
 
-Built only the standalone AI layer while 02–07 are built elsewhere. No routes, models, migrations, or changes to
-`app.ts` / `schema.prisma` / `package.json` / `config.ts`.
-
-**Done**
+**Layout**
 - `src/modules/ai/client.ts`: `callStructured()` sends one `client.beta.messages.create` call with model `claude-opus-5-5`,
   `thinking: adaptive`, explicit `effort` (`low` for recipes, `medium` for prices), structured outputs through
   `betaZodOutputFormat`, and `betas: ["server-side-fallback-2026-07-01"]` + `fallbacks: "default"`. It uses a 60 s timeout and
   `maxRetries: 0`, so 60 s is the total time allowed. It checks `stop_reason` before reading content and continues
   `pause_turn` up to 3 times. Every failure (API, rate limit, timeout, refusal, `max_tokens`, bad JSON, failed zod check)
   becomes `503 AI_UNAVAILABLE`. The client can be injected: `AiClient` covers only `beta.messages.create`.
-- `src/modules/ai/service.ts`: `suggestRecipes()` and `estimatePrices()` take plain inputs. The routes will read the DB and
-  pass the data in. `buildRecipeContext()` is deterministic: items expiring within 3 days, plus the union of all members'
-  diets and allergens.
-- `src/modules/ai/allergens.ts`: the deterministic allergen keyword table. It ignores phrases like "dairy-free" and plant
-  milks/butters. backend/08 should import this table instead of writing a second one.
+- `src/modules/ai/service.ts`: `suggestRecipes()` and `estimatePrices()` take plain inputs (Claude sees only data, never
+  the DB). `buildRecipeContext()` is deterministic: items expiring within 3 days (from `cabinet_items.expires_at`
+  directly, not 09's alert code), plus the union of all members' diets and allergens. `suggestForGroup()` /
+  `pricesForGroup()` are the route handlers: read the DB through `repo.ts`, call the AI functions, write only validated rows.
+- `src/modules/ai/repo.ts`: cabinet, members' diets/allergens and list rows (all scoped by `groupId`), the user's ZIP, and
+  the `price_estimates` cache (global, keyed by item + ZIP).
+- `src/modules/ai/router.ts`: both routes. Mounted in `app.ts` after `requireGroupMember` and **before**
+  `shoppingListRouter`, so `/shopping-list/prices` can never be read as `/shopping-list/:id` (that router has no
+  `POST /:id` today, but order keeps it safe if one is added). The allergen table lives in `src/lib/allergens.ts` (shared with 08).
 - `src/contracts/ai.ts`: request schemas, model-output schemas (`strictObject`, so extra fields cause a 503), and response schemas.
-- `test/ai.test.ts`: 18 unit tests with a stubbed client and no network.
+- Tests: `test/ai.test.ts` (18 unit tests) and `test/ai.routes.test.ts` (19 supertest tests against Postgres; Claude
+  stubbed with `vi.mock` of `getAiClient`, no network).
+
+**Schema:** migration `20261011050200_price_estimates` adds only `price_estimates` (database/09 step 3): `UNIQUE (item_id,
+zip_code)`, `item_id` FK `ON DELETE CASCADE` (a cache row should never block deleting an item), plus hand-written CHECKs
+`zip_code ~ '^[0-9]{5}$'` and `0 <= low <= typical <= high`. The plan's single `recalls_and_prices` migration was split
+because the recalls tables were built concurrently (`20261011050100_recalls`). Note: this migration was first applied to
+the shared dev DB as `20261011050000_price_estimates`, which collided with `20261011050000_product_fks`; the folder was
+renamed and the `_prisma_migrations` row updated in place (no reset). Other dev DBs that applied the old name need the
+same one-line `UPDATE _prisma_migrations SET migration_name = '20261011050200_price_estimates' WHERE migration_name =
+'20261011050000_price_estimates'`.
+
+**Routes**
+- Both bodies are optional (no body = defaults). `maxRecipes` 1–5 (default 3), `mustUseExpiring` default true; `zipCode`
+  must be 5 digits. Invalid → `400 VALIDATION_ERROR`. Non-members → `404 NOT_FOUND` (from `requireGroupMember`).
+- **Recipe rate limit:** 10 requests per hour per group (`express-rate-limit`, in-memory, keyed by `groupId`), counted
+  before validation and including requests that fail. Over → `429 RATE_LIMITED`. An empty cabinet returns `[]` without
+  calling Claude (still counted). No caching, per the plan.
+- **"Add missing to list":** every `missingItems` name is run through the same `search()` used by `GET /items/search`.
+  An `exact` or `suggested` match returns `results[0]`; `none` (or a name with no letters/digits) returns `item: null`.
+  The app adds a matched item with the existing `POST /groups/:groupId/shopping-list {itemId}` (manual row); unmatched
+  names can go through `POST /items` first.
+- **Prices:** ZIP = body, then `users.zip_code`, else `400 ZIP_REQUIRED` ("Set a ZIP code in your profile or send
+  zipCode"), checked before anything else. Every shopping-list row (checked or not; it's the trip cost) is priced.
+  Rows with a `price_estimates` row for (item, ZIP) under 24 h old come from cache; the rest go to Claude in **one**
+  request (none if everything is cached or the list is empty). Valid fresh rows are upserted with `model = claude-opus-5-5`
+  and `fetched_at = now()`; stale rows are overwritten. Totals = sum of `lowCents` / `highCents` over cached + fresh
+  priced items. Items in list order. Any Claude failure → `503 AI_UNAVAILABLE` and nothing is written.
+- **Frontend must update (additive):** each `Recipe` in the response also has
+  `missingItemMatches: [{name, item: Item | null}]`, and the prices response also has `unpricedItemIds: string[]`
+  (list items with no usable estimate, excluded from the totals). Both are now in the contract table in
+  `plan/backend/README.md`; nothing was removed or renamed. Label every price as an **estimate** (`estimate: true`).
 
 **Choices**
 - **Recipe checks:** a recipe is **dropped**, not labeled, if any of its text mentions a forbidden allergen.
@@ -201,17 +233,10 @@ Built only the standalone AI layer while 02–07 are built elsewhere. No routes,
 - **ZIP location:** `user_location` in the SDK has no `postal_code`, so the request sends `country: "US"` and puts the ZIP in the prompt.
 - **Response shape:** each priced item has `{itemId, itemName, lowCents, typicalCents, highCents, unit, sourceUrls, estimate: true}`.
   This fills in the contract's `items[]` and does not change the contract table.
-- **Not verified with a real key:** structured outputs combined with `web_search_20260209` in one request. Check this
-  once `ANTHROPIC_API_KEY` is available.
-
-**Remaining for 10**
-- Routes `POST /groups/:groupId/recipes/suggest` and `POST /groups/:groupId/shopping-list/prices`, behind `requireGroupMember`
-  and mounted in `app.ts`.
-- `price_estimates` table (`database/09`): 24 h cache read, upsert with `model = AI_MODEL`, and totals across cached and fresh rows.
-- ZIP fallback to `users.zip_code`, otherwise 400.
-- Rate limit: 10 recipe requests per hour per group.
-- Map `missingItems` to catalog items through the `/items/search` logic ("Add missing to list").
-- Ticking the README boxes, and route tests with supertest.
+- **Needs a real `ANTHROPIC_API_KEY` to verify** (all stubbed in tests): structured outputs combined with
+  `web_search_20260209` in one request; the `server-side-fallback-2026-07-01` beta + `fallbacks: "default"` being accepted;
+  the "demo list prices in under 30 seconds" Done-when item (left unticked); real recipe/price quality.
+- **Skipped:** Kroger Products API alternative (plan marks it optional). Rate-limit store is per process.
 ## 03-groups-invites + 07-realtime-sync
 
 - **Schema created here** (no database branch existed): migration `*_groups_and_invites` with `groups`, `group_members`,

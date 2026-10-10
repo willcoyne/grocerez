@@ -15,6 +15,7 @@ import { cabinetRouter } from "./modules/cabinet/router.js";
 import { shoppingListRouter } from "./modules/shopping-list/router.js";
 import { productsRouter } from "./modules/products/router.js";
 import { alertsRouter } from "./modules/recalls/router.js";
+import { aiRouter } from "./modules/ai/router.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
@@ -58,6 +59,7 @@ app.use("/api", uploadsRouter);
 app.use("/api", itemsRouter);
 app.use("/api", preferencesRouter);
 app.use("/api", cabinetRouter);
+app.use("/api", aiRouter); // before shoppingListRouter: owns /shopping-list/prices
 app.use("/api", shoppingListRouter);
 app.use("/api", productsRouter);
 app.use("/api", alertsRouter);
