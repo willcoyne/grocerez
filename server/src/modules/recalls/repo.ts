@@ -1,10 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../db.js";
-import { brandAppears, MATCH_THRESHOLD } from "./match.js";
+import { MATCH_THRESHOLD, STOP_WORDS } from "./match.js";
 import type { Recall } from "./openfda.js";
 
 type Db = Prisma.TransactionClient | typeof prisma;
-type Scored = { recall_id: string; cabinet_item_id: string; group_id: string; brand: string | null; product_description: string; score: number };
 
 export const recallsRepo = {
   // Upsert by external_id (openFDA recall_number): re-importing never duplicates.
@@ -17,40 +16,49 @@ export const recallsRepo = {
     ),
 
   /**
-   * Scores recalls against cabinet items with pg_trgm strict_word_similarity (DECISIONS "09 (partial, parallel)"):
-   * best of item name, aliases and `brand + ' ' + product name`. A match needs score >= 0.35 and, when the brand is
-   * known, the brand as whole words in the description. Inserts new matches only; returns the groups that got one.
+   * Scores recalls against cabinet items with pg_trgm strict_word_similarity (DECISIONS "09 (partial, parallel)").
+   * Same rule as `matchRecalls` in match.ts: candidate names are item name, aliases and `brand + ' ' + product name`;
+   * a name qualifies with score >= 0.35 and all its significant words in the description (whole words, optional
+   * trailing "s"); score = best qualifying name; a known brand must appear as whole words in the description.
+   * Match + insert is one statement: `FOR KEY SHARE` locks the matched cabinet item and recall rows, so a concurrent
+   * delete either waits or its row is skipped (no FK error), and `ON CONFLICT DO NOTHING` keeps existing/dismissed
+   * matches. Returns the groups that got a new match.
    * Scope: `recallsSince` limits recalls by report_date (daily job), `cabinetItemIds` limits items (cabinet add).
    */
   match: async (scope: { recallsSince?: Date; cabinetItemIds?: string[] }, db: Db = prisma): Promise<string[]> => {
     if (scope.cabinetItemIds && !scope.cabinetItemIds.length) return [];
     // ponytail: cross join scored in SQL; fine for a 30-day recall window x household cabinets. Prefilter with the
     // `<<%` GIN operator if cabinets grow to many thousands of rows.
-    const rows = await db.$queryRaw<Scored[]>`
-      SELECT * FROM (
-        SELECT r.id AS recall_id, c.id AS cabinet_item_id, c.group_id, p.brand, r.product_description,
-          GREATEST(
-            strict_word_similarity(i.name, r.product_description),
-            COALESCE((SELECT max(strict_word_similarity(a.alias_normalized, r.product_description))
-                      FROM item_aliases a WHERE a.item_id = i.id), 0),
-            CASE WHEN p.id IS NULL THEN 0
-                 ELSE strict_word_similarity(COALESCE(p.brand, '') || ' ' || p.name, r.product_description) END
-          )::float8 AS score
-        FROM cabinet_items c
-        JOIN items i ON i.id = c.item_id
-        LEFT JOIN products p ON p.id = c.product_id
-        CROSS JOIN recalls r
-        WHERE TRUE
-          ${scope.recallsSince ? Prisma.sql`AND r.report_date >= ${scope.recallsSince}::date` : Prisma.empty}
-          ${scope.cabinetItemIds ? Prisma.sql`AND c.id = ANY(${scope.cabinetItemIds}::uuid[])` : Prisma.empty}
+    const rows = await db.$queryRaw<{ group_id: string }[]>`
+      INSERT INTO recall_matches (recall_id, cabinet_item_id, group_id, score)
+      SELECT r.id, c.id, c.group_id, s.score
+      FROM cabinet_items c
+      JOIN items i ON i.id = c.item_id
+      LEFT JOIN products p ON p.id = c.product_id
+      CROSS JOIN recalls r
+      CROSS JOIN LATERAL (
+        SELECT max(strict_word_similarity(n, r.product_description))::real AS score
+        FROM unnest(
+          ARRAY[i.name, CASE WHEN p.id IS NOT NULL THEN COALESCE(p.brand, '') || ' ' || p.name END]
+          || ARRAY(SELECT a.alias_normalized FROM item_aliases a WHERE a.item_id = i.id)
+        ) n
+        WHERE n IS NOT NULL
+          AND strict_word_similarity(n, r.product_description) >= ${MATCH_THRESHOLD}
+          AND NOT EXISTS (
+            SELECT 1 FROM regexp_split_to_table(lower(n), '[^[:alnum:]]+') w
+            WHERE length(w) >= 3 AND w <> ALL(${STOP_WORDS}::text[])
+              AND lower(r.product_description) !~ ('\\m' || regexp_replace(w, 's$', '') || 's?\\M'))
       ) s
-      WHERE score >= ${MATCH_THRESHOLD}`;
-    const data = rows
-      .filter((r) => !r.brand?.trim() || brandAppears(r.brand, r.product_description))
-      .map((r) => ({ recallId: r.recall_id, cabinetItemId: r.cabinet_item_id, groupId: r.group_id, score: r.score }));
-    if (!data.length) return [];
-    const created = await db.recallMatch.createManyAndReturn({ data, skipDuplicates: true, select: { groupId: true } });
-    return [...new Set(created.map((m) => m.groupId))];
+      WHERE s.score IS NOT NULL
+        AND (p.brand IS NULL OR p.brand !~ '[[:alnum:]]'
+             OR lower(r.product_description) ~ ('\\m' || array_to_string(
+                  array_remove(regexp_split_to_array(lower(p.brand), '[^[:alnum:]]+'), ''), '[^[:alnum:]]+') || '\\M'))
+        ${scope.recallsSince ? Prisma.sql`AND r.report_date >= ${scope.recallsSince}::date` : Prisma.empty}
+        ${scope.cabinetItemIds ? Prisma.sql`AND c.id = ANY(${scope.cabinetItemIds}::uuid[])` : Prisma.empty}
+      FOR KEY SHARE OF c, r
+      ON CONFLICT (recall_id, cabinet_item_id) DO NOTHING
+      RETURNING group_id`;
+    return [...new Set(rows.map((r) => r.group_id))];
   },
 
   openMatches: (groupId: string) =>

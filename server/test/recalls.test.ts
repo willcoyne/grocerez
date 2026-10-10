@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { estimateExpiration } from "../src/lib/expiration.js";
 import { fetchRecalls, recallLink } from "../src/modules/recalls/openfda.js";
-import { brandAppears, matchRecalls, similarity, strictWordSimilarity } from "../src/modules/recalls/match.js";
+import { allWordsAppear, brandAppears, matchRecalls, similarity, strictWordSimilarity } from "../src/modules/recalls/match.js";
 
 const day = 86_400_000;
 const bought = new Date("2026-10-01T12:00:00Z");
@@ -89,6 +89,30 @@ describe("matching", () => {
     expect(brandAppears("Fresh Valley", "FRESH VALLEY organic spinach")).toBe(true);
     expect(brandAppears("Valley", "Valleyview spinach")).toBe(false);
     expect(brandAppears("", "anything")).toBe(false);
+  });
+
+  it("allWordsAppear needs every significant word, whole-word, with an optional trailing s", () => {
+    expect(allWordsAppear("Cheese Crackers", "Sliced cheese, cheddar, 8 oz")).toBe(false);
+    expect(allWordsAppear("Cheese Crackers", "Cheese Cracker sandwiches")).toBe(true);
+    expect(allWordsAppear("Salt and Pepper Chips", "Pepper chips with sea salt")).toBe(true); // "and" is a stop word
+    expect(allWordsAppear("Spinach", "Spinachy dip")).toBe(false);
+  });
+
+  it("matchRecalls rejects a single shared word and keeps a name inside a long description", () => {
+    const recalls = [
+      { id: "cheese", productDescription: "Sliced cheese, cheddar, 8 oz" },
+      {
+        id: "long",
+        productDescription:
+          "Fresh Farms brand Organic Baby Spinach in 5 oz and 10 oz plastic clamshells and 1 lb bags, sold at retail stores nationwide, UPC 0 12345 67890 1",
+      },
+    ];
+    const items = [
+      { id: "crackers", groupId: "g", itemName: "Cheese Crackers" },
+      { id: "spinach", groupId: "g", itemName: "Baby Spinach" },
+    ];
+    expect(strictWordSimilarity("Cheese Crackers", recalls[0].productDescription)).toBeGreaterThanOrEqual(0.35); // old false positive
+    expect(matchRecalls(recalls, items).map((m) => [m.recallId, m.cabinetItemId])).toEqual([["long", "spinach"]]);
   });
 
   it("matchRecalls applies threshold and brand gate", () => {

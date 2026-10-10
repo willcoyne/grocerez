@@ -1,6 +1,8 @@
 // Pure recall-to-cabinet matching. Mirrors pg_trgm so a SQL version (strict_word_similarity) gives the same answers.
 
 export const MATCH_THRESHOLD = 0.35;
+/** Name words that never count toward the all-words gate (with words under 3 chars, like "oz"). */
+export const STOP_WORDS = ["and", "the", "with", "for"];
 
 const words = (s: string) => s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
@@ -40,6 +42,25 @@ export function brandAppears(brand: string, description: string): boolean {
   return b.length > 0 && ` ${words(description).join(" ")} `.includes(` ${b} `);
 }
 
+/**
+ * Every significant word of `name` appears as a whole word in the description, allowing one trailing "s" either way
+ * ("cracker" ~ "crackers"). Stops "Cheese Crackers" matching any recall that only mentions "cheese".
+ * ponytail: "s"-only plurals; "berries"/"berry" don't pair. Add a stemmer if real misses show up.
+ * Same rule as the SQL in recalls/repo.ts (`~ '\m<stem>s?\M'`).
+ */
+export function allWordsAppear(name: string, description: string): boolean {
+  const desc = new Set(words(description));
+  return words(name)
+    .filter((w) => w.length >= 3 && !STOP_WORDS.includes(w))
+    .every((w) => {
+      const stem = w.replace(/s$/, "");
+      return desc.has(stem) || desc.has(`${stem}s`);
+    });
+}
+
+/** A brand gates matching only if it has at least one letter or digit. */
+const hasBrand = (brand?: string | null): brand is string => !!brand && words(brand).length > 0;
+
 export type MatchRecall = { id: string; productDescription: string };
 export type MatchCabinetItem = {
   id: string; // cabinet_item_id
@@ -52,17 +73,21 @@ export type MatchCabinetItem = {
 export type RecallMatch = { recallId: string; groupId: string; cabinetItemId: string; score: number };
 
 /**
- * Score = best of item name, aliases, and `brand + ' ' + productName`. A match needs score >= threshold
- * and, when the brand is known, the brand must appear in the description. Results are suggestions only.
+ * Candidate names: item name, aliases, and `brand + ' ' + productName`. A name qualifies when its score >= threshold
+ * and all its significant words appear in the description; score = best qualifying name. When the brand is known it
+ * must also appear in the description. Results are suggestions only.
  */
 export function matchRecalls(recalls: MatchRecall[], items: MatchCabinetItem[]): RecallMatch[] {
   const out: RecallMatch[] = [];
   for (const r of recalls) {
     for (const it of items) {
-      if (it.brand && !brandAppears(it.brand, r.productDescription)) continue;
+      if (hasBrand(it.brand) && !brandAppears(it.brand, r.productDescription)) continue;
       const names = [it.itemName, ...(it.aliases ?? [])];
       if (it.productName) names.push(`${it.brand ?? ""} ${it.productName}`);
-      const score = Math.max(...names.map((n) => strictWordSimilarity(n, r.productDescription)));
+      const scores = names
+        .filter((n) => allWordsAppear(n, r.productDescription))
+        .map((n) => strictWordSimilarity(n, r.productDescription));
+      const score = Math.max(0, ...scores);
       if (score >= MATCH_THRESHOLD) out.push({ recallId: r.id, groupId: it.groupId, cabinetItemId: it.id, score });
     }
   }

@@ -412,7 +412,7 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
   of `npm test` (`vitest`) so it never depends on CI detection to skip watch mode. Not run on GitHub yet.
 - `server/DEPLOY.md`: image usage, env var table, Railway steps, Cloud Run + Cloud SQL alternative, seeding/`DEMO_KEY`, CI,
   monitoring, and the demo checklist with exactly what each item needs.
-- **Known flake (not fixed here):** `test/alerts.test.ts` "importRecalls job" failed once in a full parallel run with
+- **Known flake (fixed, see "Fix: recall import race, matching precision"):** `test/alerts.test.ts` "importRecalls job" failed once in a full parallel run with
   `recall_matches_cabinet_item_id_fkey`: the import matches across all groups, and another test file deleted a cabinet
   item between the match query and `createManyAndReturn` (`modules/recalls/repo.ts:52`). Same race exists in production
   (a user deletes a cabinet item mid-import fails that run; it retries at the next start / 06:00). Fix: do the match +
@@ -547,7 +547,8 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
   The pure JS `matchRecalls` stays as the reference implementation. New matches are `createManyAndReturn(skipDuplicates)`.
   Known ceiling: a two-word item name matches on one shared word (`Cheese Crackers` vs any recall mentioning "cheese"
   scores 0.44). That's what the plan's threshold gives; the alerts are worded "possible match, check your package".
-  Raise the threshold or require every item word if the demo shows too much noise.
+  Raise the threshold or require every item word if the demo shows too much noise. (Done: all-words gate, see "Fix: recall import race,
+  matching precision".)
 - **Per-item re-match** runs inside the write's transaction on cabinet `POST` **and finish trip** (bought items are cabinet
   adds), against **all** stored recalls (catches old ones). A dismissed match stays dismissed on re-add (same row,
   `UNIQUE (recall_id, cabinet_item_id)`). A ran-out + re-buy creates a new cabinet row, so the alert can come back.
@@ -592,3 +593,22 @@ Everything that doesn't need a cloud account is built and verified locally. Noth
   now also filters on `checked: false`, which Postgres re-checks at delete time.
 - **Frontend must update:** `POST /items {name, aliasOf}` can return `400 ALIAS_NOT_SUGGESTED`. Send `aliasOf` only for the
   item the search suggested for exactly that typed text. If you get this error, fall back to the "add as new" flow.
+
+## Fix: recall import race, matching precision
+
+- **Race fixed at the root:** `recallsRepo.match` is now one `INSERT INTO recall_matches ... SELECT ... FOR KEY SHARE OF
+  c, r ON CONFLICT (recall_id, cabinet_item_id) DO NOTHING RETURNING group_id`. A single INSERT ... SELECT alone still
+  races (the FK check sees a delete that commits after the statement's snapshot); `FOR KEY SHARE` makes a concurrent
+  delete either wait or have its row skipped. Covers the daily import and the per-item re-match (cabinet add, finish
+  trip), which share this function. Brand gate moved from JS into the same SQL. Test: `alerts.test.ts` "a cabinet item
+  deleted while matching runs" (fails with `recall_matches_cabinet_item_id_fkey` without the lock).
+- **Matching precision:** a candidate name (item name, alias, `brand + product name`) qualifies only if its
+  `strict_word_similarity` >= 0.35 **and** every significant word (>= 3 chars, not `and/the/with/for`) appears as a
+  whole word in the description, allowing one trailing "s" either way. Score = best qualifying name. "Cheese Crackers"
+  no longer matches "Sliced cheese"; "Baby Spinach" still matches inside a long description. Same rule in JS
+  (`match.ts` `allWordsAppear`/`matchRecalls`) and SQL (`~ '\m<stem>s?\M'`). Known ceiling: only "s" plurals pair
+  ("berries" vs "berry" won't). A brand with no letters/digits no longer gates (was: rejected everything).
+- **Test isolation:** `importRecalls({ job })` names the `job_runs` row (default `import-recalls`); `alerts.test.ts` uses
+  `import-recalls-<tag>`. Its recall descriptions now include the test's item tag, since item names carry it and the
+  all-words gate requires it.
+- No API contract change.
