@@ -3,6 +3,8 @@ import { defineConfig } from "vitest/config";
 // Stub values so tests never need real secrets. Postgres comes from docker-compose.yml.
 export default defineConfig({
   test: {
+    // DB-heavy route tests run 20+ files in parallel against one Postgres; 5s default flakes under load.
+    testTimeout: 20_000,
     env: {
       NODE_ENV: "test",
       PORT: "3999",
