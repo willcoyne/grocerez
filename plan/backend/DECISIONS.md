@@ -388,30 +388,40 @@ same one-line `UPDATE _prisma_migrations SET migration_name = '20261011050200_pr
 - **Allergen keyword tables not consolidated:** 04 needed no keyword logic (items carry `default_allergens`), so the
   duplicate tables in `products/common.ts` and `ai/allergens.ts` were left alone.
 
-## 12 (partial, parallel)
+## 12-deployment
 
-Built while M2 (04-06) is in progress on `main`. Nothing deployed; no cloud resources created.
+Everything that doesn't need a cloud account is built and verified locally. Nothing deployed; no cloud resources created.
 
-**Done**
-- `server/Dockerfile` (multi-stage, `node:22-slim`, OpenSSL installed for Prisma, `prisma generate` + `tsc` in the build
-  stage, runs as the non-root `node` user) and `server/.dockerignore`. Verified locally: image builds and serves
-  `/api/health` against the local Postgres.
-- **Migrations run on container start** (`npx prisma migrate deploy && exec node dist/index.js`), as the plan's step 1
-  says, instead of a separate release step. Safe because the service runs as exactly 1 instance (step 3).
-- **The runtime image keeps dev dependencies**, because the `prisma` CLI is a devDependency and moving it would churn
-  `package-lock.json`. Upgrade path: move `prisma` to `dependencies`, then `npm prune --omit=dev` in the build stage.
-- **`TRUST_PROXY`** (new optional env, integer hop count, default `0` = off) sets `app.set("trust proxy", n)`, closing
-  02-auth item 6. Set `TRUST_PROXY=1` on Railway / Cloud Run. Added to `.env.example`; config test covers it.
-- `server/DEPLOY.md`: image usage, env var table, Railway steps, Cloud Run + Cloud SQL alternative (min = max = 1
-  instance, no CPU throttling, session affinity for Socket.IO), seeding, monitoring, and the demo checklist (all unchecked).
+- **Image:** `server/Dockerfile` (multi-stage, `node:22-slim`, OpenSSL for Prisma, non-root `node` user) + `.dockerignore`.
+  Migrations run on container start (`npx prisma migrate deploy && exec node dist/index.js`), as step 1 says; safe because
+  the service runs as exactly 1 instance (step 3). The runtime keeps dev dependencies because the `prisma` CLI is a
+  devDependency (upgrade path: move it to `dependencies`, `npm prune --omit=dev`). Verified 2026-10-10: against an empty
+  scratch database all 12 migrations apply and `/api/health` returns `{"ok":true}`; against the local dev DB "No pending
+  migrations"; with `api.fda.gov` unreachable and no `OPENFDA_API_KEY`, the startup recall import logs `recall import failed`
+  and the server keeps serving.
+- **`TRUST_PROXY`** (optional hop count, default 0) sets `trust proxy` so rate limits see the client IP. `1` on Railway / Cloud Run.
+- **`CORS_ORIGINS`** (optional, comma-separated, default `http://localhost:8081`) replaces the hard-coded `EXPO_DEV_ORIGINS`
+  and feeds both Express CORS and Socket.IO. Only an Expo web build needs it.
+- **`DEMO_KEY`** (optional, min 32 chars, empty = unset). Step 4: in production `/api/dev/login-as` stays unmounted unless
+  `DEMO_KEY` is set; then it is mounted behind `X-Demo-Key: <DEMO_KEY>` (sha256 + `timingSafeEqual`), else
+  `401 UNAUTHENTICATED`. Outside production the route is unchanged (no header), so the frontend's `__DEV__` demo list keeps
+  working locally. Not a contract change (the dev route isn't in the contract table). **Frontend note:** a build that uses the
+  demo list against the deployed API must send `X-Demo-Key`.
+- **CI** (step 6): `.github/workflows/server-ci.yml`, on PRs to `main` touching `server/`: `npm ci`, `prisma validate`,
+  `prisma migrate deploy` against a `postgres:16` service, `npm run build` (tsc), `npx vitest run`. `npx vitest run` instead
+  of `npm test` (`vitest`) so it never depends on CI detection to skip watch mode. Not run on GitHub yet.
+- `server/DEPLOY.md`: image usage, env var table, Railway steps, Cloud Run + Cloud SQL alternative, seeding/`DEMO_KEY`, CI,
+  monitoring, and the demo checklist with exactly what each item needs.
+- **Known flake (not fixed here):** `test/alerts.test.ts` "importRecalls job" failed once in a full parallel run with
+  `recall_matches_cabinet_item_id_fkey`: the import matches across all groups, and another test file deleted a cabinet
+  item between the match query and `createManyAndReturn` (`modules/recalls/repo.ts:52`). Same race exists in production
+  (a user deletes a cabinet item mid-import fails that run; it retries at the next start / 06:00). Fix: do the match +
+  insert as one `INSERT ... SELECT ... ON CONFLICT DO NOTHING`, or retry on P2003.
 
-**Remaining**
-- Step 2/5: the actual Railway (or Cloud Run) deploy, public URL into `EXPO_PUBLIC_API_URL`, host health check config.
-- Step 4: `npx prisma db seed` against prod. No seed script exists on this branch yet (owned by `plan/database`).
-  A `DEMO_KEY`-guarded `/dev/login-as` for production is not built; it stays unmounted when `NODE_ENV=production`.
-- Step 6 (optional CI workflow): not added. Needs a Postgres service container since tests hit a real DB.
-- Step 7 demo checklist and "Done when": every item depends on M2 (04-06), finishing 08/09/10, and a real deploy.
-- CORS still only allows `http://localhost:8081`; a deployed Expo **web** build would need its origin added (native apps are unaffected).
+**Remaining (needs accounts / devices)**
+- Step 2/5: the Railway (or Cloud Run) deploy, public URL into `EXPO_PUBLIC_API_URL`, host health check on `/api/health`.
+- Step 4: `npx prisma db seed` against prod. No seed exists on this branch (`plan/database/10-seed-data`, database owner).
+- Step 7 demo checklist and "Done when": all need the deployed API and phones; left unchecked in the README.
 
 ## 05-cabinet
 

@@ -48,6 +48,29 @@ describe("config", () => {
     expect(() => loadConfig({ ...process.env, TRUST_PROXY: "yes" })).toThrow(/TRUST_PROXY/);
   });
 
+  it("CORS_ORIGINS defaults to the Expo web dev server and splits a list", () => {
+    expect(loadConfig({ ...process.env, CORS_ORIGINS: undefined }).CORS_ORIGINS).toEqual(["http://localhost:8081"]);
+    expect(loadConfig({ ...process.env, CORS_ORIGINS: "" }).CORS_ORIGINS).toEqual(["http://localhost:8081"]);
+    expect(loadConfig({ ...process.env, CORS_ORIGINS: "https://a.app, https://b.app," }).CORS_ORIGINS).toEqual([
+      "https://a.app",
+      "https://b.app",
+    ]);
+  });
+
+  it("DEMO_KEY is optional, empty means unset, and must be at least 32 chars", () => {
+    expect(loadConfig({ ...process.env, DEMO_KEY: undefined }).DEMO_KEY).toBeUndefined();
+    expect(loadConfig({ ...process.env, DEMO_KEY: "" }).DEMO_KEY).toBeUndefined();
+    expect(loadConfig({ ...process.env, DEMO_KEY: "k".repeat(32) }).DEMO_KEY).toBe("k".repeat(32));
+    expect(() => loadConfig({ ...process.env, DEMO_KEY: "short" })).toThrow(/DEMO_KEY/);
+  });
+
+  it("CORS allows the configured origin only", async () => {
+    const ok = await request(app).get("/api/health").set("Origin", "http://localhost:8081");
+    expect(ok.headers["access-control-allow-origin"]).toBe("http://localhost:8081");
+    const bad = await request(app).get("/api/health").set("Origin", "https://evil.example");
+    expect(bad.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
   it("server refuses to start with a missing variable", () => {
     const { JWT_SECRET: _omit, ...env } = process.env;
     const out = spawnSync(process.execPath, ["--import", "tsx", "src/index.ts"], {

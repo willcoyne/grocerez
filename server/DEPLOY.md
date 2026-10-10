@@ -15,7 +15,10 @@ curl http://localhost:3000/api/health   # {"ok":true}
 - Base `node:22-slim`, runs as the non-root `node` user, listens on `PORT`.
 - **Release step:** the container runs `npx prisma migrate deploy` before `node dist/index.js` on every start.
   It's idempotent; if it fails (bad `DATABASE_URL`, failed migration) the container exits and the host shows the error in logs.
-- `NODE_ENV=production` is baked in, so `/api/dev/login-as` is **not mounted**.
+- `NODE_ENV=production` is baked in, so `/api/dev/login-as` is **not mounted** unless `DEMO_KEY` is set (see "Seeding").
+- Verified locally (2026-10-10): builds; against an empty database it applies all migrations and serves `/api/health`;
+  against an up-to-date one it logs "No pending migrations"; with openFDA unreachable and no `OPENFDA_API_KEY` the startup
+  recall import logs `recall import failed` and the server keeps serving.
 
 ## Environment variables
 
@@ -32,6 +35,9 @@ All are required except where noted. The server exits on start, naming every mis
 | `AWS_REGION`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | See "S3 setup" in `README.md` |
 | `APP_LINK_BASE` | App deep-link base, `grocerez://` |
 | `TRUST_PROXY` | `1` on Railway / Cloud Run (one proxy hop), so rate limits see the client IP. Optional, default off |
+| `CORS_ORIGINS` | Optional. Comma-separated browser origins (only an Expo **web** build needs this; native apps send no Origin). Default `http://localhost:8081` |
+| `DEMO_KEY` | Optional. Set only if the demo needs `/dev/login-as` on the deployed API (`openssl rand -hex 32`, min 32 chars). Unset after judging |
+| `OPENFDA_API_KEY` | Optional. Raises the openFDA rate limit for the daily recall import; works without it |
 | `RESEND_API_KEY` | Optional (invite emails, stretch goal) |
 
 ## Railway (recommended)
@@ -70,8 +76,18 @@ Same Google Cloud project as the OAuth clients.
 DATABASE_URL=<prod url> npx prisma db seed
 ```
 
-Not available yet: the seed script is owned by `plan/database` and doesn't exist on this branch. `/dev/login-as`
-stays off in production; if the demo needs it, it must first be guarded with a `DEMO_KEY` header (not built).
+**Not available yet:** the seed script (`prisma/seed.ts`, `plan/database/10-seed-data`) is owned by the database builder and
+doesn't exist on this branch. Until it lands, the demo group/users/recall must be created by hand or through the app.
+
+`/dev/login-as/:userId` (seeded `seed-*` users only) is off in production. To use it in the demo deployment, set `DEMO_KEY`
+on the service; the route is then mounted and every call needs the header `X-Demo-Key: <DEMO_KEY>` (otherwise `401`).
+Remove `DEMO_KEY` after the demo.
+
+## CI
+
+`.github/workflows/server-ci.yml` runs on PRs to `main` that touch `server/`: `npm ci`, `prisma validate`,
+`prisma migrate deploy` against a Postgres 16 service, `npm run build` (tsc), `npx vitest run`. No secrets needed; the
+vitest config stubs every external key.
 
 ## Monitoring
 
@@ -80,12 +96,22 @@ and is the host health check.
 
 ## Demo checklist
 
-Two phones, cellular data, deployed API.
+Two phones, cellular data, deployed API. **Backend** = the API behind the item is built and covered by tests against
+local Postgres. No item is checked: each needs the real deploy, phones with the app, and the accounts listed under it.
 
-- [ ] Two phones signed in as different users in the same group (auth + groups/invites built; needs deploy + Google client IDs)
-- [ ] Phone A adds a preference, the list updates on phone B (needs backend/04, 06)
-- [ ] Check off items while shopping, finish trip, items appear in the cabinet with expiration dates (needs 05, 06)
-- [ ] Mark Oreos "ran out", they come back on the list (needs 05, 06)
-- [ ] Scan a SmartLabel / barcode, see calories and allergens and an allergen badge for a member (needs 08 finished)
-- [ ] Recipe suggestions from expiring items; price estimate for the list (needs 10 finished)
-- [ ] Recall alert shown (seeded) (needs 09 finished + seed)
+Built locally:
+- [x] Docker image builds, migrates, serves `/api/health`, survives openFDA being unreachable
+- [x] `DEMO_KEY`-guarded `/dev/login-as`, configurable `CORS_ORIGINS`, `TRUST_PROXY`
+- [x] CI workflow (runs once the repo is on GitHub)
+
+On phones (all need: Railway or GCP project with Postgres, public URL in `EXPO_PUBLIC_API_URL`, `JWT_SECRET`, and an app build):
+- [ ] Two phones signed in as different users in the same group. Backend: auth, groups, email invites. Needs Google OAuth
+      iOS/Android/Web client IDs in `GOOGLE_CLIENT_IDS` (or `DEMO_KEY` + the seed for `/dev/login-as`)
+- [ ] Phone A adds a preference, the list updates on phone B. Backend: preferences, list engine, Socket.IO
+- [ ] Check off items while shopping, finish trip, items appear in the cabinet with expiration dates. Backend: 05, 06
+- [ ] Mark Oreos "ran out", they come back on the list. Backend: 05, 06. Needs the seed (or Oreos added by hand)
+- [ ] Scan a SmartLabel / barcode, see calories and allergens and an allergen badge for a member. Backend: 08 (Open Food
+      Facts / SmartLabel need no key). Needs a phone camera build
+- [ ] Recipe suggestions from expiring items; price estimate for the list. Backend: 10. Needs `ANTHROPIC_API_KEY`
+- [ ] Recall alert shown (seeded). Backend: 09. Needs the seed's fake recall (`plan/database/10`) or a real openFDA match
+- [ ] Photos (avatars, item photos). Backend: 11. Needs the S3 bucket + IAM keys (`AWS_*`, `S3_BUCKET`)

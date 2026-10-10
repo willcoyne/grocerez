@@ -5,7 +5,7 @@ import { pinoHttp } from "pino-http";
 import { logger } from "./lib/logger.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { healthRouter } from "./modules/health/router.js";
-import { authRouter, devRouter } from "./modules/auth/router.js";
+import { authRouter, devRouter, requireDemoKey } from "./modules/auth/router.js";
 import { usersRouter } from "./modules/users/router.js";
 import { groupsRouter } from "./modules/groups/router.js";
 import { uploadsRouter } from "./modules/uploads/router.js";
@@ -20,15 +20,12 @@ import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
 import { config } from "./config.js";
 
-// Expo web dev server. Native apps send no Origin header and are unaffected by CORS.
-export const EXPO_DEV_ORIGINS = ["http://localhost:8081"];
-
 export const app = express();
 // Behind a host proxy, req.ip (used by the rate limiters) must come from X-Forwarded-For.
 if (config.TRUST_PROXY) app.set("trust proxy", config.TRUST_PROXY);
 
 app.use(helmet());
-app.use(cors({ origin: EXPO_DEV_ORIGINS }));
+app.use(cors({ origin: config.CORS_ORIGINS }));
 app.use(express.json({ limit: "1mb" }));
 // Query strings are never logged: Socket.IO-style clients send `?token=`, and searches can be personal (GAPS #26).
 app.use(
@@ -48,6 +45,7 @@ app.use(
 app.use("/api", healthRouter);
 app.use("/api", authRouter);
 if (config.NODE_ENV !== "production") app.use("/api", devRouter);
+else if (config.DEMO_KEY) app.use("/api/dev", requireDemoKey(config.DEMO_KEY)).use("/api", devRouter); // demo deploy only
 
 // Everything below requires a valid app JWT (unknown /api paths included, so routes can't be probed).
 app.use("/api", requireAuth);

@@ -177,6 +177,32 @@ describe("POST /api/dev/login-as/:userId", () => {
   });
 });
 
+describe("POST /api/dev/login-as with DEMO_KEY (production demo deploy)", () => {
+  it("is mounted in production only behind a matching X-Demo-Key header", async () => {
+    const key = "demo-key-demo-key-demo-key-demo-key-1";
+    const seeded = await prisma.user.create({
+      data: { googleSub: `seed-${randomUUID()}`, email: `seed-${randomUUID()}@example.com`, displayName: "Seed" },
+    });
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEMO_KEY", key);
+    try {
+      const { app: demoApp } = await import("../src/app.js");
+      const url = `/api/dev/login-as/${seeded.id}`;
+      expect((await request(demoApp).post(url)).status).toBe(401);
+      expect((await request(demoApp).post(url).set("X-Demo-Key", "wrong")).status).toBe(401);
+      expect((await request(demoApp).post(url).set("X-Demo-Key", `${key}x`)).status).toBe(401);
+      const res = await request(demoApp).post(url).set("X-Demo-Key", key);
+      expect(res.status).toBe(200);
+      expect(AuthResponse.parse(res.body).user.id).toBe(seeded.id);
+      await (await import("../src/db.js")).prisma.$disconnect();
+    } finally {
+      vi.unstubAllEnvs();
+      await prisma.user.delete({ where: { id: seeded.id } });
+    }
+  });
+});
+
 // Last: exhausts this file's limiter.
 describe("rate limit", () => {
   it("allows 20 sign-in attempts per minute per IP, then 429", async () => {

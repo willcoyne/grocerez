@@ -21,6 +21,13 @@ const schema = z.object({
   OPENFDA_API_KEY: z.string().optional().transform((s) => s || undefined),
   // Number of reverse proxies in front of the server (Railway / Cloud Run: 1). 0 or unset = trust none.
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  // Comma-separated browser origins allowed by CORS and Socket.IO. Native apps send no Origin and are unaffected.
+  CORS_ORIGINS: z
+    .string()
+    .optional()
+    .transform((s) => (s || "http://localhost:8081").split(",").map((o) => o.trim()).filter(Boolean)),
+  // Production only: when set, /api/dev/login-as is mounted and requires an `X-Demo-Key: <DEMO_KEY>` header.
+  DEMO_KEY: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
 });
 
 export type Config = z.infer<typeof schema>;

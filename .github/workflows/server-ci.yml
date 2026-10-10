@@ -1,0 +1,35 @@
+# backend/12 step 6: typecheck, build and test the API against a real Postgres on PRs to main.
+name: server-ci
+on:
+  pull_request:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/server-ci.yml"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: grocerez
+          POSTGRES_PASSWORD: grocerez
+          POSTGRES_DB: grocerez
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U grocerez" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://grocerez:grocerez@localhost:5432/grocerez
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - run: npx vitest run
