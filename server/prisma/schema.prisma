@@ -39,8 +39,11 @@ model User {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  allergens UserAllergen[]
-  diets     UserDiet[]
+  allergens      UserAllergen[]
+  diets          UserDiet[]
+  groupsCreated  Group[]        @relation("GroupCreatedBy")
+  memberships    GroupMember[]
+  invitesSent    GroupInvite[]  @relation("InviteInvitedBy")
 
   @@map("users")
 }
@@ -62,4 +65,71 @@ model UserDiet {
 
   @@id([userId, diet])
   @@map("user_diets")
+}
+
+// ─── 03 Groups, members & email invites ────────────────────────────────────────
+
+enum GroupRole {
+  owner
+  member
+
+  @@map("group_role")
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  declined
+  revoked
+
+  @@map("invite_status")
+}
+
+model Group {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  /// Nullable so deleting the creator's account doesn't delete or block the household.
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator User?         @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  members GroupMember[]
+  invites GroupInvite[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  String    @map("group_id") @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  role     GroupRole @default(member)
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+/// One row per (group, email). Re-inviting sets the row back to `pending` (upsert), so the table doubles as history.
+/// Matching rule: an invite belongs to a user when `group_invites.email = users.email` (both lower-cased + trimmed, CHECK enforced).
+model GroupInvite {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String       @map("group_id") @db.Uuid
+  email       String
+  invitedBy   String?      @map("invited_by") @db.Uuid
+  status      InviteStatus @default(pending)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Set on accept / decline / revoke; NULL while pending (CHECK enforced).
+  respondedAt DateTime?    @map("responded_at") @db.Timestamptz(6)
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter User? @relation("InviteInvitedBy", fields: [invitedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, email])
+  @@index([email, status])
+  @@map("group_invites")
 }

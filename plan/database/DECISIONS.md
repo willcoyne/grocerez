@@ -47,3 +47,14 @@ Format: date · folder · what the plan said · what was done · why.
 - **Did:** added `server/src/db.ts` (the PrismaClient singleton named in `backend/01`) because the Prisma 7 client needs the
   `@prisma/adapter-pg` driver adapter and the seed/checks needed one. The backend builder can keep or move it.
 
+### 2026-10-10 · 03 · `groups.created_by` on user delete
+- **Plan said:** `created_by uuid FK → users` (no `ON DELETE`).
+- **Did:** nullable, `ON DELETE SET NULL`.
+- **Why:** `DELETE /me` (11) must succeed and the household must survive; ownership lives in `group_members.role`, not `created_by`.
+
+### 2026-10-10 · 03 · Extra invite CHECKs
+- **Did:** `CHECK (email = lower(btrim(email)) AND email <> '')` (plan: `email = lower(email)`, plus "trimmed" in the notes), and
+  `CHECK ((status = 'pending') = (responded_at IS NULL))`. Also `groups.name` can't be blank.
+- **Backend impact:** re-inviting must upsert with `ON CONFLICT (group_id, email) DO UPDATE SET status='pending', responded_at=NULL`;
+  accept/decline/revoke must set `responded_at = now()` in the same update.
+
