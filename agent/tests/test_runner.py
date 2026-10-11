@@ -110,7 +110,7 @@ async def test_happy_path_one_proposed_with_meta_and_estimate(ctx, settings, pla
         async def invoke_async(self, p):
             class R:
                 def __str__(s):
-                    return '{"items":[{"name":"Lemons","lowCents":300,"highCents":400}]}'
+                    return '{"prices":[[300,400]]}'
 
             return R()
 
@@ -149,6 +149,90 @@ async def test_propose_fills_ingredients_and_missing_items_from_checked_draft(ct
     plan = terminals(route)[0]["payload"]["plan"]
     assert plan["meals"][0]["ingredients"] == ["Rice", "Lemons"]
     assert plan["missingItems"] == [{"name": "Lemons", "forMeals": ["Rice bowl"]}]
+
+
+@respx.mock
+async def test_propose_step_is_done_before_terminal_proposed_event(ctx, settings, play):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+
+    async def script(tools):
+        await tools["propose_plan"](PLAN)
+
+    play(script)
+    await go(ctx, settings)
+    ev = events(route)
+    assert ev[-1]["type"] == "proposed"
+    done = [e for e in ev if e["type"] == "step" and e["payload"]["id"] == "propose_plan"]
+    assert done and done[-1]["payload"] == {"id": "propose_plan", "label": "Plan ready", "status": "done"}
+    assert ev.index(done[-1]) < ev.index(ev[-1])
+
+
+@respx.mock
+async def test_no_missing_items_gets_one_nudge_then_is_accepted(ctx, settings, play):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    meal2 = {**MEAL, "title": "Egg rice", "missing": []}
+    nothing = {"meals": [{**MEAL, "missing": []}, meal2], "summary": "x"}
+    out = []
+
+    async def script(tools):
+        out.append(await tools["propose_plan"](nothing))
+        out.append(await tools["propose_plan"](nothing))
+
+    play(script)
+    await go(ctx, settings)
+    assert out[0].startswith("error: no missing items") and out[1] == "ok"
+    assert [e["type"] for e in terminals(route)] == ["proposed"]
+
+
+@respx.mock
+async def test_summary_only_propose_uses_last_checked_full_meals(ctx, settings, play):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+
+    async def script(tools):
+        await tools["check_meal_safety"]([MEAL])
+        assert await tools["propose_plan"]({"summary": "One dinner."}) == "ok"
+
+    play(script)
+    await go(ctx, settings)
+    plan = terminals(route)[0]["payload"]["plan"]
+    assert plan["meals"][0]["title"] == "Rice bowl" and plan["meals"][0]["steps"] == MEAL["steps"]
+    assert plan["summary"] == "One dinner." and plan["missingItems"][0]["name"] == "Lemons"
+    assert plan["meals"][0]["uses"] == ["Rice"]  # derived: ingredients minus missing
+
+
+@respx.mock
+async def test_uses_derived_when_omitted(ctx, settings, play):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+
+    async def script(tools):
+        lean = {k: v for k, v in MEAL.items() if k != "uses"}
+        await tools["propose_plan"]({"meals": [lean], "summary": "x"})
+
+    play(script)
+    await go(ctx, settings)
+    assert terminals(route)[0]["payload"]["plan"]["meals"][0]["uses"] == ["Rice"]
+
+
+@respx.mock
+async def test_more_than_three_meals_is_capped_with_note(ctx, settings, play):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    meals = [{**MEAL, "title": f"Meal {i}", "missing": [f"Item{i}"]} for i in range(4)]
+    items = [{"name": f"Item{i}", "forMeals": [f"Meal {i}"]} for i in range(4)]
+
+    async def script(tools):
+        await tools["propose_plan"]({"meals": meals, "missingItems": items, "summary": "Four dinners."})
+
+    play(script)
+    await go(ctx, settings)
+    plan = terminals(route)[0]["payload"]["plan"]
+    assert [m["title"] for m in plan["meals"]] == ["Meal 0", "Meal 1", "Meal 2"]
+    assert [i["name"] for i in plan["missingItems"]] == ["Item0", "Item1", "Item2"]
+    assert plan["summary"].endswith("Capped at 3 meals.")
 
 
 @respx.mock

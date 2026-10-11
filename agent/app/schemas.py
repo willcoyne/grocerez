@@ -231,6 +231,12 @@ class PriceResult(BaseModel):
     items: list[PriceItem]
 
 
+class PricePairs(BaseModel):
+    """Compact price-agent reply: [[lowCents, highCents], ...] in the same order as the input items."""
+
+    prices: list[tuple[Annotated[int, Field(ge=0, le=10_000_000)], Annotated[int, Field(ge=0, le=10_000_000)]]]
+
+
 # ─── Per-run runtime types (no module-level mutable state) ───────────────────
 
 
@@ -256,8 +262,11 @@ class RunState:
     failed_tools: set[str] = field(default_factory=set)
     safety_by_title: dict[str, SafetyMealOut] = field(default_factory=dict)
     drafts: dict[str, list[str]] = field(default_factory=dict)  # title -> ingredients last safety-checked
+    draft_meals: dict[str, dict[str, Any]] = field(default_factory=dict)  # full meals of the LAST safety check
     priced: dict[str, tuple[int, int]] = field(default_factory=dict)
     proposal_failures: int = 0
+    missing_nudged: bool = False
+    tool_s: float = 0.0  # summed tool wall time (parallel tools overlap, so this is an upper bound)
     tool_calls: int = 0
     budget_exceeded: bool = False
     extra_tokens_in: int = 0

@@ -95,8 +95,7 @@ class StepReporter(HookProvider):
             name = self._name(event.tool_use)
             if name not in RUNNING_LABELS:
                 return
-            if name == "check_meal_safety":
-                await self._finish_drafting(event.tool_use)
+            await self._finish_drafting(event.tool_use)  # any next tool means drafting is over
             await self._sink.step(name, self._running_label(name, event.tool_use), "running")
         except Exception:  # progress is best-effort; never break the run
             log.exception("StepReporter.before failed")
@@ -109,6 +108,7 @@ class StepReporter(HookProvider):
             if name not in RUNNING_LABELS:
                 return
             state = self._state
+            state.tool_s += event.duration or 0.0
             failed = event.exception is not None or name in state.failed_tools
             label = state.done_labels.pop(name, None) or DONE_LABELS[name]
             detail = state.done_details.pop(name, None)
