@@ -37,12 +37,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
 
 import { errorMessage } from "@/api/client";
+import { useCabinet } from "@/api/hooks/cabinet";
 import { AppText, Button, ErrorState } from "@/components/ui";
+import { useCabinetActions } from "@/components/useCabinetActions";
+import { MapOutPicker } from "@/features/cabinet/CabinetScreen";
+import { RanOutPrompt } from "@/features/cabinet/RanOutPrompt";
+import { useRanOutPrompt } from "@/features/cabinet/ranOutStore";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 
 import { usePantry } from "./data";
 import { activeFilterCount, applyFilters } from "./filters";
-import { BackButton, FilterButton, FilterSheet, SearchButton, SearchPanel, ShoppingListNote } from "./overlay";
+import { BackButton, FilterButton, FilterSheet, SearchButton, SearchPanel, ShoppingListNote, ToolButtons } from "./overlay";
 import { pantry as palette, softShadow } from "./overlay/palette";
 import { CameraRig, type CameraFocus, type PhaseClock, type Vec3 } from "./scene/CameraRig";
 import { PANTRY_DIMENSIONS } from "./scene/exterior/dimensions";
@@ -84,9 +89,15 @@ const OPENING_CLIP = [
 const LAYER_INTERACTIVE = 1 << 0;
 const LAYER_PASSIVE = 1 << 1;
 
-export function PantryScreen() {
+/** `onShowList` switches the Pantry tab to the cabinet list view (CabinetScreen), which has every cabinet action. */
+export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
   const groupId = useRequiredGroupId();
+  const cabinet = useCabinet(groupId);
+  const actions = useCabinetActions(groupId);
+  const ranOutPrompt = useRanOutPrompt();
+  const [adding, setAdding] = useState(false);
   const router = useRouter();
+  const scan = useCallback(() => router.push("/scanner?mode=add-to-cabinet"), [router]);
   const data = usePantry(groupId);
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
@@ -267,6 +278,12 @@ export function PantryScreen() {
     [items, selectedId],
   );
 
+  /** The cabinet row behind the selected item, for the quick actions (running low / ran out). */
+  const selectedRow = useMemo(
+    () => (selectedItem ? (cabinet.data?.find((r) => r.id === selectedItem.id) ?? null) : null),
+    [cabinet.data, selectedItem],
+  );
+
   const inShelves = phase === "shelves" && !leaving;
   const isEmpty = !data.isLoading && !data.error && items.length === 0;
 
@@ -369,12 +386,41 @@ export function PantryScreen() {
           <AppText variant="caption" center color="muted">
             Scan a product to stock your pantry.
           </AppText>
-          <Button label="Scan a product" size="sm" onPress={() => router.push("/scanner?mode=add-to-cabinet")} />
+          <View style={styles.row}>
+            <Button label="Add items" size="sm" onPress={() => setAdding(true)} />
+            <Button label="Scan a product" size="sm" variant="secondary" onPress={scan} />
+          </View>
         </View>
       ) : null}
 
       {inShelves && selectedItem ? (
         <View style={[styles.bottomCenter, { bottom: insets.bottom + 20 }]} pointerEvents="box-none">
+          {selectedRow ? (
+            <View style={[styles.row, styles.quickRow]}>
+              <Pressable
+                testID="pantry-low-button"
+                accessibilityRole="button"
+                accessibilityLabel={selectedRow.status === "running_low" ? `${selectedItem.name} is back in stock` : `${selectedItem.name} is running low`}
+                onPress={() => (selectedRow.status === "running_low" ? actions.backInStock(selectedRow) : actions.markLow(selectedRow))}
+                style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+              >
+                <AppText variant="caption" weight="bold" style={styles.pillText}>
+                  {selectedRow.status === "running_low" ? "Back in stock" : "Running low"}
+                </AppText>
+              </Pressable>
+              <Pressable
+                testID="pantry-ranout-button"
+                accessibilityRole="button"
+                accessibilityLabel={`${selectedItem.name} ran out`}
+                onPress={() => actions.ranOut(selectedRow)}
+                style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+              >
+                <AppText variant="caption" weight="bold" style={styles.pillText}>
+                  Ran out
+                </AppText>
+              </Pressable>
+            </View>
+          ) : null}
           <Pressable
             testID="pantry-details-button"
             accessibilityRole="button"
@@ -397,6 +443,22 @@ export function PantryScreen() {
         // The 3D store (features/shopping) has no route yet, so "Start shopping" opens the List tab.
         onStartShopping={() => router.push("/list")}
       />
+
+      {phase === "closed" || inShelves ? (
+        <ToolButtons compact={phase === "closed"} onListView={onShowList} onAdd={() => setAdding(true)} onScan={scan} />
+      ) : null}
+      <MapOutPicker groupId={groupId} visible={adding} onClose={() => setAdding(false)} onScan={scan} />
+
+      {ranOutPrompt && (phase === "closed" || inShelves) ? (
+        <View style={[styles.topCard, styles.promptCard, { top: insets.top + 12 }]}>
+          <RanOutPrompt
+            name={ranOutPrompt.item.name}
+            busy={actions.addingAnyway}
+            onAdd={() => actions.addAnyway(ranOutPrompt)}
+            onDismiss={() => actions.dismissRanOut(ranOutPrompt)}
+          />
+        </View>
+      ) : null}
 
       {inShelves ? (
         <>
@@ -618,6 +680,8 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   bottomCenter: { position: "absolute", left: 0, right: 0, bottom: 20, alignItems: "center" },
   row: { flexDirection: "row", justifyContent: "center", gap: 10, flexWrap: "wrap", paddingHorizontal: 16 },
+  quickRow: { marginBottom: 10 },
+  promptCard: { left: 80, right: 80, padding: 0, backgroundColor: "transparent" },
   detailsPill: { backgroundColor: palette.oakDark, maxWidth: "80%" },
   detailsText: { color: palette.cream },
   topCenter: { position: "absolute", left: 0, right: 0, top: 56, alignItems: "center" },

@@ -2,6 +2,8 @@ import { fireEvent, screen } from "@testing-library/react-native";
 
 import { renderWithProviders } from "@/test-utils";
 
+import { setRanOutPrompt } from "@/features/cabinet/ranOutStore";
+
 import { PantryScreen } from "../PantryScreen";
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -74,5 +76,19 @@ describe("PantryScreen shell", () => {
     expect(screen.getByTestId("pantry-error")).toBeTruthy();
     await fireEvent.press(screen.getByText(/try again|retry/i));
     expect(mockPantry.refetched).toBe(1);
+  });
+
+  it("keeps the old Cabinet tools reachable: list view switch, and the ran-out prompt", async () => {
+    const onShowList = jest.fn();
+    await renderWithProviders(<PantryScreen onShowList={onShowList} />);
+    await fireEvent.press(screen.getByTestId("pantry-listview-button"));
+    expect(onShowList).toHaveBeenCalled();
+
+    await renderWithProviders(<PantryScreen />);
+    expect(screen.queryByTestId("ranout-prompt")).toBeNull();
+    // "Ran out" on the item screen (or a quick action) sets this; the Pantry must show it again.
+    setRanOutPrompt({ id: "c1", item: { id: "i1", name: "Oat Milk", category: "dairy" } } as never);
+    expect(await screen.findByText(/Nobody has Oat Milk in their preferences/)).toBeTruthy();
+    setRanOutPrompt(null);
   });
 });
