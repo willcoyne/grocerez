@@ -31,12 +31,20 @@ class Settings(BaseSettings):
     # Cited web recipes (Tavily search + allowlisted recipe sites). Without a key the model writes the meals.
     tavily_api_key: str = Field(default="", repr=False)
     tavily_url: str = "https://api.tavily.com/search"
-    recipe_candidates: int = 4
+    recipe_candidates: int = 6
+    # Only sites that answer our fetcher (200) and ship schema.org Recipe JSON-LD; see README for the probe.
+    # Probed live (Tavily search + our fetcher + JSON-LD). Dropped: foodnetwork, budgetbytes, cookieandkate (403 to
+    # our fetcher); allrecipes, seriouseats, simplyrecipes, eatingwell (Tavily returns no results for them);
+    # loveandlemons (no JSON-LD / oversize pages).
     recipe_domains: list[str] = [
-        "allrecipes.com", "seriouseats.com", "bbcgoodfood.com", "simplyrecipes.com", "budgetbytes.com",
-        "foodnetwork.com", "bonappetit.com", "epicurious.com", "eatingwell.com", "delish.com", "tasteofhome.com",
-        "cookieandkate.com", "minimalistbaker.com", "loveandlemons.com",
+        "bbcgoodfood.com", "bonappetit.com", "epicurious.com", "delish.com", "tasteofhome.com", "minimalistbaker.com",
+        "skinnytaste.com", "recipetineats.com", "pinchofyum.com", "onceuponachef.com", "natashaskitchen.com",
+        "jocooks.com", "cafedelites.com", "spendwithpennies.com", "wellplated.com", "ambitiouskitchen.com",
     ]
+    # Treated as on hand in cited recipes (never added to the shopping list), plus any cooking oil if the cabinet has one.
+    pantry_basics: list[str] = ["salt", "black pepper", "water", "ice", "cooking spray"]
+    cooking_oils: list[str] = ["olive oil", "canola oil", "vegetable oil", "cooking oil", "oil", "avocado oil",
+                               "sunflower oil", "corn oil"]
 
     agent_shared_secret: str = Field(default="", repr=False)
     agent_max_tool_calls: int = 25

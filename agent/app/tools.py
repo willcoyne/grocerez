@@ -19,7 +19,7 @@ from strands import tool
 from .config import Settings
 from .models import model_id_for
 from .pricing import PriceService
-from .recipes import ParsedRecipe, RecipeService, _sing, have_item, singular_set, step_key
+from .recipes import ParsedRecipe, RecipeService, exclusion_terms, have_item, singular_set, step_key, write_steps
 from .schemas import (
     AgentPlan,
     PlanDraft,
@@ -109,6 +109,30 @@ def normalize_meal(m: Any) -> Any:
 
 def _unique(items: Iterable[str]) -> list[str]:
     return _strs(list(items))
+
+
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def assign_days(meals: list[dict[str, Any]], today: str | None) -> None:
+    """Give every meal a day: keep the days already set, fill the rest with the next free weekdays from `today`
+    (the household's local date), so a plan never mixes dated and undated meals."""
+    try:
+        start = date.fromisoformat(str(today)[:10]).weekday()
+    except ValueError:
+        start = datetime.now(timezone.utc).weekday()
+    used = {m["day"] for m in meals if m.get("day")}
+    offset = 0
+    for m in meals:
+        if m.get("day"):
+            continue
+        for _ in range(7):
+            name = _WEEKDAYS[(start + offset) % 7]
+            offset += 1
+            if name not in used:
+                m["day"] = name
+                used.add(name)
+                break
 
 
 def _lines(m: dict[str, Any]) -> list[str]:
@@ -320,7 +344,9 @@ def build_tools(
         if not state.draft_meals or state.pending_finds > 0:
             return  # wait until every parallel find_recipe has landed so the final name set is priced once
         if all((r := state.safety_by_title.get(t)) is not None and r.passes for t in state.draft_meals):
-            pricer.start(_unique(n for m in state.draft_meals.values() for n in m["missing"]))
+            # Only the meals that will ship (propose_plan caps at MAX_MEALS), so the priced set matches the final one.
+            kept = list(state.draft_meals.values())[:MAX_MEALS]
+            pricer.start(_unique(n for m in kept for n in m["missing"]))
 
     def _invalidate() -> None:
         state.draft_meals = {}
@@ -335,7 +361,9 @@ def build_tools(
         new = [normalize_meal(m) for m in strip_nul(meals) if isinstance(m, dict)]
         # Meals already found with find_recipe (cited) stay in the plan; the model only adds its own fallback meals.
         kept = [m for t, m in state.draft_meals.items() if m.get("source") and t not in {n["title"] for n in new}]
-        norm = [*kept, *new]
+        if len(kept) >= MAX_MEALS:  # everything is already found and checked: don't redraft it
+            return _j({"all_pass": True, "note": f"{len(kept)} cited meals are already stored; call propose_plan now"})
+        norm = [*kept, *new][:MAX_MEALS]
         real, extra, err = await _check(norm) if norm else ([], [], "error: no meals given")
         if err:
             _invalidate()  # unknown state: propose_plan must be preceded by a fresh check
@@ -434,12 +462,21 @@ def build_tools(
 
     # ── find_recipe (cited web recipes) ──────────────────────────────────────
 
-    ASSUMED = {"water", "salt", "pepper", "black pepper", "ice", "cooking spray"}  # never added to the list
     NOTE = ("No cited recipe available for this idea. Write the meal yourself (ingredients, missing, steps) and "
             "include it in check_meal_safety; it will be labeled AI-created.")
+    basics = {_norm(b) for b in settings.pantry_basics}
+    oils = {_norm(o) for o in settings.cooking_oils}
 
     def _owned() -> set[str]:
-        return singular_set(state.cabinet_names) | state.list_names
+        return state.cabinet_names | state.list_names
+
+    def _on_hand_basic(name: str) -> bool:
+        """Salt, black pepper, water... and any cooking oil when the cabinet has some oil: never added to the list."""
+        n = _norm(name)
+        # suffix match: "Kosher Salt" -> salt, "Nonstick Cooking Spray" -> cooking spray (but not "Water Chestnuts")
+        if any(n == b or n.endswith(" " + b) for b in basics):
+            return True
+        return n in oils and any("oil" in c.split() for c in state.cabinet_names)
 
     def _join(names: list[str]) -> str:
         return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
@@ -447,9 +484,9 @@ def build_tools(
     def _meal_from(r: ParsedRecipe) -> dict[str, Any]:
         owned = _owned()
         ings = r.ingredients[:25]
-        missing = [i for i in ings if not have_item(i, owned) and _norm(i) not in ASSUMED][:15]
+        missing = [i for i in ings if not have_item(i, owned) and not _on_hand_basic(i)][:15]
         core = [i for i in ings if i not in missing][:3] or ings[:3]
-        # Our own generic steps: the site's method text is never copied (full method is one tap away at the source).
+        # Generic fallback steps; find_recipe replaces them with model-written ones in its own words when it can.
         steps = [f"Prep {_join(core)}.", "Cook everything as directed in the linked recipe.", "Season to taste and serve."]
         return normalize_meal({
             "title": _clip(r.title, 120), "day": None, "minutes": r.minutes, "servings": r.servings,
@@ -461,7 +498,7 @@ def build_tools(
     def _score(r: ParsedRecipe, must_use: list[str]) -> int:
         owned = _owned()
         have = sum(1 for g in r.ingredients if have_item(g, owned))
-        wanted = sum(1 for mu in must_use if any(_sing(mu) in _sing(g) or _sing(g) in _sing(mu) for g in r.ingredients))
+        wanted = sum(1 for mu in must_use if have_item(mu, set(r.ingredients)))
         return have + 3 * wanted  # prefer recipes that use the expiring items, then ones the cabinet mostly covers
 
     async def _batch(payload: list[dict[str, Any]]) -> list[SafetyMealOut] | None:
@@ -482,8 +519,49 @@ def build_tools(
         if recipes is None or not recipes.enabled:
             state.done_labels[key] = "Writing this one myself"
             return _j({"found": False, "note": NOTE})
-        cands = await recipes.candidates(idea, must_use, avoid, state.used_urls)
+        tried: set[str] = set()
+        terms = exclusion_terms(state.household)  # "dairy-free", "vegetarian": fewer candidates fail the safety check
+        core = must_use[0] if must_use else idea.split()[-1]
+        queries = [
+            " ".join([f"{idea} recipe" + (f" with {', '.join(must_use[:3])}" if must_use else ""), *terms]),
+            " ".join([f"{core} easy dinner recipe", *terms]),  # ONE simpler retry when nothing passes
+        ]
+        winner = None
+        for attempt, query in enumerate(queries):
+            winner = await _round(query, must_use, avoid, tried)
+            if winner:
+                break
+            log.info("find_recipe %r: no safe recipe on attempt %d", idea, attempt + 1)
+        if winner is None:
+            state.done_labels[key] = "No safe recipe found, writing it myself"
+            return _j({"found": False, "note": NOTE})
+        meal, rec, res = winner
+        # Real cooking guidance in the model's own words (outline = first ~10 words of each source step, never the
+        # full text); re-checked because apply checks steps. Falls back to the generic steps on any problem.
+        steps = await write_steps(recipes.steps_factory, rec, meal["ingredients"])
+        if steps:
+            cand = normalize_meal({**meal, "steps": steps})
+            chk = await _batch(safety_payload([cand], to_buy=False))
+            if chk and chk[0].passes:
+                meal = cand
+            else:
+                why = "; ".join(f"{p.reason} ({p.ingredient})" for p in (chk[0].problems if chk else [])[:3]) or "no result"
+                log.info("model-written steps rejected (%s); using generic steps", why)
+        state.draft_meals[meal["title"]] = meal
+        state.safety_by_title[meal["title"]] = SafetyMealOut(title=meal["title"], passes=True, problems=[], unknown=res.unknown)
+        state.used_urls.add(rec.url)
+        state.done_labels[key] = _clip(f"Found: {rec.title} ({rec.site})", 200)
+        # Minimal result (tokens): the full meal, steps and lines stay in run state for propose_plan.
+        return _j({"found": True, "title": meal["title"], "site": rec.site, "uses": meal["uses"][:8],
+                   "missing": meal["missing"]})
+
+    async def _round(query: str, must_use: list[str], avoid: list[str], tried: set[str]):
+        """One search + parallel fetch + ranked batch safety check. Returns (meal, recipe, result) or None."""
+        cands, rejects = await recipes.candidates(query, avoid, state.used_urls | tried)
+        for r in rejects:
+            log.info("recipe candidate rejected: %s", r)
         cands = [c for c in cands if _clip(c.title, 120) not in state.draft_meals]
+        tried.update(c.url for c in cands)
         ranked = sorted(enumerate(cands), key=lambda t: (-_score(t[1], must_use), t[0]))
         meals = [_meal_from(c) for _, c in ranked]
         recs = [c for _, c in ranked]
@@ -492,19 +570,11 @@ def build_tools(
         winner = None
         for i, res in enumerate(results or []):
             if res.passes:
-                winner = (meals[i], recs[i], res)
-                break
-        if winner is None:
-            state.done_labels[key] = "No safe recipe found, writing it myself"
-            return _j({"found": False, "note": NOTE})
-        meal, rec, res = winner
-        state.draft_meals[meal["title"]] = meal
-        state.safety_by_title[meal["title"]] = SafetyMealOut(title=meal["title"], passes=True, problems=[], unknown=res.unknown)
-        state.used_urls.add(rec.url)
-        state.done_labels[key] = _clip(f"Found: {rec.title} ({rec.site})", 200)
-        return _j({"found": True, "title": meal["title"], "site": rec.site, "minutes": meal["minutes"],
-                   "uses": meal["uses"], "missing": meal["missing"],
-                   "note": "Stored for propose_plan; do not re-send this meal."})
+                winner = winner or (meals[i], recs[i], res)
+            else:
+                why = "; ".join(f"{p.reason} ({p.ingredient})" for p in res.problems[:3]) or "failed"
+                log.info("recipe candidate rejected: %s: unsafe: %s", recs[i].url, why)
+        return winner
 
     @tool
     async def find_recipe(idea: str, must_use: list[str] | None = None, avoid: list[str] | None = None) -> str:
@@ -595,6 +665,7 @@ def build_tools(
                     "add_missing: [4 to 6 fresh ingredient names NOT in the cabinet or on the list].")
 
         norm_meals = [m.model_dump() for m in draft.meals]
+        assign_days(norm_meals, (state.household or {}).get("today"))
         real, extra, err = await _check(norm_meals)
         if err:
             fatal = state.fatal_status is not None

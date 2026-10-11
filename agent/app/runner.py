@@ -72,6 +72,7 @@ async def run(
     price_cache: Any = None,
     retry_delay_s: float = 0.2,
     recipe_transport: httpx.AsyncBaseTransport | None = None,
+    recipe_steps_factory: Any = None,
 ) -> None:
     """Posts exactly one of proposed/failed (unless the server closed the run). Only re-raises cancellation."""
     settings = settings or get_settings()
@@ -80,7 +81,7 @@ async def run(
     sink = EventSink(client, ctx.run_id, step_timeout=settings.step_timeout_s,
                      terminal_timeout=settings.terminal_timeout_s)
     pricer = PriceService(ctx, state, settings, sink, agent_factory=price_agent_factory, cache=price_cache)
-    recipes = RecipeService(settings, transport=recipe_transport)
+    recipes = RecipeService(settings, transport=recipe_transport, steps_agent_factory=recipe_steps_factory)
     agent: Agent | None = None
 
     def meta() -> dict[str, Any]:

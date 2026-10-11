@@ -48,9 +48,11 @@ TAVILY_API_KEY=tvly-...        # https://app.tavily.com
 ```
 
 Without a key, or when Tavily fails or no safe recipe is found, the model writes the meal itself (`source: null`, shown as
-AI-created). Pages are fetched only over https from an allowlist of recipe sites (`RECIPE_DOMAINS` in `app/config.py`: allrecipes.com,
-seriouseats.com, bbcgoodfood.com, simplyrecipes.com, budgetbytes.com, foodnetwork.com, bonappetit.com, epicurious.com, eatingwell.com,
-delish.com, tasteofhome.com, cookieandkate.com, minimalistbaker.com, loveandlemons.com), re-checked after every redirect (max 3),
+AI-created). Pages are fetched only over https from an allowlist of recipe sites (`recipe_domains` in `app/config.py`, probed live: bbcgoodfood.com, bonappetit.com,
+epicurious.com, delish.com, tasteofhome.com, minimalistbaker.com, skinnytaste.com, recipetineats.com, pinchofyum.com,
+onceuponachef.com, natashaskitchen.com, jocooks.com, cafedelites.com, spendwithpennies.com, wellplated.com,
+ambitiouskitchen.com; dropped: foodnetwork/budgetbytes/cookieandkate = 403 to our fetcher, allrecipes/seriouseats/
+simplyrecipes/eatingwell = Tavily returns no results for them, loveandlemons = no JSON-LD), re-checked after every redirect (max 3),
 never IP literals, 5 s timeout, 2 MB cap. Only the title, image, time, yield and ingredient lines are used; the method text is never copied.
 
 Endpoints: `POST /runs` (header `X-Agent-Secret`, answers 202) and `GET /health`.
