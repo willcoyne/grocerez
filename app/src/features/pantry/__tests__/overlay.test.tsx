@@ -120,7 +120,7 @@ describe("FilterSheet", () => {
   it("disables Safe for me when the user has no allergens", async () => {
     await render(<Harness />);
     expect(selected("pantry-filter-safe")).toMatchObject({ checked: false, disabled: true });
-    expect(screen.getByText("Add your allergies on the Me tab to use this")).toBeTruthy();
+    expect(screen.getByText("Add your allergies on the Me note to use this")).toBeTruthy();
   });
 
   it("Done and the backdrop close the sheet", async () => {

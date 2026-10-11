@@ -31,7 +31,7 @@ const RECURRENCE_OPTIONS: { value: Recurrence; label: string }[] = [
 
 const isTemp = (p: Preference) => p.id.startsWith("temp-");
 
-/** Me tab → "What I want from the store" (DESIGN.md §4.7). Data hooks here; rows are PreferenceRow. */
+/** Me note (pinned on the pantry) → "What I want from the store" (DESIGN.md §4.7). Data hooks here; rows are PreferenceRow. */
 export function MyPreferences({ groupId }: { groupId: string }) {
   const prefs = usePreferences(groupId, "me");
   const cabinet = useCabinet(groupId);

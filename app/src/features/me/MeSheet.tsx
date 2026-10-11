@@ -1,3 +1,8 @@
+/**
+ * "Me" as a paper note pinned below the shopping list on the pantry (it replaced the Me tab): my preferences, diet and
+ * allergies, profile (photo, ZIP) and sign out. Opens after the camera flies to the note and the paper lifts off its pin,
+ * exactly like the List note.
+ */
 import type { Dietary } from "@contracts/dietary";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -7,35 +12,57 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { errorMessage } from "@/api/client";
 import { useDietary, useUpdateDietary, useUpdateMe } from "@/api/hooks/me";
 import { pickAndUploadImage } from "@/api/hooks/uploads";
-import { TabHeader } from "@/components/GroupSwitcher";
 import { DietaryPicker } from "@/components/DietaryPicker";
 import { InviteBanner } from "@/components/InviteBanner";
 import { MyPreferences } from "@/components/MyPreferences";
-import { AppText, Avatar, Button, Card, ErrorState, LoadingState, SectionLabel, TextField, useToast } from "@/components/ui";
-import { useActiveGroup } from "@/state/ActiveGroupContext";
+import { AppText, Avatar, Button, Card, ErrorState, LoadingState, TextField, useToast } from "@/components/ui";
+import { PAPER_MARGIN_X, PaperSection, PaperSheet, paperStyles } from "@/features/pantry/overlay/PaperSheet";
 import { useAuth } from "@/state/AuthContext";
 import { size, space } from "@/theme";
 
-/** Me tab (DESIGN.md §4.7): my preferences, diet and allergies, plus profile (photo, ZIP) and sign out. */
-export default function MeScreen() {
-  const { activeGroupId } = useActiveGroup();
+export type MeSheetProps = { visible: boolean; groupId: string; onClose: () => void };
+
+export function MeSheet({ visible, groupId, onClose }: MeSheetProps) {
+  if (!visible) return null;
+  return <MeNote groupId={groupId} onClose={onClose} />;
+}
+
+function MeNote({ groupId, onClose }: Omit<MeSheetProps, "visible">) {
   const { signOut } = useAuth();
   const router = useRouter();
   return (
-    <View style={styles.screen} testID="tab-me">
-      <TabHeader title="My preferences" />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <InviteBanner />
-        <SectionLabel>What I want from the store</SectionLabel>
-        {activeGroupId ? <MyPreferences groupId={activeGroupId} /> : null}
-        <DietarySection />
-        <SectionLabel style={styles.gapTop}>Profile</SectionLabel>
-        <Profile />
-        <SectionLabel style={styles.gapTop}>About</SectionLabel>
-        <Button label="How the Pantry Agent works" variant="secondary" fullWidth onPress={() => router.push("/agent-flow")} />
-        <Button label="Sign out" variant="secondary" fullWidth onPress={() => void signOut()} />
+    <PaperSheet testID="me-note" title="Me" closeLabel="Close my preferences" onClose={onClose}>
+      <ScrollView style={paperStyles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.block}>
+          <InviteBanner />
+        </View>
+        <PaperSection title="What I want from the store" />
+        <View style={styles.block}>
+          <MyPreferences groupId={groupId} />
+        </View>
+        <PaperSection title="Diet and allergies" />
+        <View style={styles.block}>
+          <DietarySection />
+        </View>
+        <PaperSection title="Profile" />
+        <View style={styles.block}>
+          <Profile />
+        </View>
+        <PaperSection title="About" />
+        <View style={[styles.block, styles.buttons]}>
+          <Button
+            label="How the Pantry Agent works"
+            variant="secondary"
+            fullWidth
+            onPress={() => {
+              onClose();
+              router.push("/agent-flow");
+            }}
+          />
+          <Button label="Sign out" variant="secondary" fullWidth onPress={() => void signOut()} />
+        </View>
       </ScrollView>
-    </View>
+    </PaperSheet>
   );
 }
 
@@ -123,10 +150,10 @@ function DietarySection() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  content: { padding: space.screenX, gap: space.md, paddingBottom: space.xxl * 2 },
-  gapTop: { marginTop: space.sm },
-  dietary: { gap: space.sm, marginTop: space.sm },
+  content: { paddingBottom: space.xxl },
+  block: { paddingLeft: PAPER_MARGIN_X - 4, paddingRight: 16, paddingTop: space.sm, gap: space.sm },
+  buttons: { gap: space.sm },
+  dietary: { gap: space.sm },
   profile: { gap: space.md },
   row: { flexDirection: "row", alignItems: "center", gap: space.md },
   zipRow: { flexDirection: "row", alignItems: "flex-start", gap: space.sm },

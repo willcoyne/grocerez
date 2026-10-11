@@ -74,7 +74,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
               testID="pantry-filter-safe"
               icon={<ShieldCheck size={22} color={pantry.green} />}
               title="Safe for me"
-              subtitle={hasMine ? `Hide anything with ${mineLabel}` : "Add your allergies on the Me tab to use this"}
+              subtitle={hasMine ? `Hide anything with ${mineLabel}` : "Add your allergies on the Me note to use this"}
               value={filters.safeForMe}
               disabled={!hasMine}
               onToggle={() => set({ safeForMe: !filters.safeForMe })}

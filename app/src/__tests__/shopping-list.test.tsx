@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
-import ListScreen from "@/app/(tabs)/list";
+import { ShoppingListNote } from "@/features/pantry/overlay/ShoppingListNote";
 import { toSections } from "@/lib/listSections";
 import { apiRoutes, renderWithProviders, testGroup, testUser } from "@/test-utils";
 
@@ -60,7 +60,7 @@ describe("toSections", () => {
   });
 });
 
-describe("Shopping list", () => {
+describe("Shopping list (the paper note pinned on the pantry; it replaced the List tab)", () => {
   beforeEach(() => mockPush.mockReset());
 
   it("shows allergen chips with member and allergen, and the running-low chip", async () => {
@@ -71,10 +71,10 @@ describe("Shopping list", () => {
         [`GET /groups/${g}/cabinet`]: () => [{ id: "c1", itemId: oreos.itemId, status: "running_low" }],
       }),
     );
-    await renderWithProviders(<ListScreen />);
-    expect(await screen.findByText("Contains milk · User 3")).toBeTruthy();
+    await renderWithProviders(<ShoppingListNote visible groupId={g} onClose={jest.fn()} />);
+    expect(await screen.findByText("Milk · User 3")).toBeTruthy();
     expect(screen.getByText("2 to buy · 0 in the cart")).toBeTruthy();
-    expect(await screen.findByText("Running low at home")).toBeTruthy();
+    expect(await screen.findByText(/Running low at home/)).toBeTruthy();
     expect(screen.getByText("Check items off as you shop")).toBeTruthy();
   });
 
@@ -92,7 +92,7 @@ describe("Shopping list", () => {
           }),
       }),
     );
-    const { queryClient } = await renderWithProviders(<ListScreen />);
+    const { queryClient } = await renderWithProviders(<ShoppingListNote visible groupId={g} onClose={jest.fn()} />);
     await fireEvent.press(await screen.findByLabelText("Check off Oreos"));
     // Optimistic: checked immediately, with a syncing dot and "checked by you".
     await screen.findByText("1 to buy · 1 in the cart");
@@ -116,7 +116,7 @@ describe("Shopping list", () => {
         [`POST /groups/${g}/shopping-list/complete`]: () => new Promise((res) => (finish = res)),
       }),
     );
-    await renderWithProviders(<ListScreen />);
+    await renderWithProviders(<ShoppingListNote visible groupId={g} onClose={jest.fn()} />);
     await fireEvent.press(await screen.findByText("Finish trip · move 1 to the cabinet"));
     await waitFor(() => expect(screen.getByLabelText("Finishing…")).toBeDisabled());
     finish({ movedToCabinet: 1 });

@@ -1,6 +1,8 @@
 /**
  * The shopping list as a paper notepad (SPEC.md round 2): opens after the camera flies to the note pinned on the pantry
  * and the paper lifts off its pin. Plain React Native (works on web + native), layered over the canvas.
+ * It replaced the List tab, so it carries everything that tab did: check-off, price estimate (+ per-row prices),
+ * scan-to-match, running-low and Pantry Agent notes, and "Finish trip" (checked rows → cabinet → expiration check).
  *
  * Thin client: rows, aisle order, allergen flags and the "preference rows can't be deleted" rule all come from the
  * server; this view only groups what it gets (unchecked by category in server order, checked at the bottom).
@@ -8,15 +10,22 @@
 import type { Item } from "@contracts/items";
 import type { ShoppingListItem } from "@contracts/shoppingList";
 import { useMutationState } from "@tanstack/react-query";
-import { AlertTriangle, Check, Plus, X } from "lucide-react-native";
+import { useRouter } from "expo-router";
+import { AlertTriangle, Check, Plus, ScanBarcode, Sparkles, X } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { ApiError, errorMessage } from "@/api/client";
-import { useAddListItem, useCheckItem, useDeleteListItem, useShoppingList } from "@/api/hooks/shoppingList";
+import { usePrices } from "@/api/hooks/ai";
+import { useCabinet } from "@/api/hooks/cabinet";
+import { useGroupDetail } from "@/api/hooks/groups";
+import { useAddListItem, useCheckItem, useCompleteTrip, useDeleteListItem, useShoppingList } from "@/api/hooks/shoppingList";
+import { RecallBanner } from "@/components/AlertsSection";
 import { ItemPicker } from "@/components/ItemPicker";
-import { AppText, ErrorState, useToast } from "@/components/ui";
-import { labelize } from "@/lib/format";
+import { AiLabel, AppText, ErrorState, useToast } from "@/components/ui";
+import { confirm } from "@/lib/confirm";
+import { formatCents, formatCentsRange, labelize, plural } from "@/lib/format";
+import { maybeAskNotificationPermission } from "@/notifications/expirations";
 import { useSocketConnected } from "@/realtime/SocketProvider";
 import { useAuth } from "@/state/AuthContext";
 
@@ -27,8 +36,6 @@ export type ShoppingListNoteProps = {
   visible: boolean;
   groupId: string;
   onClose: () => void;
-  /** "Start shopping" (PantryScreen pushes /shopping). */
-  onStartShopping: () => void;
 };
 
 /** Notepad colours (now shared with the Week sheet, see PaperSheet.tsx). */
@@ -64,22 +71,43 @@ export function noteSections(rows: readonly ShoppingListItem[]): { toBuy: Sectio
   return { toBuy: order.map((cat) => ({ key: cat, title: labelize(cat), rows: by.get(cat)! })), checked };
 }
 
-export function ShoppingListNote({ visible, groupId, onClose, onStartShopping }: ShoppingListNoteProps) {
+export function ShoppingListNote({ visible, groupId, onClose }: ShoppingListNoteProps) {
   if (!visible) return null;
-  return <NoteSheet groupId={groupId} onClose={onClose} onStartShopping={onStartShopping} />;
+  return <NoteSheet groupId={groupId} onClose={onClose} />;
 }
 
-function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteProps, "visible">) {
+function NoteSheet({ groupId, onClose }: Omit<ShoppingListNoteProps, "visible">) {
   const connected = useSocketConnected();
   // Live sync comes from the socket; while it's down, poll every 5 s while the note is open.
   const list = useShoppingList(groupId, { refetchInterval: connected ? false : 5000 });
   const check = useCheckItem(groupId);
   const add = useAddListItem(groupId);
   const del = useDeleteListItem(groupId);
+  const complete = useCompleteTrip(groupId);
+  const detail = useGroupDetail(groupId);
+  const cabinet = useCabinet(groupId);
+  const router = useRouter();
   const { user } = useAuth();
   const meId = user?.id;
   const { show: toast } = useToast();
   const [picking, setPicking] = useState(false);
+
+  const names = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const mem of detail.data?.members ?? []) m.set(mem.id, mem.displayName);
+    return m;
+  }, [detail.data]);
+  const lowItemIds = useMemo(
+    () => new Set((cabinet.data ?? []).filter((c) => c.status === "running_low").map((c) => c.itemId)),
+    [cabinet.data],
+  );
+  // Read-only view of the cached estimate (fetched from the Prices screen).
+  const prices = usePrices(groupId, { enabled: false }).data;
+  /** itemId → "~$3.49" for the rows (from the last estimate). */
+  const priceById = useMemo(
+    () => new Map((prices?.items ?? []).map((p) => [p.itemId, `~${formatCents(p.typicalCents ?? Math.round((p.lowCents + p.highCents) / 2))}`])),
+    [prices],
+  );
 
   const syncing = useMutationState({
     filters: { mutationKey: ["check", groupId], status: "pending" },
@@ -103,6 +131,32 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
     });
   const pick = (item: Item) =>
     add.mutate({ itemId: item.id }, { onSuccess: () => toast(`Added ${item.name} to the list`), onError });
+  const scan = (r: ShoppingListItem) => router.push(`/scanner?mode=match-list-item&listItemId=${r.id}`);
+
+  async function finishTrip() {
+    const n = checked.length;
+    if (!(await confirm("Finish trip?", `Move ${plural(n, "checked item")} to the cabinet?`, "Finish trip"))) return;
+    const itemIds = checked.map((r) => r.itemId);
+    complete.mutate(undefined, {
+      onSuccess: ({ movedToCabinet }) => {
+        toast(`${plural(movedToCabinet, "item")} moved to the cabinet`);
+        void maybeAskNotificationPermission();
+        if (movedToCabinet > 0) router.push(`/expiration-check?itemIds=${itemIds.join(",")}`);
+      },
+      onError,
+    });
+  }
+  const rowProps = (r: ShoppingListItem) => ({
+    row: r,
+    meId,
+    names,
+    runningLow: lowItemIds.has(r.itemId),
+    priceText: priceById.get(r.itemId) ?? null,
+    syncing: syncingIds.has(r.id),
+    onToggle: toggle,
+    onDelete: remove,
+    onScan: scan,
+  });
 
   let body: React.ReactNode;
   if (list.isPending) {
@@ -137,7 +191,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
               {s.title}
             </AppText>
             {s.rows.map((r) => (
-              <NoteRow key={r.id} row={r} meId={meId} syncing={syncingIds.has(r.id)} onToggle={toggle} onDelete={remove} />
+              <NoteRow key={r.id} {...rowProps(r)} />
             ))}
           </View>
         ))}
@@ -147,7 +201,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
               In the cart
             </AppText>
             {checked.map((r) => (
-              <NoteRow key={r.id} row={r} meId={meId} syncing={syncingIds.has(r.id)} onToggle={toggle} onDelete={remove} />
+              <NoteRow key={r.id} {...rowProps(r)} />
             ))}
           </View>
         ) : null}
@@ -164,23 +218,53 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
       subheader={
         <>
           {rows.length > 0 ? <PaperCaption strong>{`${toBuyCount} to buy · ${checked.length} in the cart`}</PaperCaption> : null}
+          {rows.length > 0 ? (
+            <View style={styles.priceRow}>
+              <Pressable
+                onPress={() => router.push("/prices")}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  prices
+                    ? `Estimated total ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}. Open prices`
+                    : "Estimate prices"
+                }
+                style={({ pressed }) => [styles.priceButton, pressed && styles.pressed]}
+                testID="list-note-prices"
+              >
+                <AppText variant="bodyS" weight="bold" style={styles.priceText}>
+                  {prices ? `Est. ${formatCentsRange(prices.totalLowCents, prices.totalHighCents, true)}` : "Estimate prices"}
+                </AppText>
+              </Pressable>
+              <AiLabel text="AI estimate" />
+            </View>
+          ) : null}
           {!connected && !list.isPending ? <PaperCaption>Live updates paused · refreshing every 5 s</PaperCaption> : null}
         </>
       }
       footer={
-        toBuyCount > 0 ? (
+        rows.length > 0 ? (
           <PaperPrimaryButton
-            label="Start shopping 🛒"
-            accessibilityLabel="Start shopping"
-            accessibilityHint="Opens the store aisle to shop this list"
-            onPress={onStartShopping}
-            testID="list-note-start-shopping"
+            label={
+              complete.isPending
+                ? "Finishing…"
+                : checked.length === 0
+                  ? "Check items off as you shop"
+                  : `Finish trip · move ${checked.length} to the cabinet`
+            }
+            accessibilityHint="Moves the checked items into the pantry"
+            disabled={checked.length === 0}
+            loading={complete.isPending}
+            onPress={() => void finishTrip()}
+            testID="finish-trip"
           />
         ) : null
       }
       overlay={<ItemPicker visible={picking} title="Add to the list" onClose={() => setPicking(false)} onPick={pick} />}
     >
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.banner}>
+            <RecallBanner groupId={groupId} />
+          </View>
           {body}
           {!list.isPending && !list.isError ? (
             <Pressable
@@ -201,29 +285,41 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
   );
 }
 
-function NoteRow({
-  row,
-  meId,
-  syncing,
-  onToggle,
-  onDelete,
-}: {
+function who(userId: string | null, meId: string | undefined, names: Map<string, string>): string {
+  if (!userId) return "someone";
+  if (userId === meId) return "you";
+  return names.get(userId) ?? "someone";
+}
+
+type NoteRowProps = {
   row: ShoppingListItem;
   meId: string | undefined;
+  /** userId → display name (members of the active household). */
+  names: Map<string, string>;
+  runningLow: boolean;
+  /** "~$3.49" from the last price estimate, when there is one. */
+  priceText: string | null;
   syncing: boolean;
   onToggle: (r: ShoppingListItem) => void;
   onDelete: (r: ShoppingListItem) => void;
-}) {
+  onScan: (r: ShoppingListItem) => void;
+};
+
+function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, onDelete, onScan }: NoteRowProps) {
   const name = row.item.name;
-  const wanted =
-    row.reason === "manual"
-      ? "Added by hand"
+  const wanted = row.checked
+    ? `In the cart · checked by ${who(row.checkedBy, meId, names)}`
+    : row.reason === "manual"
+      ? row.addedBy
+        ? `Added by ${who(row.addedBy, meId, names)}`
+        : "Added by hand"
       : row.wantedBy.length
         ? `For ${row.wantedBy.map((w) => (w.userId === meId ? "you" : w.displayName)).join(", ")}`
         : null;
-  const meta = [row.quantityText, wanted].filter(Boolean).join(" · ");
+  const meta = [row.quantityText, wanted, runningLow && !row.checked ? "Running low at home" : null].filter(Boolean).join(" · ");
   // My allergens first, so the most important badge is read first.
   const flags = [...row.allergenFlags].sort((a, b) => Number(b.userId === meId) - Number(a.userId === meId));
+  const agentNote = row.note ? row.note.replace(/^✨\s*/, "") : null;
 
   return (
     <View style={styles.row} testID={`list-note-row-${row.id}`}>
@@ -251,6 +347,11 @@ function NoteRow({
             >
               {name}
             </AppText>
+            {priceText ? (
+              <AppText variant="bodyS" weight="semi" style={styles.pencil} testID={`list-note-price-${row.id}`}>
+                {priceText}
+              </AppText>
+            ) : null}
             {syncing ? <View style={styles.syncDot} accessible accessibilityLabel="Syncing" /> : null}
           </View>
           {meta ? (
@@ -258,11 +359,19 @@ function NoteRow({
               {meta}
             </AppText>
           ) : null}
+          {agentNote ? (
+            <View style={styles.agentNote} accessible accessibilityLabel={`AI note: ${agentNote}`}>
+              <Sparkles size={12} color={NOTE_PAPER.pencil} strokeWidth={2.5} />
+              <AppText variant="caption" weight="semi" style={[styles.pencil, styles.name]}>
+                {agentNote.charAt(0).toUpperCase() + agentNote.slice(1)}
+              </AppText>
+            </View>
+          ) : null}
           {flags.length > 0 ? (
             <View style={styles.badges}>
               {flags.map((f) => {
                 const mine = f.userId === meId;
-                const who = mine ? "you" : f.displayName;
+                const whom = mine ? "you" : f.displayName;
                 return (
                   <View
                     key={`${f.userId}-${f.allergen}`}
@@ -273,7 +382,7 @@ function NoteRow({
                   >
                     <AlertTriangle size={13} color={mine ? "#FFFFFF" : pantry.redInk} strokeWidth={2.6} />
                     <AppText variant="caption" weight="bold" style={mine ? styles.badgeMineText : styles.badgeOtherText}>
-                      {`${allergenLabel(f.allergen)} · ${who}`}
+                      {`${allergenLabel(f.allergen)} · ${whom}`}
                     </AppText>
                   </View>
                 );
@@ -282,6 +391,17 @@ function NoteRow({
           ) : null}
         </View>
       </Pressable>
+      {!row.checked ? (
+        <Pressable
+          onPress={() => onScan(row)}
+          accessibilityRole="button"
+          accessibilityLabel={`Scan a product for ${name}`}
+          style={({ pressed }) => [styles.del, pressed && styles.pressed]}
+          testID={`list-note-scan-${row.id}`}
+        >
+          <ScanBarcode size={18} color={pantry.muted} />
+        </Pressable>
+      ) : null}
       {row.reason === "manual" ? (
         <Pressable
           onPress={() => onDelete(row)}
@@ -347,6 +467,18 @@ const styles = {
     borderBottomColor: NOTE_PAPER.rule,
   },
   addText: { fontSize: 20, lineHeight: 26, color: pantry.green },
+  agentNote: { flexDirection: "row", alignItems: "center", gap: 4 },
+  banner: { paddingLeft: PAPER_MARGIN_X - 4, paddingRight: 12 },
+  priceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: MARGIN_X, marginTop: 8 },
+  priceButton: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: pantry.green,
+  },
+  priceText: { color: pantry.green },
   pressed: { opacity: 0.75 },
   }),
 };

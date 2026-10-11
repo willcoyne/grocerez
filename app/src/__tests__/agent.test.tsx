@@ -7,7 +7,7 @@ import * as WebBrowser from "expo-web-browser";
 import demoRunJson from "../../../server/test/fixtures/agent/demo-run.json";
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
-import ListScreen from "@/app/(tabs)/list";
+import { ShoppingListNote } from "@/features/pantry/overlay/ShoppingListNote";
 import GroupScreen from "@/app/(tabs)/group";
 import AgentScreen, { DEFAULT_PROMPT, replayDelays } from "@/app/agent";
 import { AgentMealCard } from "@/components/AgentMealCard";
@@ -278,7 +278,7 @@ describe("Shopping list ✨ note chip", () => {
         [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }),
       }),
     );
-    await renderWithProviders(<ListScreen />);
+    await renderWithProviders(<ShoppingListNote visible groupId={g} onClose={jest.fn()} />);
     // The emoji in the stored note becomes a Sparkles icon (DESIGN.md: no emoji); the text stays.
     expect(await screen.findByText("For Lemon garlic chicken with spinach rice")).toBeTruthy();
     expect(screen.getByLabelText("AI note: for Lemon garlic chicken with spinach rice")).toBeTruthy();

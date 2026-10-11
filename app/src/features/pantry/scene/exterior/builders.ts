@@ -27,7 +27,7 @@ import { advanceOf, textGeometry } from "./font";
 import { applyWoodUV, bevelBox, merge, place, prep, tint, type Vec3, woodPiece } from "./geometry";
 import { getMaterials, PALETTE } from "./materials";
 
-export { LIST_FALLBACK, listLines, WEEK_FALLBACK, weekNoteLines } from "./list";
+export { LIST_FALLBACK, listLines, ME_FALLBACK, meNoteLines, WEEK_FALLBACK, weekNoteLines } from "./list";
 export const GROCER = "Grocer";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -506,11 +506,11 @@ export function buildListText(lines: string[]): BufferGeometry {
   return merge(parts);
 }
 
-/** The Week note's text, laid out like the List note: "Week" with the squiggle, then up to 3 day lines ("Mon Chicken.."). */
-export function buildWeekText(lines: string[]): BufferGeometry {
+/** A titled note's text, laid out like the List note: the title with its squiggle, then up to 3 lines. */
+function buildTitledText(titleText: string, lines: string[]): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const z = 0.0055;
-  const title = textGeometry("Week", { size: 0.052, depth: 0.0015, curveSegments: 3 });
+  const title = textGeometry(titleText, { size: 0.052, depth: 0.0015, curveSegments: 3 });
   title.computeBoundingBox();
   const tb = title.boundingBox!;
   title.translate(-(tb.min.x + tb.max.x) / 2, 0.072, z);
@@ -529,6 +529,16 @@ export function buildWeekText(lines: string[]): BufferGeometry {
   for (const p of parts) p.deleteAttribute("uv");
   for (const p of parts) p.setAttribute("uv", new BufferAttribute(new Float32Array(p.getAttribute("position").count * 2), 2));
   return merge(parts);
+}
+
+/** The Week note's text: "Week" with the squiggle, then up to 3 day lines ("Mon Chicken.."). */
+export function buildWeekText(lines: string[]): BufferGeometry {
+  return buildTitledText("Week", lines);
+}
+
+/** The Me note's text: "Me" with the squiggle, then name / allergies / ZIP. */
+export function buildMeText(lines: string[]): BufferGeometry {
+  return buildTitledText("Me", lines);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -574,6 +584,7 @@ type Shared = {
   floor: BufferGeometry;
   hit: BufferGeometry;
   noteHit: BufferGeometry;
+  meHit: BufferGeometry;
   weekHit: BufferGeometry;
 };
 
@@ -597,6 +608,7 @@ export function getSharedGeometry(): Shared {
     floor: buildFloor(),
     hit: new BoxGeometry(2.7, 4.2, 1.5),
     noteHit: new BoxGeometry(NOTE_HIT.size[0], NOTE_HIT.size[1], NOTE_HIT.size[2]),
+    meHit: new BoxGeometry(ME_HIT.size[0], ME_HIT.size[1], ME_HIT.size[2]),
     weekHit: new BoxGeometry(WEEK_HIT.size[0], WEEK_HIT.size[1], WEEK_HIT.size[2]),
   };
   return shared;
@@ -612,10 +624,15 @@ export const NOTE_HIT = {
   position: [D.note.x + 0.02, D.note.y, 0.27] as Vec3,
   size: [0.36, 0.56, 0.7] as Vec3,
 };
-/** Tap target for the Week note: same depth as the list's, stacked directly below it (no overlap: y 1.42–1.82). */
-export const WEEK_HIT = {
-  position: [D.weekNote.x + 0.02, 1.62, 0.27] as Vec3,
+/** Tap target for the Me note: same depth as the list's, stacked directly below it (no overlap: y 1.42–1.82). */
+export const ME_HIT = {
+  position: [D.meNote.x + 0.02, 1.62, 0.27] as Vec3,
   size: [0.36, 0.4, 0.7] as Vec3,
+};
+/** Tap target for the Week note, below the Me note (y 0.96–1.42). */
+export const WEEK_HIT = {
+  position: [D.weekNote.x + 0.02, 1.19, 0.27] as Vec3,
+  size: [0.36, 0.46, 0.7] as Vec3,
 };
 
 export type ExteriorHandles = {
@@ -628,7 +645,10 @@ export type ExteriorHandles = {
   /** the paper (+ its text) that lifts off the pin; local frame = note centre, pivot at the note group */
   notePaper: Group;
   setListLines(lines: string[]): void;
-  /** the Week note's paper (+ text), pinned below the list */
+  /** the Me note's paper (+ text), pinned below the list */
+  mePaper: Group;
+  setMeLines(lines: string[]): void;
+  /** the Week note's paper (+ text), pinned below the Me note */
   weekPaper: Group;
   setWeekLines(lines: string[]): void;
   dispose(): void;
@@ -695,19 +715,25 @@ export function createExterior(): ExteriorHandles {
   note.add(mesh(g.pin, m.paint, true, false));
   root.add(note);
 
-  // The Week note (spec §13): same paper and pin, its own text.
-  const week = new Group();
-  week.position.set(D.weekNote.x, D.weekNote.y, D.weekNote.z);
-  week.rotation.z = D.weekNote.rotZ;
-  const weekPaper = new Group();
-  weekPaper.add(mesh(g.paper, m.paper, false, true));
-  const weekText = mesh(new BufferGeometry(), m.ink, false, false);
-  weekPaper.add(weekText);
-  week.add(weekPaper);
-  week.add(mesh(g.pin, m.paint, true, false));
-  root.add(week);
+  // The Me and Week notes (spec §13): same paper and pin, their own text.
+  const pinned = (n: { x: number; y: number; z: number; rotZ: number }) => {
+    const group = new Group();
+    group.position.set(n.x, n.y, n.z);
+    group.rotation.z = n.rotZ;
+    const paper = new Group();
+    paper.add(mesh(g.paper, m.paper, false, true));
+    const text = mesh(new BufferGeometry(), m.ink, false, false);
+    paper.add(text);
+    group.add(paper);
+    group.add(mesh(g.pin, m.paint, true, false));
+    root.add(group);
+    return { paper, text };
+  };
+  const { paper: mePaper, text: meText } = pinned(D.meNote);
+  const { paper: weekPaper, text: weekText } = pinned(D.weekNote);
 
   let lastKey = "";
+  let lastMeKey = "";
   let lastWeekKey = "";
   return {
     root,
@@ -717,6 +743,7 @@ export function createExterior(): ExteriorHandles {
     lettersZ: g.lettersZ,
     sign,
     notePaper,
+    mePaper,
     weekPaper,
     setListLines(lines) {
       const key = lines.join("\n");
@@ -724,6 +751,13 @@ export function createExterior(): ExteriorHandles {
       lastKey = key;
       textMesh.geometry.dispose();
       textMesh.geometry = buildListText(lines);
+    },
+    setMeLines(lines) {
+      const key = lines.join("\n");
+      if (key === lastMeKey) return;
+      lastMeKey = key;
+      meText.geometry.dispose();
+      meText.geometry = buildMeText(lines);
     },
     setWeekLines(lines) {
       const key = lines.join("\n");
@@ -734,10 +768,13 @@ export function createExterior(): ExteriorHandles {
     },
     dispose() {
       // Shared geometry/materials stay alive (module level). Only per-instance text is freed; safe to call twice
-      // (React StrictMode re-runs effects), setListLines / setWeekLines rebuild it.
+      // (React StrictMode re-runs effects), setListLines / setMeLines / setWeekLines rebuild it.
       textMesh.geometry.dispose();
       textMesh.geometry = new BufferGeometry();
       lastKey = "";
+      meText.geometry.dispose();
+      meText.geometry = new BufferGeometry();
+      lastMeKey = "";
       weekText.geometry.dispose();
       weekText.geometry = new BufferGeometry();
       lastWeekKey = "";

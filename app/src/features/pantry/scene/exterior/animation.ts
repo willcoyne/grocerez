@@ -1,6 +1,6 @@
 // Per-frame pose logic for the exterior, kept pure (inputs: phase, openProgress, time) so it is testable and can
 // drive both the R3F component and a plain three.js preview.
-import type { PantryPhase } from "../../types";
+import type { NoteKind, PantryPhase } from "../../types";
 import { type ExteriorHandles, NOTE_PIN_Y } from "./builders";
 import { LIST_LIFT_START } from "../motion";
 import { PANTRY_DIMENSIONS as D } from "./dimensions";
@@ -21,6 +21,10 @@ export type ExteriorAnimState = {
   noteHover: boolean;
   /** smoothed 0..1 hover lift of the note */
   noteLift: number;
+  /** pointer is over the pinned Me note (web hover) */
+  meHover: boolean;
+  /** smoothed 0..1 hover lift of the Me note */
+  meLift: number;
   /** pointer is over the pinned Week note (web hover) */
   weekHover: boolean;
   /** smoothed 0..1 hover lift of the Week note */
@@ -38,6 +42,8 @@ export function createAnimState(): ExteriorAnimState {
     hover: false,
     noteHover: false,
     noteLift: 0,
+    meHover: false,
+    meLift: 0,
     weekHover: false,
     weekLift: 0,
     glow: 0,
@@ -145,7 +151,13 @@ export function notePose(now: number, hover: number, lift: number, tappable: boo
   };
 }
 
-export type ExteriorInput = { phase: PantryPhase; openProgress: number; listProgress?: number };
+export type ExteriorInput = {
+  phase: PantryPhase;
+  openProgress: number;
+  listProgress?: number;
+  /** which pinned paper the `list` phase lifts toward the camera (default the List) */
+  liftedNote?: NoteKind;
+};
 
 /** Apply poses to the scene graph. `now` is a monotonically increasing clock in seconds. */
 export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: ExteriorInput, now: number, dt: number) {
@@ -197,21 +209,28 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   // --- sign
   h.sign.rotation.z = signAngle(now, since, s.opened, s.shakeFromCrooked);
 
-  // --- pinned list: "tap me" flutter / hover lift / lift-off toward the camera
-  s.noteLift += ((s.noteHover && phase === "closed" ? 1 : 0) - s.noteLift) * Math.min(1, dt * 10);
-  const np = notePose(now, s.noteLift, noteLiftFor(input.listProgress ?? 0), phase === "closed", D.note.rotZ);
-  h.notePaper.position.set(np.x, np.y, np.z);
-  h.notePaper.rotation.set(np.rx, 0, np.rz);
-
-  // --- pinned Week note: the same flutter/hover, out of step with the list; it never lifts off (the sheet opens)
-  s.weekLift += ((s.weekHover && phase === "closed" ? 1 : 0) - s.weekLift) * Math.min(1, dt * 10);
-  const wp = notePose(now + 2.6, s.weekLift, 0, phase === "closed", D.weekNote.rotZ);
-  h.weekPaper.position.set(wp.x, wp.y, wp.z);
-  h.weekPaper.rotation.set(wp.rx, 0, wp.rz);
+  // --- pinned papers (List, Me, Week): "tap me" flutter (out of step) / hover lift / lift-off toward the camera
+  const closed = phase === "closed";
+  const lifted = input.liftedNote ?? "list";
+  const lift = noteLiftFor(input.listProgress ?? 0);
+  const k = Math.min(1, dt * 10);
+  s.noteLift += ((s.noteHover && closed ? 1 : 0) - s.noteLift) * k;
+  s.meLift += ((s.meHover && closed ? 1 : 0) - s.meLift) * k;
+  s.weekLift += ((s.weekHover && closed ? 1 : 0) - s.weekLift) * k;
+  const papers = [
+    { paper: h.notePaper, kind: "list", hover: s.noteLift, phase: 0, rotZ: D.note.rotZ },
+    { paper: h.mePaper, kind: "me", hover: s.meLift, phase: 1.3, rotZ: D.meNote.rotZ },
+    { paper: h.weekPaper, kind: "week", hover: s.weekLift, phase: 2.6, rotZ: D.weekNote.rotZ },
+  ] as const;
+  for (const n of papers) {
+    const pose = notePose(now + n.phase, n.hover, n.kind === lifted ? lift : 0, closed, n.rotZ);
+    n.paper.position.set(pose.x, pose.y, pose.z);
+    n.paper.rotation.set(pose.rx, 0, pose.rz);
+  }
 
   // --- knob breathing glow (closed only) to invite a tap
   const target =
-    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.weekHover ? 0.35 : 0) : 0;
+    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.meHover && !s.weekHover ? 0.35 : 0) : 0;
   s.glow += (target - s.glow) * Math.min(1, dt * 6);
   getMaterials().knob.emissiveIntensity = s.glow;
 }

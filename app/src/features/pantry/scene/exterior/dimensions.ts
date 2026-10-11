@@ -24,8 +24,10 @@ export const PANTRY_DIMENSIONS = {
   signNail: [0.98, 4.3, -0.93] as const,
   /** paper shopping list pinned on the right stile: centre, size, tilt (radians about z) */
   note: { x: 0.99, y: 2.1, z: 0.004, width: 0.23, height: 0.37, rotZ: -0.06 },
-  /** the Week note (spec §13), pinned just below the list on the same stile, tilted the other way */
-  weekNote: { x: 0.99, y: 1.64, z: 0.004, rotZ: 0.045 },
+  /** the Me note (my preferences, diet, profile), pinned just below the list on the same stile, tilted the other way */
+  meNote: { x: 0.99, y: 1.64, z: 0.004, rotZ: 0.045 },
+  /** the Week note (spec §13), pinned below the Me note */
+  weekNote: { x: 0.99, y: 1.18, z: 0.004, rotZ: -0.035 },
   /** back wall plane and floor */
   wallZ: -0.95,
   /** everything worth framing (incl. the stool + plant at the right) */

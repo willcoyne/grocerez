@@ -6,7 +6,7 @@
  * - shelves: follows the shelf scroll (`scroll.state.y`, advanced here via `scroll.step`) and eases to a searched
  *   item (`focus`), with critically-damped smoothing so phase changes never pop.
  * - closing: pulls back from wherever the camera was to the closed framing (`clock.zoom` 1..0).
- * - list: flies from the closed framing to the pinned shopping list so the note fills ~70% of the width
+ * - list: flies from the closed framing to a pinned paper (`noteTarget`: List, Me or Week) so it fills ~70% of the width
  *   (`clock.list` 0..LIST_CAMERA_END; the paper then lifts toward the lens, see exterior/animation.ts) and back.
  * It also keeps the scroll bounds / px-to-world factor in sync with the viewport.
  */
@@ -14,7 +14,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 
-import type { PantryPhase } from "../types";
+import type { NoteKind, PantryPhase } from "../types";
 import { PANTRY_DIMENSIONS } from "./exterior/dimensions";
 import {
   easeInOutCubic,
@@ -61,6 +61,7 @@ export function CameraRig({
   contentHeight,
   frame,
   focus,
+  noteTarget,
 }: {
   phase: PantryPhase;
   clock: MutableRefObject<PhaseClock>;
@@ -72,6 +73,8 @@ export function CameraRig({
   /** closed-view framing box (PANTRY_DIMENSIONS.bounds) */
   frame: FrameBounds;
   focus: MutableRefObject<CameraFocus>;
+  /** the paper the `list` phase flies to (default the List) */
+  noteTarget?: MutableRefObject<NoteKind>;
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
@@ -120,9 +123,12 @@ export function CameraRig({
     pose.door.pos.set(sx, doorY, doorDist);
     pose.door.target.set(sx, doorY, sz - 0.2);
 
-    // Note pose: straight on to the pinned list, close enough that it fills NOTE_FILL of the width.
-    const N = PANTRY_DIMENSIONS.note;
-    pose.note.pos.set(N.x, N.y, N.z + noteDistance(N.width, N.height, aspect));
+    // Note pose: straight on to the target paper, close enough that it fills NOTE_FILL of the width (all papers share
+    // the List's size).
+    const { width, height } = PANTRY_DIMENSIONS.note;
+    const target = noteTarget?.current ?? "list";
+    const N = target === "me" ? PANTRY_DIMENSIONS.meNote : target === "week" ? PANTRY_DIMENSIONS.weekNote : PANTRY_DIMENSIONS.note;
+    pose.note.pos.set(N.x, N.y, N.z + noteDistance(width, height, aspect));
     pose.note.target.set(N.x, N.y, N.z);
 
     if (phase !== pose.lastPhase) {

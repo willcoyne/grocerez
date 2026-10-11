@@ -23,7 +23,8 @@ function VisibleTabBar(props: TabBarProps) {
 }
 
 /**
- * Tabs in order: Pantry (home, route `cabinet`), List, Me, Household. "/" (index) redirects to the Pantry.
+ * Tabs in order: Pantry (home, route `cabinet`), Household. "/" (index) redirects to the Pantry.
+ * The shopping list, Me and Week are papers pinned on the 3D pantry (features/pantry), not tabs.
  * Each screen renders its own header; the Pantry scene fills the area above the tab bar.
  */
 export default function TabsLayout() {
@@ -40,8 +41,6 @@ export default function TabsLayout() {
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: color.bg } }}
     >
       <Tabs.Screen name="cabinet" options={{ title: "Pantry" }} />
-      <Tabs.Screen name="list" options={{ title: "List" }} />
-      <Tabs.Screen name="me" options={{ title: "Me" }} />
       <Tabs.Screen name="group" options={{ title: "Household", tabBarBadge: alertCount > 0 ? alertCount : undefined }} />
       <Tabs.Screen name="index" options={{ href: null }} />
     </Tabs>
