@@ -1,7 +1,9 @@
 import type { Allergen, Diet } from "../contracts/dietary.js";
 import { allergensInText } from "./allergens.js";
 
-const MEAT = /(?<![a-z])(beef|pork|bacon|ham|chicken|turkey|lamb|veal|sausages?|pepperoni|salami|prosciutto|chorizo|meat|steak|ground beef|gelatin|lard|duck|venison)(?![a-z])/i;
+// Plural-tolerant ("Chickens", "Steaks", "Meatballs", "Hot Dogs"): a plural must not slip past a vegetarian.
+const MEAT =
+  /(?<![a-z])(beef|pork|bacon|hams?|chickens?|turkeys?|lambs?|veal|sausages?|pepperonis?|salamis?|prosciutto|chorizos?|meats?|meatballs?|meatloaf|steaks?|ground beef|gelatin|lard|ducks?|venison|hot ?dogs?|jerky|brisket|ribs)(?![a-z])/i;
 const NOT_VEGAN = /(?<![a-z])(honey|gelatin)(?![a-z])/i;
 const NOT_KETO = /(?<![a-z])(sugar|rice|pasta|bread|potato(es)?|flour|noodles?|tortillas?)(?![a-z])/i;
 

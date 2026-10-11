@@ -23,7 +23,7 @@ const requireAgentSecret: RequestHandler = (req, _res, next) => {
 /** Parsed first so an invalid `proposed` plan can fail the run (422) instead of a plain 400. */
 const Envelope = z.object({
   runId: z.uuid(),
-  seq: z.number().int().min(0),
+  seq: z.number().int().min(0).max(2_147_483_647), // stored/sorted as Postgres int4
   type: z.enum(["step", "proposed", "failed"]),
   payload: z.unknown(),
 });

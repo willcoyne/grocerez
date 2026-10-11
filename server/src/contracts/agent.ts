@@ -6,28 +6,33 @@ import { ShoppingListItem } from "./shoppingList.js";
 // Pantry Agent (plan/challenges/01-pantry-agent). FROZEN in Phase 0: the app, the server and agent/app/schemas.py
 // (pydantic) all follow these shapes. server/test/fixtures/agent/demo-run.json must validate against AgentRun.
 
+/** Postgres text can't hold NUL (0x00): reject it at the boundary instead of failing in the database. */
+const text = () => z.string().regex(/^[^\u0000]*$/, "must not contain NUL characters");
+/** seq is stored and sorted as a Postgres int4. */
+const SEQ_MAX = 2_147_483_647;
+
 // ─── Plan (what the agent proposes via propose_plan) ─────────────────────────
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 export const PlanMeal = z.object({
-  title: z.string().trim().min(1).max(120),
+  title: text().trim().min(1).max(120),
   day: z.enum(WEEKDAYS).nullable(),
   minutes: z.number().int().min(1).max(240),
   servings: z.number().int().min(1).max(20),
-  ingredients: z.array(z.string().trim().min(1).max(120)).min(1).max(25),
+  ingredients: z.array(text().trim().min(1).max(120)).min(1).max(25),
   /** Cabinet item names this meal uses. */
-  uses: z.array(z.string().trim().min(1).max(120)).max(15),
+  uses: z.array(text().trim().min(1).max(120)).max(15),
   /** Generic grocery names to buy ("Lemons"), no quantities. */
-  missing: z.array(z.string().trim().min(1).max(120)).max(15),
-  steps: z.array(z.string().trim().min(1).max(500)).min(1).max(6),
+  missing: z.array(text().trim().min(1).max(120)).max(15),
+  steps: z.array(text().trim().min(1).max(500)).min(1).max(6),
 });
 export type PlanMeal = z.infer<typeof PlanMeal>;
 
 export const PlanMissingItem = z.object({
-  name: z.string().trim().min(1).max(120),
+  name: text().trim().min(1).max(120),
   /** Meal titles that need this item. */
-  forMeals: z.array(z.string().max(120)).min(1).max(7),
+  forMeals: z.array(text().max(120)).min(1).max(7),
 });
 
 export const PlanEstimate = z.object({
@@ -42,9 +47,9 @@ export const AgentPlan = z.object({
   estimate: PlanEstimate.nullable(),
   safety: z.object({
     checked: z.literal(true),
-    perMeal: z.array(z.object({ title: z.string(), passes: z.boolean(), unknown: z.array(z.string()) })),
+    perMeal: z.array(z.object({ title: text(), passes: z.boolean(), unknown: z.array(text()) })),
   }),
-  summary: z.string().max(400),
+  summary: text().max(400),
 });
 export type AgentPlan = z.infer<typeof AgentPlan>;
 
@@ -57,20 +62,20 @@ export const AgentStepStatus = z.enum(["running", "done", "failed"]);
 
 export const AgentStep = z.object({
   /** Increasing per run; the order steps are shown in. */
-  seq: z.number().int().min(0),
+  seq: z.number().int().min(0).max(SEQ_MAX),
   /** Stable per step so "running" can become "done" (e.g. "get_cabinet", "drafting"). */
-  id: z.string().min(1).max(64),
-  label: z.string().min(1).max(200),
+  id: text().min(1).max(64),
+  label: text().min(1).max(200),
   status: AgentStepStatus,
-  detail: z.string().max(500).optional(),
+  detail: text().max(500).optional(),
   /** ISO timestamp set by the server when the event arrives (used by the recorded-run replay). */
   at: z.string(),
 });
 export type AgentStep = z.infer<typeof AgentStep>;
 
 export const AgentRunMeta = z.object({
-  provider: z.string().max(40),
-  model: z.string().max(120),
+  provider: text().max(40),
+  model: text().max(120),
   toolCalls: z.number().int().min(0),
   tokensIn: z.number().int().min(0).nullable(),
   tokensOut: z.number().int().min(0).nullable(),
@@ -99,7 +104,7 @@ export const AgentRunSummary = AgentRun.omit({ steps: true });
 export type AgentRunSummary = z.infer<typeof AgentRunSummary>;
 
 export const StartAgentRunBody = z.object({
-  prompt: z.string().trim().min(1).max(500),
+  prompt: text().trim().min(1).max(500),
   budgetCents: z.number().int().min(0).max(100_000).nullable().optional(),
 });
 export type StartAgentRunBody = z.infer<typeof StartAgentRunBody>;
@@ -130,7 +135,7 @@ export type AgentHousehold = z.infer<typeof AgentHousehold>;
 
 export const SafetyCheckBody = z.object({
   meals: z
-    .array(z.object({ title: z.string().trim().min(1).max(120), ingredients: z.array(z.string().trim().min(1).max(120)).min(1).max(25) }))
+    .array(z.object({ title: text().trim().min(1).max(120), ingredients: z.array(text().trim().min(1).max(120)).min(1).max(25) }))
     .min(1)
     .max(7),
 });
@@ -177,21 +182,21 @@ export type AgentRunRequest = z.infer<typeof AgentRunRequest>;
 export const AgentEvent = z.discriminatedUnion("type", [
   z.object({
     runId: z.uuid(),
-    seq: z.number().int().min(0),
+    seq: z.number().int().min(0).max(SEQ_MAX),
     type: z.literal("step"),
     payload: AgentStep.omit({ seq: true, at: true }),
   }),
   z.object({
     runId: z.uuid(),
-    seq: z.number().int().min(0),
+    seq: z.number().int().min(0).max(SEQ_MAX),
     type: z.literal("proposed"),
     payload: z.object({ plan: AgentPlan, meta: AgentRunMeta }),
   }),
   z.object({
     runId: z.uuid(),
-    seq: z.number().int().min(0),
+    seq: z.number().int().min(0).max(SEQ_MAX),
     type: z.literal("failed"),
-    payload: z.object({ message: z.string().max(500), meta: AgentRunMeta.optional() }),
+    payload: z.object({ message: text().max(500), meta: AgentRunMeta.optional() }),
   }),
 ]);
 export type AgentEvent = z.infer<typeof AgentEvent>;

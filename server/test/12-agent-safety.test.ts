@@ -49,7 +49,25 @@ describe("12 agent safety check (per member)", () => {
     const { g } = await household();
     const [m] = (await safety.check(g.id, [meal("Lemon chicken", "Chicken Breast", "Lemons")])).meals;
     expect(m.passes).toBe(false);
-    expect(m.problems).toEqual([{ ingredient: "Chicken Breast", reason: "not vegetarian", members: ["Veg"] }]);
+    expect(m.problems).toEqual([
+      { ingredient: "Chicken Breast", reason: "not vegetarian", members: ["Veg"] },
+      // The title is checked too (people cook what it says).
+      { ingredient: "Lemon chicken", reason: "not vegetarian", members: ["Veg"] },
+    ]);
+  });
+
+  it("meat by catalog category or plural (Hot Dogs, Steaks, Meatballs, Chickens) fails a vegetarian; steps are checked", async () => {
+    const { g } = await household();
+    const res = await safety.check(g.id, ["Hot Dogs", "Steaks", "Meatballs", "Chickens"].map((n) => meal("Dinner", n)));
+    expect(res.meals.map((m) => m.passes)).toEqual([false, false, false, false]);
+    const [s] = (await safety.check(g.id, [{ title: "Noodles", ingredients: ["Rice"], steps: ["Whisk the peanut butter."] }])).meals;
+    expect(s.problems).toEqual([{ ingredient: "Whisk the peanut butter.", reason: "contains peanuts", members: ["Carson"] }]);
+  });
+
+  it("a fuzzy 'suggested' hit is not verification: the ingredient is listed as unknown", async () => {
+    const { g } = await household();
+    const [m] = (await safety.check(g.id, [meal("Dessert", "Custard")])).meals;
+    expect(m.unknown).toContain("Custard");
   });
 
   it("uses the catalog's default allergens when the name has no keyword (Oreos → soy)", async () => {

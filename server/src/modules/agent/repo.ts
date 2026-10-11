@@ -102,6 +102,9 @@ export const agentRepo = {
       WHERE status = 'running' AND created_at < ${before}
       RETURNING id, group_id AS "groupId", user_id AS "userId"`,
 
+  /** Every run still running (boot: re-arm their timeouts). */
+  running: () => prisma.agentRun.findMany({ where: { status: "running" }, select: { id: true, createdAt: true } }),
+
   /** proposed → applied, the double-tap guard inside apply's transaction. */
   claimApply: async (db: Db, groupId: string, runId: string) =>
     (
