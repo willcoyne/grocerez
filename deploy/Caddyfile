@@ -1,0 +1,18 @@
+# Caddy obtains and renews the TLS certificate for {$DOMAIN} automatically (needs ports 80/443 reachable and DNS pointing here).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API + Socket.IO. reverse_proxy upgrades WebSocket connections transparently, so /socket.io/* needs no extra config.
+	@backend path /api/* /socket.io/*
+	handle @backend {
+		reverse_proxy server:3000
+	}
+
+	# Everything else: the static Expo web export (mounted at /srv/web). SPA fallback to index.html.
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
+# The agent service is deliberately NOT routed here: it is reachable only on the compose network.

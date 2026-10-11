@@ -12,6 +12,8 @@ function getClient(): S3Client {
   if (!s3Configured()) throw notConfigured("File storage (S3)");
   client ??= new S3Client({
     region: config.AWS_REGION,
+    // S3-compatible stores (Akamai Object Storage): custom endpoint + path-style addressing.
+    ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT, forcePathStyle: true } : {}),
     credentials: { accessKeyId: config.AWS_ACCESS_KEY_ID!, secretAccessKey: config.AWS_SECRET_ACCESS_KEY! },
   });
   return client;
