@@ -28,6 +28,7 @@ function toListItem(r: Row, names: Map<string, string>): ShoppingListItem {
     checkedAt: r.checkedAt?.toISOString() ?? null,
     scannedProductId: r.scannedProductId,
     addedBy: r.addedBy,
+    note: r.note,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };

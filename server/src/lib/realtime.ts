@@ -1,6 +1,6 @@
 import type { Server } from "socket.io";
 
-export type GroupEvent = "shopping-list:changed" | "cabinet:changed" | "preferences:changed" | "group:changed";
+export type GroupEvent = "shopping-list:changed" | "cabinet:changed" | "preferences:changed" | "group:changed" | "agent:changed";
 export type UserEvent = "invites:changed" | "group:changed";
 
 let io: Server | null = null;
@@ -20,8 +20,8 @@ export const userRoom = (userId: string) => `user:${userId}`;
  * "Something changed" signals, never data: clients refetch through REST.
  * Call these only AFTER the transaction that made the change has committed.
  */
-export function emitGroup(groupId: string, event: GroupEvent, by: string | null) {
-  io?.to(groupRoom(groupId)).emit(event, { groupId, by });
+export function emitGroup(groupId: string, event: GroupEvent, by: string | null, extra: Record<string, string> = {}) {
+  io?.to(groupRoom(groupId)).emit(event, { ...extra, groupId, by });
 }
 
 export function emitUser(userId: string, event: UserEvent, payload: Record<string, unknown> = {}) {

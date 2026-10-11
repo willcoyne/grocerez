@@ -40,6 +40,12 @@ const schema = z.object({
   CONTACT_EMAIL: z.string().default("team@grocerez.app"),
   /** If set in production, /api/dev/login-as is mounted and requires header `x-demo-key: <DEMO_KEY>`. */
   DEMO_KEY: optional,
+  /** Pantry Agent service (challenge 01). Unset → POST /agent/runs answers 503 NOT_CONFIGURED and the app falls back to /recipes. */
+  AGENT_URL: optional,
+  /** Shared secret for server ↔ agent calls (X-Agent-Secret). Required (≥ 32 chars) when AGENT_URL is set. */
+  AGENT_SHARED_SECRET: optional,
+  /** API base the agent calls for its tools (it runs next to the server). */
+  AGENT_PUBLIC_API_URL: z.string().min(1).default("http://localhost:3000/api"),
   ENABLE_JOBS: z
     .enum(["true", "false"])
     .default("true")
@@ -61,8 +67,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       const key = issue.path.join(".") || "(root)";
       problems.push(`${key}: ${env[key] === undefined ? "missing" : issue.message}`);
     }
-  } else if (parsed.data.NODE_ENV === "production") {
-    for (const key of PROD_REQUIRED) if (!parsed.data[key]) problems.push(`${key}: missing (required in production)`);
+  } else {
+    if (parsed.data.NODE_ENV === "production") {
+      for (const key of PROD_REQUIRED) if (!parsed.data[key]) problems.push(`${key}: missing (required in production)`);
+    }
+    if (parsed.data.AGENT_URL && (parsed.data.AGENT_SHARED_SECRET ?? "").length < 32) {
+      problems.push("AGENT_SHARED_SECRET: must be at least 32 characters when AGENT_URL is set");
+    }
   }
   if (problems.length || !parsed.success) {
     throw new ConfigError(`Invalid environment configuration:\n  - ${problems.join("\n  - ")}\nSee server/.env.example.`);

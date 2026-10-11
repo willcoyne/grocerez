@@ -51,6 +51,7 @@ model User {
   cabinetItems  CabinetItem[]
   listChecked   ShoppingListItem[] @relation("ListCheckedBy")
   listAdded     ShoppingListItem[] @relation("ListAddedBy")
+  agentRuns     AgentRun[]
 
   @@map("users")
 }
@@ -109,6 +110,7 @@ model Group {
   cabinetItems  CabinetItem[]
   listItems     ShoppingListItem[]
   recallMatches RecallMatch[]
+  agentRuns     AgentRun[]
 
   @@map("groups")
 }
@@ -307,6 +309,10 @@ model ShoppingListItem {
   /// SmartLabel / barcode scanned while checking off.
   scannedProductId String?    @map("scanned_product_id") @db.Uuid
   addedBy          String?    @map("added_by") @db.Uuid
+  /// Short label shown on the row, e.g. "✨ for Lemon chicken" (Pantry Agent, challenge 01). ≤ 120 chars.
+  note             String?    @db.VarChar(120)
+  /// The agent run whose plan added this row (challenge 01).
+  agentRunId       String?    @map("agent_run_id") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -315,11 +321,48 @@ model ShoppingListItem {
   checker        User?    @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
   scannedProduct Product? @relation(fields: [scannedProductId], references: [id], onDelete: SetNull)
   adder          User?    @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+  agentRun       AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
 
   @@unique([groupId, itemId])
   @@index([groupId, checked])
   @@index([scannedProductId])
   @@map("shopping_list_items")
+}
+
+// ─── Challenge 01 Pantry Agent runs ────────────────────────────────────────────
+
+enum AgentRunStatus {
+  running
+  proposed
+  applied
+  failed
+
+  @@map("agent_run_status")
+}
+
+/// One "Plan our week" run. `steps` = [{seq, id, label, status, detail?, at}] (appended atomically with jsonb ||);
+/// `plan` = AgentPlan (contracts/agent.ts) once proposed; `meta` = {provider, model, toolCalls, tokensIn, tokensOut, ms}.
+model AgentRun {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String         @map("group_id") @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  prompt      String         @db.VarChar(500)
+  budgetCents Int?           @map("budget_cents")
+  status      AgentRunStatus @default(running)
+  steps       Json           @default("[]")
+  plan        Json?
+  error       String?
+  meta        Json?
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  appliedAt   DateTime?      @map("applied_at") @db.Timestamptz(6)
+
+  group     Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listItems ShoppingListItem[]
+
+  @@index([groupId, createdAt(sort: Desc)])
+  @@map("agent_runs")
 }
 
 // ─── 08 Product data cache (SmartLabel / barcode) ──────────────────────────────
