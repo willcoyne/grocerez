@@ -14,12 +14,14 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from .config import Settings
+from .pricing import extract_json
 
 log = logging.getLogger("agent.recipes")
 
@@ -36,7 +38,28 @@ SITE_NAMES = {
     "bonappetit.com": "Bon Appétit", "epicurious.com": "Epicurious", "eatingwell.com": "EatingWell",
     "delish.com": "Delish", "tasteofhome.com": "Taste of Home", "cookieandkate.com": "Cookie and Kate",
     "minimalistbaker.com": "Minimalist Baker", "loveandlemons.com": "Love & Lemons",
+    "skinnytaste.com": "Skinnytaste", "recipetineats.com": "RecipeTin Eats", "pinchofyum.com": "Pinch of Yum",
+    "onceuponachef.com": "Once Upon a Chef", "natashaskitchen.com": "Natasha's Kitchen", "jocooks.com": "Jo Cooks",
+    "cafedelites.com": "Cafe Delites", "spendwithpennies.com": "Spend With Pennies", "wellplated.com": "Well Plated",
+    "ambitiouskitchen.com": "Ambitious Kitchen",
 }
+
+
+_LISTING = re.compile(r"/(?:collections?|galleries|gallery|recipe-ideas|roundups?|category|categories|tag|tags|"
+                      r"ingredients|topics?)/|-gallery/?$", re.I)
+_URL_NOISE = re.compile(r"/(?:comment-page-\d+|print|amp)/?$", re.I)
+
+
+def canonical_url(url: Any) -> str | None:
+    """Drop query/fragment and comment/print/amp suffixes so one recipe is fetched once, not three times."""
+    if not isinstance(url, str):
+        return None
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return None
+    path = _URL_NOISE.sub("", p.path)
+    return p._replace(path=path, query="", fragment="", params="").geturl()
 
 
 def step_key(idea: str) -> str:
@@ -86,7 +109,7 @@ _WORDS = (
     "large|small|medium|extra-large|jumbo|ripe|boneless|skinless|peeled|seeded|cored|trimmed|cooked|uncooked|raw|"
     "packed|softened|melted|chilled|cold|warm|hot|room temperature|unsalted|salted|low-sodium|reduced-sodium|"
     "organic|thawed|drained|rinsed|toasted|canned|frozen|lean|extra[- ]virgin|juiced|zested|halved|quartered|"
-    "cubed|torn|beaten|sifted|heaping|scant"
+    "cubed|torn|beaten|sifted|heaping|scant|prepared|store-bought|premade|ready-to-eat|oil[- ]packed|nonstick"
 )
 _WORD_RE = re.compile(rf"\b(?:{_WORDS})\b", re.I)
 _PAREN = re.compile(r"\([^)]*\)|\[[^\]]*\]")
@@ -108,7 +131,9 @@ def clean_ingredient(line: str) -> str | None:
     if not s or s.endswith(":") or re.match(r"^for the\b", s, re.I):
         return None
     s = _PAREN.sub(" ", s)
+    s = re.sub(r"[()\[\]]", " ", s)  # unbalanced leftovers
     s = re.sub(r"^(?:juice|zest)\s+of\s+", "", s, flags=re.I)
+    s = _WORD_RE.sub(" ", s)  # "1 large bunch green onions": drop adjectives first so quantity + unit are adjacent
     for _ in range(2):  # "1 (14 oz) can tomatoes" -> quantity, then unit, then maybe another quantity
         s = _QTY_RE.sub("", s, count=1)
         s = _UNIT_RE.sub("", s, count=1)
@@ -118,9 +143,15 @@ def clean_ingredient(line: str) -> str | None:
     s = re.sub(r"\s+", " ", s)
     s = re.sub(r"^[\s,.\-–:]+", "", s)
     s = re.sub(r"^of\s+", "", s, flags=re.I)
+    s = re.sub(r"^(?:or|and)\s+", "", s, flags=re.I)  # left over from "fresh or canned pineapple"
     s = s.split(",")[0]
-    s = re.split(r"\s+(?:or|/)\s+", s, maxsplit=1, flags=re.I)[0]  # "butter or margarine" -> first choice
+    s = re.split(r"\s+\+\s+|\s*/\s*", s, maxsplit=1)[0]  # "2 eggs + 1 tbsp water", "green onion/scallions"
+    s = re.split(r"\s+or\s+", s, maxsplit=1, flags=re.I)[0]  # "butter or margarine" -> first choice
+    s = re.sub(r"^(?:or|and)\s+", "", s, flags=re.I)
     s = s.strip(" .-–:")
+    s = re.sub(r"\b(garlic)\s+cloves?\b", r"\1", s, flags=re.I)  # "garlic cloves" -> Garlic
+    if re.fullmatch(r"(?:ground\s+)?(?:black\s+)?pepper(?:corns)?", s, re.I):
+        s = "black pepper"  # "freshly ground black pepper", "ground pepper" -> Black Pepper
     if not re.search(r"[A-Za-z]", s) or len(s) > 120:
         return None
     return _title_case(s)
@@ -137,9 +168,31 @@ def _sing(name: str) -> str:
     return s
 
 
+# A different product that merely contains the same word: "Rice" is not "Rice Vinegar", "Milk" is not "Milk Chocolate".
+_DIFFERENT = {"powder", "vinegar", "sauce", "paste", "broth", "stock", "juice", "extract", "flour", "flakes", "seed",
+              "seeds", "syrup", "dressing", "milk", "cream", "oil", "butter", "chocolate", "bar", "mix"}
+
+
+def _tokens(name: str) -> set[str]:
+    return {_sing(t) for t in re.findall(r"[a-z]+", name.lower())}
+
+
 def have_item(name: str, owned: set[str]) -> bool:
-    """True if a generic ingredient is already in `owned` (singular-normalized names): strict equality."""
-    return _sing(name) in owned
+    """True if a generic ingredient is already owned: whole-word containment in both directions
+    ("Garlic Cloves" <-> "Garlic"), unless the extra words make it a different product ("Rice" vs "Rice Vinegar")."""
+    n = _tokens(name)
+    if not n:
+        return False
+    for c in owned:
+        ct = _tokens(c)
+        if not ct:
+            continue
+        if n == ct:
+            return True
+        small, big = (n, ct) if len(n) < len(ct) else (ct, n)
+        if small < big and not ((big - small) & _DIFFERENT):
+            return True
+    return False
 
 
 def singular_set(names: Any) -> set[str]:
@@ -164,6 +217,12 @@ class ParsedRecipe:
     lines: list[str]
     step_count: int
     ingredients: list[str] = field(default_factory=list)  # cleaned generic names (<= 25)
+    outline: list[str] = field(default_factory=list)  # first ~10 words of each source step (never the full text)
+    minutes_src: int | None = None  # as published (None when the page gives none; `minutes` then defaults to 30)
+    servings_src: int | None = None
+
+
+_ROUNDUP = re.compile(r"^\s*\d+\s|\b(?:recipes|ideas|roundup|collection)\s*$|\b\d+\s+(?:best|easy|healthy|quick)\b", re.I)
 
 
 def _nodes(obj: Any) -> Iterator[dict[str, Any]]:
@@ -172,7 +231,7 @@ def _nodes(obj: Any) -> Iterator[dict[str, Any]]:
             yield from _nodes(x)
     elif isinstance(obj, dict):
         yield obj
-        for key in ("@graph", "mainEntity", "itemListElement"):
+        for key in ("@graph", "mainEntity"):  # not itemListElement: list/carousel pages hold *other* pages' recipes
             if key in obj:
                 yield from _nodes(obj[key])
 
@@ -238,6 +297,28 @@ def count_steps(value: Any) -> int:
     return 0
 
 
+def extract_outline(value: Any, words: int = 10, limit: int = 6) -> list[str]:
+    """First ~10 words of each method step: a compact outline for the step writer, never the full instruction text."""
+    texts: list[str] = []
+
+    def walk(v: Any) -> None:
+        if isinstance(v, str):
+            texts.extend(p for p in re.split(r"\n+", v) if p.strip())
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+        elif isinstance(v, dict):
+            if "itemListElement" in v:
+                walk(v["itemListElement"])
+            else:
+                t = v.get("text") or v.get("name")
+                if isinstance(t, str) and t.strip():
+                    texts.append(t)
+
+    walk(value)
+    return [" ".join(html_lib.unescape(t).split()[:words]) for t in texts[:limit]]
+
+
 def _publisher_name(node: dict[str, Any], all_nodes: list[dict[str, Any]]) -> str | None:
     pub = node.get("publisher")
     if isinstance(pub, dict) and isinstance(pub.get("name"), str):
@@ -277,10 +358,14 @@ def parse_recipe_html(page: str, url: str) -> ParsedRecipe | None:
         if not _is_type(node, "Recipe"):
             continue
         raw_lines = node.get("recipeIngredient") or node.get("ingredients") or []
+        if not isinstance(raw_lines, list):  # a bare string would be iterated character by character
+            continue
         lines = [html_lib.unescape(" ".join(str(x).split())) for x in raw_lines if isinstance(x, str) and x.strip()]
         name = node.get("name")
-        if not lines or not isinstance(name, str) or not name.strip():
+        if len(lines) < 3 or not isinstance(name, str) or not name.strip():
             continue
+        if _ROUNDUP.search(name) or count_steps(node.get("recipeInstructions")) < 2:
+            continue  # collection / roundup pages ("84 dairy-free recipes"), not a single cookable recipe
         host = urlparse(url).hostname or ""
         og = _OG_SITE.search(page) or _OG_SITE2.search(page)
         site = _publisher_name(node, all_nodes) or (og.group(1) if og else None) or pretty_host(host)
@@ -304,6 +389,9 @@ def parse_recipe_html(page: str, url: str) -> ParsedRecipe | None:
             lines=[ln[:200] for ln in lines][:40],
             step_count=count_steps(node.get("recipeInstructions")),
             ingredients=generic[:25],
+            outline=extract_outline(node.get("recipeInstructions")),
+            minutes_src=max(1, min(1440, total)) if total else None,
+            servings_src=max(1, min(50, parse_yield(node.get("recipeYield")) or 0)) if parse_yield(node.get("recipeYield")) else None,
         )
     return None
 
@@ -314,7 +402,14 @@ def parse_recipe_html(page: str, url: str) -> ParsedRecipe | None:
 class RecipeService:
     """Tavily search + safe fetch for one run. `enabled` is False without TAVILY_API_KEY (the model writes the meal)."""
 
-    def __init__(self, settings: Settings, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        steps_agent_factory: Any = None,
+    ) -> None:
+        self.steps_factory = steps_agent_factory or default_steps_agent_factory(settings)
         self._key = settings.tavily_api_key
         self._search_url = settings.tavily_url
         self._allowed = [d.lower() for d in settings.recipe_domains]
@@ -347,64 +442,142 @@ class RecipeService:
             return []
         urls: list[str] = []
         for r in results:
-            u = r.get("url") if isinstance(r, dict) else None
-            if isinstance(u, str) and url_allowed(u, self._allowed) and u not in urls:
+            u = canonical_url(r.get("url")) if isinstance(r, dict) else None
+            if u and url_allowed(u, self._allowed) and not _LISTING.search(u) and u not in urls:
                 urls.append(u)
         return urls
 
-    async def fetch_html(self, url: str) -> str | None:
-        """GET with manual redirects (each hop re-checked against the allowlist), size cap and timeout."""
+    async def fetch_raw(
+        self, url: str, *, max_bytes: int = MAX_BYTES, html_only: bool = True, accept: str = "text/html"
+    ) -> tuple[bytes | None, str, str]:
+        """GET with manual redirects (each hop re-checked against the allowlist), size cap and timeout.
+        Returns (body, "", encoding) or (None, reason, "") where reason is e.g. "http 403", "oversize"."""
 
-        async def go() -> str | None:
+        async def go() -> tuple[bytes | None, str, str]:
             current = url
             for _ in range(MAX_REDIRECTS + 1):
                 if not url_allowed(current, self._allowed):
                     log.warning("blocked fetch of a non-allowlisted url")
-                    return None
-                async with self._http.stream("GET", current, headers={"User-Agent": UA, "Accept": "text/html"},
+                    return None, "not allowlisted", ""
+                async with self._http.stream("GET", current, headers={"User-Agent": UA, "Accept": accept},
                                              timeout=FETCH_TIMEOUT_S) as resp:
                     if resp.status_code in (301, 302, 303, 307, 308):
                         loc = resp.headers.get("location")
                         if not loc:
-                            return None
+                            return None, "redirect without location", ""
                         current = urljoin(current, loc)
                         continue
                     if resp.status_code != 200:
-                        return None
-                    if "html" not in resp.headers.get("content-type", "html").lower():
-                        return None
+                        return None, f"http {resp.status_code}", ""
+                    if html_only and "html" not in resp.headers.get("content-type", "html").lower():
+                        return None, "not html", ""
                     buf = bytearray()
                     async for chunk in resp.aiter_bytes():
                         buf.extend(chunk)
-                        if len(buf) > MAX_BYTES:
+                        if len(buf) > max_bytes:
                             log.warning("page over the size cap")
-                            return None
-                    return buf.decode(resp.encoding or "utf-8", errors="replace")
-            return None  # too many redirects
+                            return None, "oversize", ""
+                    return bytes(buf), "", resp.encoding or "utf-8"
+            return None, "too many redirects", ""
 
         try:
             return await asyncio.wait_for(go(), FETCH_DEADLINE_S)
         except Exception as e:
             log.warning("fetch failed: %s", type(e).__name__)
-            return None
+            return None, f"fetch failed ({type(e).__name__})", ""
 
-    async def load(self, url: str) -> ParsedRecipe | None:
-        page = await self.fetch_html(url)
+    async def fetch_html_ex(self, url: str) -> tuple[str | None, str]:
+        """Page HTML as text, or (None, reason)."""
+        body, reason, enc = await self.fetch_raw(url)
+        return (body.decode(enc, errors="replace"), "") if body is not None else (None, reason)
+
+    async def fetch_html(self, url: str) -> str | None:
+        return (await self.fetch_html_ex(url))[0]
+
+    async def load_ex(self, url: str) -> tuple[ParsedRecipe | None, str]:
+        page, reason = await self.fetch_html_ex(url)
         if not page:
-            return None
+            return None, reason
         try:
-            return parse_recipe_html(page, url)
+            r = parse_recipe_html(page, url)
         except Exception:
             log.exception("recipe parse crashed")
-            return None
+            return None, "parse error"
+        return (r, "") if r else (None, "no JSON-LD recipe")
 
-    async def candidates(self, idea: str, must_use: list[str], avoid: list[str], skip: set[str]) -> list[ParsedRecipe]:
-        """Up to N parsed recipes for an idea, fetched in parallel, in search order."""
-        query = f"{idea} recipe" + (f" with {', '.join(must_use[:3])}" if must_use else "")
+    async def load(self, url: str) -> ParsedRecipe | None:
+        return (await self.load_ex(url))[0]
+
+    async def candidates(
+        self, query: str, avoid: list[str], skip: set[str]
+    ) -> tuple[list[ParsedRecipe], list[str]]:
+        """Up to N parsed recipes for a search query, fetched in parallel, in search order, plus the rejection reasons
+        ("<url>: http 403") of the ones that could not be used."""
         urls = [u for u in await self.search(query[:300]) if u not in skip][: self._n]
-        loaded = await asyncio.gather(*(self.load(u) for u in urls), return_exceptions=True)
-        out = [r for r in loaded if isinstance(r, ParsedRecipe)]
+        loaded = await asyncio.gather(*(self.load_ex(u) for u in urls), return_exceptions=True)
+        out: list[ParsedRecipe] = []
+        rejects: list[str] = []
         bad = {a.strip().lower() for a in avoid if a.strip()}
-        if not bad:
-            return out
-        return [r for r in out if not any(b in g.lower() for g in r.ingredients for b in bad)]
+        for u, res in zip(urls, loaded):
+            if isinstance(res, BaseException):
+                rejects.append(f"{u}: error ({type(res).__name__})")
+            elif res[0] is None:
+                rejects.append(f"{u}: {res[1]}")
+            elif bad and any(b in g.lower() for g in res[0].ingredients for b in bad):
+                rejects.append(f"{u}: has an avoided ingredient")
+            else:
+                out.append(res[0])
+        return out, rejects
+
+
+# ─── query helpers & step writer ─────────────────────────────────────────────
+
+_ALLERGEN_TERMS = {
+    "milk": "dairy-free", "eggs": "egg-free", "fish": "no fish", "shellfish": "no shellfish", "tree_nuts": "nut-free",
+    "peanuts": "peanut-free", "wheat": "no wheat", "soy": "soy-free", "sesame": "no sesame", "gluten": "gluten-free",
+}
+_DIET_TERMS = {"vegetarian": "vegetarian", "vegan": "vegan", "pescatarian": "pescatarian", "keto": "keto",
+               "halal": "halal", "kosher": "kosher", "low_sodium": "low sodium", "dairy_free": "dairy-free",
+               "gluten_free": "gluten-free"}
+
+
+def exclusion_terms(household: dict[str, Any] | None) -> list[str]:
+    """Search words that steer Tavily toward recipes this household can eat ("dairy-free", "vegetarian")."""
+    terms: list[str] = []
+    for m in (household or {}).get("members", []):
+        for a in m.get("allergens", []):
+            terms.append(_ALLERGEN_TERMS.get(a, f"no {a}"))
+        for d in m.get("diets", []):
+            terms.append(_DIET_TERMS.get(d, d))
+    return list(dict.fromkeys(terms))[:6]
+
+
+STEPS_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "steps.md"
+STEP_WORDS = 15
+
+
+def default_steps_agent_factory(settings: Settings) -> Any:
+    def make() -> Any:
+        from strands import Agent
+
+        from .models import build_model
+
+        return Agent(model=build_model(settings.price_provider, settings),
+                     system_prompt=STEPS_PROMPT_PATH.read_text(encoding="utf-8"), tools=None, callback_handler=None)
+
+    return make
+
+
+async def write_steps(factory: Any, recipe: ParsedRecipe, ingredients: list[str]) -> list[str] | None:
+    """2-3 short steps in the model's OWN words from the ingredient names and a compact outline (the first ~10 words of
+    each source step). Returns None on any failure so the caller falls back to generic steps."""
+    prompt = json.dumps({"title": recipe.title, "ingredients": ingredients[:12], "outline": recipe.outline[:6]})
+    try:
+        result = await factory().invoke_async(prompt)
+        data = extract_json(str(result))
+        steps = [" ".join(str(s).split()[:STEP_WORDS]) for s in data.get("steps", []) if str(s).strip()]
+    except Exception as e:
+        log.info("step writer failed: %s", type(e).__name__)
+        return None
+    steps = [s for s in steps if s][:3]
+    return steps if steps else None

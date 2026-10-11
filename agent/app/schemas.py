@@ -301,6 +301,51 @@ class PricePairs(BaseModel):
     prices: list[tuple[Annotated[int, Field(ge=0, le=10_000_000)], Annotated[int, Field(ge=0, le=10_000_000)]]]
 
 
+# ─── Recipe index (spec §12) ─────────────────────────────────────────────────
+
+HttpsUrl = Annotated[str, StringConstraints(max_length=2000, pattern=r"^https://")]
+
+
+class IndexedRecipe(NoNul):
+    """One crawled recipe, as POSTed to /api/internal/recipes. Lines and metadata only: never the site's method text."""
+
+    url: HttpsUrl
+    site: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    imageUrl: HttpsUrl | None
+    minutes: int | None = Field(ge=1, le=1440)
+    servings: int | None = Field(ge=1, le=50)
+    ingredientLines: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=40
+    )
+    ingredients: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]] = Field(
+        min_length=1, max_length=40
+    )
+
+
+class RecipeIngestBody(NoNul):
+    recipes: list[IndexedRecipe] = Field(min_length=1, max_length=100)
+
+
+class RecipeSearchBody(NoNul):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    mustUse: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]] = Field(
+        default_factory=list, max_length=10
+    )
+    limit: int = Field(default=6, ge=1, le=10)
+
+
+class SearchedRecipe(IndexedRecipe):
+    id: UUID
+    distance: float
+    uses: list[str]
+
+
+class RecipeSearchResponse(BaseModel):
+    recipes: list[SearchedRecipe]
+    available: bool
+
+
 # ─── Per-run runtime types (no module-level mutable state) ───────────────────
 
 

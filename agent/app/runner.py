@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,7 +20,7 @@ from .hooks import Budget, StepReporter
 from .models import build_model, model_id_for
 from .pricing import PriceService
 from .recipes import RecipeService
-from .schemas import RunContext, RunState
+from .schemas import RecipeSearchResponse, RunContext, RunState
 from .server_client import EventSink, ServerClient
 from .tools import build_tools
 
@@ -33,6 +34,28 @@ MSG_BUDGET = "The planner needed too many steps. Please try a simpler request."
 MSG_NO_PLAN = "The planner didn't finish a plan. Please try again."
 MSG_AUTH = "I couldn't access your household data. Please try again."
 MSG_CANCELLED = "Planning was interrupted. Please try again."
+
+
+_INDEX_PROBE: dict[str, float | bool] = {}  # service-level cache: {"at": monotonic seconds, "ok": bool}
+INDEX_PROBE_TTL_S = 30.0
+
+
+async def probe_index(client: ServerClient, group_id: str) -> bool:
+    """Is the server's recipe index usable right now? One tiny search per 30 s, shared by all runs, so a missing or
+    empty index costs the planner nothing (find_recipe is then only offered when Tavily is configured)."""
+    now = time.monotonic()
+    if _INDEX_PROBE and now - float(_INDEX_PROBE["at"]) < INDEX_PROBE_TTL_S:
+        return bool(_INDEX_PROBE["ok"])
+    ok = False
+    try:
+        res = await client.post("recipe search", f"/groups/{group_id}/agent/recipes/search", {"query": "dinner", "limit": 1})
+        if res.ok:
+            parsed = RecipeSearchResponse.model_validate(res.data)
+            ok = parsed.available and True
+    except Exception as e:
+        log.info("recipe index probe failed: %s", type(e).__name__)
+    _INDEX_PROBE.update(at=now, ok=ok)
+    return ok
 
 
 def load_planner_prompt(recipes_enabled: bool) -> str:
@@ -72,6 +95,7 @@ async def run(
     price_cache: Any = None,
     retry_delay_s: float = 0.2,
     recipe_transport: httpx.AsyncBaseTransport | None = None,
+    recipe_steps_factory: Any = None,
 ) -> None:
     """Posts exactly one of proposed/failed (unless the server closed the run). Only re-raises cancellation."""
     settings = settings or get_settings()
@@ -80,7 +104,7 @@ async def run(
     sink = EventSink(client, ctx.run_id, step_timeout=settings.step_timeout_s,
                      terminal_timeout=settings.terminal_timeout_s)
     pricer = PriceService(ctx, state, settings, sink, agent_factory=price_agent_factory, cache=price_cache)
-    recipes = RecipeService(settings, transport=recipe_transport)
+    recipes = RecipeService(settings, transport=recipe_transport, steps_agent_factory=recipe_steps_factory)
     agent: Agent | None = None
 
     def meta() -> dict[str, Any]:
@@ -97,11 +121,12 @@ async def run(
 
     client.on_fatal = on_fatal
     try:
-        tools = build_tools(ctx, client, sink, state, settings, pricer=pricer, recipes=recipes)
+        index_ok = await probe_index(client, ctx.group_id)
+        tools = build_tools(ctx, client, sink, state, settings, pricer=pricer, recipes=recipes, recipe_index=index_ok)
         agent = Agent(
             model=model if model is not None else build_model(settings.agent_provider, settings),
             tools=tools,
-            system_prompt=load_planner_prompt(recipes.enabled),
+            system_prompt=load_planner_prompt(recipes.enabled or index_ok),
             callback_handler=None,
             hooks=[Budget(state, settings.agent_max_tool_calls), StepReporter(sink, state)],
         )

@@ -48,9 +48,31 @@ TAVILY_API_KEY=tvly-...        # https://app.tavily.com
 ```
 
 Without a key, or when Tavily fails or no safe recipe is found, the model writes the meal itself (`source: null`, shown as
-AI-created). Pages are fetched only over https from an allowlist of recipe sites (`RECIPE_DOMAINS` in `app/config.py`: allrecipes.com,
-seriouseats.com, bbcgoodfood.com, simplyrecipes.com, budgetbytes.com, foodnetwork.com, bonappetit.com, epicurious.com, eatingwell.com,
-delish.com, tasteofhome.com, cookieandkate.com, minimalistbaker.com, loveandlemons.com), re-checked after every redirect (max 3),
+AI-created). Pages are fetched only over https from an allowlist of recipe sites (`recipe_domains` in `app/config.py`, probed live: bbcgoodfood.com, bonappetit.com,
+epicurious.com, delish.com, tasteofhome.com, minimalistbaker.com, skinnytaste.com, recipetineats.com, pinchofyum.com,
+onceuponachef.com, natashaskitchen.com, jocooks.com, cafedelites.com, spendwithpennies.com, wellplated.com,
+ambitiouskitchen.com; dropped: foodnetwork/budgetbytes/cookieandkate = 403 to our fetcher, allrecipes/seriouseats/
+simplyrecipes/eatingwell = Tavily returns no results for them, loveandlemons = no JSON-LD), re-checked after every redirect (max 3),
 never IP literals, 5 s timeout, 2 MB cap. Only the title, image, time, yield and ingredient lines are used; the method text is never copied.
+
+### Own recipe index (spec section 12)
+
+`find_recipe` asks the server's recipe index first (`POST /groups/:gid/agent/recipes/search`, Akamai embeddings) and falls
+back to Tavily when the index is unavailable, empty, errors, or nothing in it passes the safety check. The tool is offered
+when the index is available or `TAVILY_API_KEY` is set. The index is filled offline by the crawler:
+
+```bash
+cd agent
+.venv/bin/python3 scripts/build_recipe_index.py --dry-run --per-domain 5      # crawl + parse, send nothing
+.venv/bin/python3 scripts/build_recipe_index.py --per-domain 300 --resume     # real crawl, POSTs batches of 50
+#   flags: --per-domain N  --max-total N  --domains a.com b.com  --dry-run  --resume  --server URL  --seed N
+```
+
+It reads each site's `robots.txt` (Disallow and Crawl-delay; a domain that disallows recipe paths or blocks us is skipped),
+walks the sitemaps, fetches at most 1 request/s per host (hosts run concurrently), parses the schema.org Recipe JSON-LD with
+the same parser and ingredient cleaner as `find_recipe`, and posts `IndexedRecipe` batches to `{SERVER}/api/internal/recipes`
+with `X-Agent-Secret` (`AGENT_SHARED_SECRET`). Only ingredient lines and metadata are stored or sent, never the instructions.
+Progress is kept in `agent/.index-state.json` (gitignored) so `--resume` skips finished URLs. The summary prints, per
+domain, tried / parsed / no-JSON-LD / blocked (403/429).
 
 Endpoints: `POST /runs` (header `X-Agent-Secret`, answers 202) and `GET /health`.
