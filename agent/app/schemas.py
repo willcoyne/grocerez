@@ -5,15 +5,52 @@ Keep field names, bounds and enums identical to the zod file. The parity test
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Callable, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 Weekday = Literal["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 WEEKDAYS: tuple[str, ...] = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+SEQ_MAX = 2_147_483_647  # int4, same cap as the zod contract
+
+
+def contains_nul(obj: Any) -> bool:
+    """True if any string anywhere in a JSON-like structure holds a NUL (Postgres text can't store it)."""
+    if isinstance(obj, str):
+        return "\x00" in obj
+    if isinstance(obj, dict):
+        return any(contains_nul(k) or contains_nul(v) for k, v in obj.items())
+    if isinstance(obj, (list, tuple)):
+        return any(contains_nul(v) for v in obj)
+    return False
+
+
+def strip_nul(obj: Any) -> Any:
+    """Recursively drop NULs from every string (applied to model output before it is validated/sent)."""
+    if isinstance(obj, str):
+        return obj.replace("\x00", "")
+    if isinstance(obj, dict):
+        return {strip_nul(k): strip_nul(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [strip_nul(v) for v in obj]
+    return obj
+
+
+class NoNul(BaseModel):
+    """Mixin: reject NUL characters in any field, like zod's `text()` in the contract."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_nul(cls, data: Any) -> Any:
+        if contains_nul(data):
+            raise ValueError("must not contain NUL characters")
+        return data
+
 
 # zod: z.string().trim().min(1).max(n)
 S120 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
@@ -110,7 +147,7 @@ class AgentStepPayload(BaseModel):
 
 
 class AgentStep(AgentStepPayload):
-    seq: int = Field(ge=0)
+    seq: int = Field(ge=0, le=SEQ_MAX)
     at: str
 
 
@@ -149,6 +186,8 @@ class AgentHousehold(BaseModel):
 class SafetyMealIn(BaseModel):
     title: S120
     ingredients: list[S120] = Field(min_length=1, max_length=25)
+    # Apply also checks the title and steps for allergen/diet keywords, so the agent sends them too.
+    steps: list[S500] = Field(default_factory=list, max_length=6)
 
 
 class SafetyCheckBody(BaseModel):
@@ -182,12 +221,19 @@ class AgentRunRequest(BaseModel):
     budgetCents: int | None
     zipCode: str | None
     apiBaseUrl: str
-    runToken: str
+    runToken: str = Field(repr=False)
+
+    @field_validator("apiBaseUrl")
+    @classmethod
+    def _http_url(cls, v: str) -> str:
+        if not re.match(r"^https?://[^\s/]+", v):
+            raise ValueError("apiBaseUrl must be an http(s) URL")
+        return v
 
 
-class StepEvent(BaseModel):
+class StepEvent(NoNul):
     runId: UUID
-    seq: int = Field(ge=0)
+    seq: int = Field(ge=0, le=SEQ_MAX)
     type: Literal["step"]
     payload: AgentStepPayload
 
@@ -197,9 +243,9 @@ class ProposedPayload(BaseModel):
     meta: AgentRunMeta
 
 
-class ProposedEvent(BaseModel):
+class ProposedEvent(NoNul):
     runId: UUID
-    seq: int = Field(ge=0)
+    seq: int = Field(ge=0, le=SEQ_MAX)
     type: Literal["proposed"]
     payload: ProposedPayload
 
@@ -209,9 +255,9 @@ class FailedPayload(BaseModel):
     meta: AgentRunMeta | None = None
 
 
-class FailedEvent(BaseModel):
+class FailedEvent(NoNul):
     runId: UUID
-    seq: int = Field(ge=0)
+    seq: int = Field(ge=0, le=SEQ_MAX)
     type: Literal["failed"]
     payload: FailedPayload
 
@@ -261,9 +307,10 @@ class RunState:
     done_details: dict[str, str] = field(default_factory=dict)
     failed_tools: set[str] = field(default_factory=set)
     safety_by_title: dict[str, SafetyMealOut] = field(default_factory=dict)
-    drafts: dict[str, list[str]] = field(default_factory=dict)  # title -> ingredients last safety-checked
-    draft_meals: dict[str, dict[str, Any]] = field(default_factory=dict)  # full meals of the LAST safety check
-    priced: dict[str, tuple[int, int]] = field(default_factory=dict)
+    draft_meals: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalized meals of the last check
+    to_buy_ok: bool = False  # the "To buy" pseudo-meal passed the last safety check
+    cabinet_names: set[str] = field(default_factory=set)  # normalized cabinet item names
+    fatal_status: int | None = None  # 401/403 from the server: stop the run
     proposal_failures: int = 0
     missing_nudged: bool = False
     tool_s: float = 0.0  # summed tool wall time (parallel tools overlap, so this is an upper bound)

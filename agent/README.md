@@ -36,6 +36,6 @@ Docker: `docker build -t grocerez-agent agent/` and run with `--env-file agent/.
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | model `claude-sonnet-5-5` | Anthropic fallback |
 | `AGENT_SHARED_SECRET` | none | Must equal the server's; checked on `POST /runs`, sent on `/internal/agent-events` |
 | `AGENT_MAX_TOOL_CALLS` | `25` | Budget hook cap |
-| `AGENT_RUN_TIMEOUT_S` | `90` | Wall-clock cap per run |
+| `AGENT_RUN_TIMEOUT_S` | `95` | Wall-clock cap per run (terminal event lands by ~108 s; server gives up at 120 s) |
 
 Endpoints: `POST /runs` (header `X-Agent-Secret`, answers 202) and `GET /health`.

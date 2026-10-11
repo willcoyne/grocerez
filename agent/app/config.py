@@ -30,7 +30,11 @@ class Settings(BaseSettings):
 
     agent_shared_secret: str = Field(default="", repr=False)
     agent_max_tool_calls: int = 25
-    agent_run_timeout_s: float = 105.0  # shared Akamai endpoint runs ~85 s; server gives up at 120 s
+    # Wall clock 95 s + step flush 3 s + terminal post <= 10.2 s keeps the terminal event under ~108 s (server: 120 s).
+    agent_run_timeout_s: float = 95.0
+    step_timeout_s: float = 2.5
+    terminal_timeout_s: float = 5.0
+    max_concurrent_runs: int = 4
     http_timeout_s: float = 10.0
     max_tokens: int = 4000
     temperature: float = 0.3

@@ -1,4 +1,8 @@
-"""run(ctx): build the planner agent, execute it under a wall clock, and guarantee exactly one terminal event."""
+"""run(ctx): build the planner agent, execute it under a wall clock, and guarantee exactly one terminal event.
+
+Time budget (the server gives up on a run at 120 s): wall clock 95 s + flushing steps <= 3 s + terminal post
+(5 s timeout, one retry) <= 10.2 s, so the failed/proposed event lands before ~108 s.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +16,7 @@ from strands import Agent
 from .config import Settings, get_settings
 from .hooks import Budget, StepReporter
 from .models import build_model, model_id_for
+from .pricing import PriceService
 from .schemas import RunContext, RunState
 from .server_client import EventSink, ServerClient
 from .tools import build_tools
@@ -24,11 +29,13 @@ MSG_GENERIC = "Something went wrong while planning. Please try again."
 MSG_TIMEOUT = "Planning took too long. Please try again."
 MSG_BUDGET = "The planner needed too many steps. Please try a simpler request."
 MSG_NO_PLAN = "The planner didn't finish a plan. Please try again."
+MSG_AUTH = "I couldn't access your household data. Please try again."
+MSG_CANCELLED = "Planning was interrupted. Please try again."
 
 
 def build_user_message(ctx: RunContext) -> str:
     """The user's prompt is data. Strip angle brackets so it can't close our wrapper tag."""
-    safe = ctx.prompt.replace("<", " ").replace(">", " ").strip()[:500]
+    safe = ctx.prompt.replace("<", " ").replace(">", " ").replace("\x00", "").strip()[:500]
     budget = f"${ctx.budget_cents / 100:.0f}" if ctx.budget_cents else "none given"
     return f"<user_request>\n{safe}\n</user_request>\nBudget: {budget}.\nPrice ZIP available: {'yes' if ctx.zip_code else 'no'}."
 
@@ -54,11 +61,13 @@ async def run(
     price_cache: Any = None,
     retry_delay_s: float = 0.2,
 ) -> None:
-    """Never raises. Exactly one of proposed/failed is posted (unless the server closed the run)."""
+    """Posts exactly one of proposed/failed (unless the server closed the run). Only re-raises cancellation."""
     settings = settings or get_settings()
     state = RunState()
     client = ServerClient(ctx, settings, transport=transport, retry_delay_s=retry_delay_s)
-    sink = EventSink(client, ctx.run_id)
+    sink = EventSink(client, ctx.run_id, step_timeout=settings.step_timeout_s,
+                     terminal_timeout=settings.terminal_timeout_s)
+    pricer = PriceService(ctx, state, settings, sink, agent_factory=price_agent_factory, cache=price_cache)
     agent: Agent | None = None
 
     def meta() -> dict[str, Any]:
@@ -68,9 +77,14 @@ async def run(
                 "tokensIn": None if tin is None else tin + state.extra_tokens_in,
                 "tokensOut": None if tout is None else tout + state.extra_tokens_out, "ms": state.ms()}
 
+    def on_fatal(status: int) -> None:
+        state.fatal_status = status
+        if agent is not None:
+            agent.cancel()
+
+    client.on_fatal = on_fatal
     try:
-        tools = build_tools(ctx, client, sink, state, settings,
-                            price_agent_factory=price_agent_factory, price_cache=price_cache)
+        tools = build_tools(ctx, client, sink, state, settings, pricer=pricer)
         agent = Agent(
             model=model if model is not None else build_model(settings.agent_provider, settings),
             tools=tools,
@@ -83,17 +97,27 @@ async def run(
         sink.on_stop = agent.cancel
         await asyncio.wait_for(agent.invoke_async(build_user_message(ctx)), timeout=settings.agent_run_timeout_s)
         if not sink.terminal_sent and not sink.closed:
-            await sink.failed(MSG_BUDGET if state.budget_exceeded else MSG_NO_PLAN, meta())
+            msg = (MSG_AUTH if state.fatal_status else MSG_BUDGET if state.budget_exceeded else MSG_NO_PLAN)
+            await sink.failed(msg, meta())
     except asyncio.TimeoutError:
         log.warning("run %s timed out after %ss", ctx.run_id, settings.agent_run_timeout_s)
         if agent is not None:
             agent.cancel()
         await sink.failed(MSG_TIMEOUT, meta())
+    except asyncio.CancelledError:
+        # The service is shutting down or the task was cancelled: best-effort terminal event, then re-raise.
+        try:
+            await asyncio.wait_for(asyncio.shield(sink.failed(MSG_CANCELLED, meta())), timeout=5)
+        except BaseException:
+            log.warning("run %s: could not post failed after cancellation", ctx.run_id)
+        raise
     except Exception:
         log.exception("run %s crashed", ctx.run_id)  # details stay in logs, never in the event
-        await sink.failed(MSG_GENERIC, meta())
+        await sink.failed(MSG_AUTH if state.fatal_status else MSG_GENERIC, meta())
     finally:
+        pricer.cancel()
         try:
+            await sink.flush(1.0)  # let queued steps finish before the HTTP client closes
             await client.aclose()
         except Exception:
             log.exception("closing client failed")
