@@ -1,18 +1,24 @@
 /* eslint-disable react/no-unknown-property -- R3F JSX props (args, attach, intensity, ...) are valid three.js props */
 /**
  * Web canvas (Metro picks PantryCanvas.native.tsx on iOS/Android). Plain `@react-three/fiber` Canvas filling its parent.
- * ACES tone mapping + sRGB output, PCF shadows, dpr capped at 2, warm wall clear colour.
+ * sRGB output, dpr capped at 2; clear colour, fog, tone mapping, shadows and full-screen effects follow the active
+ * theme (cozy: ACES, PCF shadows, warm wall clear colour) through ThemeCanvasSetup.
  */
 import { Canvas } from "@react-three/fiber";
 import { useCallback, type WheelEvent } from "react";
 import { StyleSheet, View } from "react-native";
 import * as THREE from "three";
 
-import { CAMERA_FOV, MAX_DPR, WALL_COLOR, type PantryCanvasProps } from "./sceneConfig";
+import { themeCanvasProps } from "../../theme/canvas";
+import { useSceneTheme } from "../../theme/ThemeProvider";
+import { CAMERA_FOV, MAX_DPR, type PantryCanvasProps } from "./sceneConfig";
+import { ThemeCanvasSetup } from "./ThemeCanvasSetup";
 
 export type { PantryCanvasProps } from "./sceneConfig";
 
 export function PantryCanvas({ children, active = true, onWheel, testID }: PantryCanvasProps) {
+  const theme = useSceneTheme();
+  const cp = themeCanvasProps(theme);
   const handleWheel = useCallback(
     (e: WheelEvent<HTMLDivElement>) => {
       if (!onWheel) return;
@@ -23,24 +29,23 @@ export function PantryCanvas({ children, active = true, onWheel, testID }: Pantr
     [onWheel],
   );
   return (
-    <View style={styles.fill} testID={testID}>
+    <View style={[styles.fill, { backgroundColor: cp.background }]} testID={testID}>
       <Canvas
         style={canvasStyle}
         dpr={[1, MAX_DPR]}
         frameloop={active ? "always" : "never"}
-        shadows={{ enabled: true, type: THREE.PCFShadowMap }}
+        shadows={cp.shadows}
         camera={{ fov: CAMERA_FOV, near: 0.05, far: 60, position: [0, 1.8, 9] }}
         gl={{ antialias: true, powerPreference: "high-performance" }}
         onCreated={({ gl }) => {
-          gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.05;
+          gl.toneMapping = cp.toneMapping;
+          gl.toneMappingExposure = cp.toneMappingExposure;
           gl.outputColorSpace = THREE.SRGBColorSpace;
           gl.localClippingEnabled = true;
         }}
         onWheel={handleWheel}
       >
-        <color attach="background" args={[WALL_COLOR]} />
-        <fog attach="fog" args={[WALL_COLOR, 14, 30]} />
+        <ThemeCanvasSetup theme={theme} />
         {children}
       </Canvas>
     </View>
@@ -49,4 +54,4 @@ export function PantryCanvas({ children, active = true, onWheel, testID }: Pantr
 
 const canvasStyle = { position: "absolute", inset: 0, touchAction: "none" } as const;
 
-const styles = StyleSheet.create({ fill: { flex: 1, overflow: "hidden", backgroundColor: WALL_COLOR } });
+const styles = StyleSheet.create({ fill: { flex: 1, overflow: "hidden" } });

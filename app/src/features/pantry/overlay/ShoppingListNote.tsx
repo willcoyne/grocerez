@@ -9,7 +9,7 @@ import type { Item } from "@contracts/items";
 import type { ShoppingListItem } from "@contracts/shoppingList";
 import { useMutationState } from "@tanstack/react-query";
 import { AlertTriangle, Check, Plus, X } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,7 +22,7 @@ import { useSocketConnected } from "@/realtime/SocketProvider";
 import { useAuth } from "@/state/AuthContext";
 import { font } from "@/theme";
 
-import { allergenLabel, pantry, softShadow } from "./palette";
+import { allergenLabel, type OverlayPalette, shadowFor, useOverlayPalette, useOverlayStyles } from "./palette";
 
 export type ShoppingListNoteProps = {
   visible: boolean;
@@ -31,17 +31,6 @@ export type ShoppingListNoteProps = {
   /** "Start shopping" (PantryScreen pushes /shopping). */
   onStartShopping: () => void;
 };
-
-/** Notepad colours, matching the 3D note (cream paper, blue rules, red margin, red pin). */
-export const NOTE_PAPER = {
-  paper: "#FFFBF2",
-  rule: "#CFDDEA",
-  margin: "#E58A7E",
-  pin: "#D64541",
-  pinShine: "#F08A80",
-  ink: pantry.ink,
-  pencil: pantry.oakInk,
-} as const;
 
 const RULE = 44; // row rhythm (also the minimum tap height)
 const MARGIN_X = 50;
@@ -79,6 +68,8 @@ export function ShoppingListNote({ visible, groupId, onClose, onStartShopping }:
 }
 
 function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteProps, "visible">) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const connected = useSocketConnected();
   // Live sync comes from the socket; while it's down, poll every 5 s while the note is open.
@@ -102,7 +93,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
   const toBuyCount = rows.length - checked.length;
 
   // Paper "lands" from the lifted 3D note: fade + settle.
-  const appear = useRef(new Animated.Value(0)).current;
+  const [appear] = useState(() => new Animated.Value(0));
   useEffect(() => {
     Animated.spring(appear, { toValue: 1, useNativeDriver: Platform.OS !== "web", friction: 8, tension: 70 }).start();
   }, [appear]);
@@ -124,7 +115,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
   if (list.isPending) {
     body = (
       <View style={styles.center} testID="list-note-loading" accessibilityRole="progressbar" accessibilityLabel="Loading the list">
-        <ActivityIndicator color={NOTE_PAPER.pencil} />
+        <ActivityIndicator color={P.oakInk} />
         <AppText variant="bodyS" style={styles.pencil}>
           Loading the list…
         </AppText>
@@ -211,7 +202,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
             style={({ pressed }) => [styles.close, pressed && styles.pressed]}
             testID="list-note-close"
           >
-            <X size={22} color={NOTE_PAPER.pencil} />
+            <X size={22} color={P.oakInk} />
           </Pressable>
         </View>
         {rows.length > 0 ? (
@@ -235,7 +226,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
               style={({ pressed }) => [styles.addRow, pressed && styles.pressed]}
               testID="list-note-add"
             >
-              <Plus size={20} color={pantry.green} strokeWidth={2.6} />
+              <Plus size={20} color={P.green} strokeWidth={2.6} />
               <AppText weight="display" style={[styles.hand, styles.addText]}>
                 Add item
               </AppText>
@@ -282,6 +273,8 @@ function NoteRow({
   onToggle: (r: ShoppingListItem) => void;
   onDelete: (r: ShoppingListItem) => void;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const name = row.item.name;
   const wanted =
     row.reason === "manual"
@@ -307,7 +300,7 @@ function NoteRow({
         testID={`list-note-check-${row.id}`}
       >
         <View style={[styles.box, row.checked && styles.boxOn]}>
-          {row.checked ? <Check size={18} color={NOTE_PAPER.paper} strokeWidth={3.2} /> : null}
+          {row.checked ? <Check size={18} color={P.notePaper} strokeWidth={3.2} /> : null}
         </View>
         <View style={styles.rowText}>
           <View style={styles.nameLine}>
@@ -339,7 +332,7 @@ function NoteRow({
                     accessibilityLabel={`Allergen warning: contains ${allergenLabel(f.allergen).toLowerCase()}, ${mine ? "you are" : `${f.displayName} is`} allergic`}
                     testID={`list-note-allergen-${row.id}-${f.userId}-${f.allergen}`}
                   >
-                    <AlertTriangle size={13} color={mine ? "#FFFFFF" : pantry.redInk} strokeWidth={2.6} />
+                    <AlertTriangle size={13} color={mine ? P.onDanger : P.redInk} strokeWidth={2.6} />
                     <AppText variant="caption" weight="bold" style={mine ? styles.badgeMineText : styles.badgeOtherText}>
                       {`${allergenLabel(f.allergen)} · ${who}`}
                     </AppText>
@@ -358,137 +351,140 @@ function NoteRow({
           style={({ pressed }) => [styles.del, pressed && styles.pressed]}
           testID={`list-note-delete-${row.id}`}
         >
-          <X size={18} color={pantry.muted} />
+          <X size={18} color={P.muted} />
         </Pressable>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: pantry.backdrop },
-  sheet: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    backgroundColor: NOTE_PAPER.paper,
-    borderRadius: 6,
-    paddingTop: 26,
-    overflow: "visible",
-    ...softShadow,
-  },
-  margin: { position: "absolute", top: 0, bottom: 0, left: MARGIN_X - 10, width: 2, backgroundColor: NOTE_PAPER.margin },
-  header: { flexDirection: "row", alignItems: "flex-start", paddingLeft: MARGIN_X, paddingRight: 8 },
-  titleWrap: { flex: 1, paddingTop: 4 },
-  title: {
-    fontFamily: font.display,
-    fontSize: 40,
-    lineHeight: 46,
-    color: NOTE_PAPER.pencil,
-    transform: [{ rotate: "-3deg" }],
-  },
-  squiggle: {
-    width: 84,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: NOTE_PAPER.pencil,
-    opacity: 0.7,
-    marginTop: 2,
-    transform: [{ rotate: "-2deg" }],
-  },
-  close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  count: { paddingLeft: MARGIN_X, paddingRight: 16, marginTop: 6 },
-  scroll: { flex: 1, marginTop: 8 },
-  scrollContent: { paddingBottom: 24 },
-  center: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center", gap: 10, paddingLeft: MARGIN_X, paddingRight: 20 },
-  hand: { fontFamily: font.display, color: NOTE_PAPER.pencil },
-  emptyText: { fontSize: 22, lineHeight: 30, transform: [{ rotate: "-1.5deg" }] },
-  pencil: { color: pantry.muted },
-  section: {
-    color: pantry.oakDark,
-    paddingLeft: MARGIN_X,
-    paddingTop: 14,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
-    letterSpacing: 1.2,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    minHeight: RULE,
-    borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
-  },
-  rowMain: { flex: 1, flexDirection: "row", alignItems: "flex-start", minHeight: RULE, paddingVertical: 6 },
-  box: {
-    width: 24,
-    height: 24,
-    marginLeft: 8,
-    marginTop: 4,
-    marginRight: 22,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: NOTE_PAPER.pencil,
-    alignItems: "center",
-    justifyContent: "center",
-    transform: [{ rotate: "-4deg" }],
-  },
-  boxOn: { backgroundColor: pantry.green, borderColor: pantry.green },
-  rowText: { flex: 1, gap: 2, paddingRight: 4 },
-  nameLine: { flexDirection: "row", alignItems: "center", gap: 8 },
-  name: { color: NOTE_PAPER.ink, flexShrink: 1 },
-  checkedText: { color: pantry.muted },
-  syncDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: pantry.muted },
-  badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  badgeMine: { backgroundColor: pantry.redInk, borderColor: pantry.redInk },
-  badgeOther: { backgroundColor: pantry.redTint, borderColor: "#F2B8B1" },
-  badgeMineText: { color: "#FFFFFF" },
-  badgeOtherText: { color: pantry.redInk },
-  del: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  addRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    minHeight: RULE + 4,
-    paddingLeft: MARGIN_X - 2,
-    borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
-  },
-  addText: { fontSize: 20, lineHeight: 26, color: pantry.green },
-  shop: {
-    minHeight: 54,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 16,
-    borderRadius: 27,
-    backgroundColor: pantry.green,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    ...softShadow,
-  },
-  shopText: { color: "#FFFFFF", fontSize: 18, lineHeight: 24 },
-  pressed: { opacity: 0.75 },
-  pin: {
-    position: "absolute",
-    top: -10,
-    alignSelf: "center",
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: NOTE_PAPER.pin,
-    ...softShadow,
-  },
-  pinShine: { position: "absolute", top: 5, left: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: NOTE_PAPER.pinShine },
-});
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+    backdrop: { backgroundColor: P.backdrop },
+    sheet: {
+      position: "absolute",
+      left: 14,
+      right: 14,
+      backgroundColor: P.notePaper,
+      borderRadius: P.r(6),
+      borderWidth: P.pixel ? P.frame : 0,
+      borderColor: P.border,
+      paddingTop: 26,
+      overflow: "visible",
+      ...shadowFor(P),
+    },
+    margin: { position: "absolute", top: 0, bottom: 0, left: MARGIN_X - 10, width: 2, backgroundColor: P.noteMargin },
+    header: { flexDirection: "row", alignItems: "flex-start", paddingLeft: MARGIN_X, paddingRight: 8 },
+    titleWrap: { flex: 1, paddingTop: 4 },
+    title: {
+      fontFamily: font.display,
+      fontSize: 40,
+      lineHeight: 46,
+      color: P.oakInk,
+      transform: [{ rotate: "-3deg" }],
+    },
+    squiggle: {
+      width: 84,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: P.oakInk,
+      opacity: 0.7,
+      marginTop: 2,
+      transform: [{ rotate: "-2deg" }],
+    },
+    close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    count: { paddingLeft: MARGIN_X, paddingRight: 16, marginTop: 6 },
+    scroll: { flex: 1, marginTop: 8 },
+    scrollContent: { paddingBottom: 24 },
+    center: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center", gap: 10, paddingLeft: MARGIN_X, paddingRight: 20 },
+    hand: { fontFamily: font.display, color: P.oakInk },
+    emptyText: { fontSize: 22, lineHeight: 30, transform: [{ rotate: "-1.5deg" }] },
+    pencil: { color: P.muted },
+    section: {
+      color: P.oakDark,
+      paddingLeft: MARGIN_X,
+      paddingTop: 14,
+      paddingBottom: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: P.noteRule,
+      letterSpacing: 1.2,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      minHeight: RULE,
+      borderBottomWidth: 1,
+      borderBottomColor: P.noteRule,
+    },
+    rowMain: { flex: 1, flexDirection: "row", alignItems: "flex-start", minHeight: RULE, paddingVertical: 6 },
+    box: {
+      width: 24,
+      height: 24,
+      marginLeft: 8,
+      marginTop: 4,
+      marginRight: 22,
+      borderRadius: 4,
+      borderWidth: 2,
+      borderColor: P.oakInk,
+      alignItems: "center",
+      justifyContent: "center",
+      transform: [{ rotate: "-4deg" }],
+    },
+    boxOn: { backgroundColor: P.green, borderColor: P.green },
+    rowText: { flex: 1, gap: 2, paddingRight: 4 },
+    nameLine: { flexDirection: "row", alignItems: "center", gap: 8 },
+    name: { color: P.ink, flexShrink: 1 },
+    checkedText: { color: P.muted },
+    syncDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: P.muted },
+    badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+    badge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: P.r(12),
+      borderWidth: 1,
+    },
+    badgeMine: { backgroundColor: P.redInk, borderColor: P.redInk },
+    badgeOther: { backgroundColor: P.redTint, borderColor: P.redBorder },
+    badgeMineText: { color: P.onDanger },
+    badgeOtherText: { color: P.redInk },
+    del: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+    addRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      minHeight: RULE + 4,
+      paddingLeft: MARGIN_X - 2,
+      borderBottomWidth: 1,
+      borderBottomColor: P.noteRule,
+    },
+    addText: { fontSize: 20, lineHeight: 26, color: P.green },
+    shop: {
+      minHeight: 54,
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 16,
+      borderRadius: P.r(27),
+      backgroundColor: P.green,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      ...shadowFor(P),
+    },
+    shopText: { color: P.onAccent, fontSize: 18, lineHeight: 24 },
+    pressed: { opacity: 0.75 },
+    pin: {
+      position: "absolute",
+      top: -10,
+      alignSelf: "center",
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: P.notePin,
+      ...shadowFor(P),
+    },
+    pinShine: { position: "absolute", top: 5, left: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: P.notePinShine },
+  });

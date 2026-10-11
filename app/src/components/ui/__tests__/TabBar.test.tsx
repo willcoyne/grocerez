@@ -2,31 +2,26 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 
 import { TabBar } from "@/components/ui";
 
-type Props = Parameters<typeof TabBar>[0];
-
-function setup(index = 0) {
-  const routes = ["index", "cabinet", "me", "group"].map((name) => ({ key: `${name}-key`, name, params: undefined }));
-  const navigation = { emit: jest.fn(() => ({ defaultPrevented: false })), navigate: jest.fn() };
-  const descriptors = Object.fromEntries(
-    routes.map((r) => [r.key, { options: r.name === "group" ? { tabBarBadge: 2 } : {} }]),
-  );
-  const props = { state: { index, routes }, navigation, descriptors } as unknown as Props;
-  return { props, navigation };
-}
-
-describe("TabBar", () => {
-  it("renders List, Pantry, Me, Household in order with the active tab selected", async () => {
-    const { props } = setup(0);
-    await render(<TabBar {...props} />);
+describe("TabBar (room stations)", () => {
+  it("renders Pantry, List, Recipes, Me, Household in order with the active tab selected and a named badge", async () => {
+    await render(<TabBar active="list" onSelect={jest.fn()} badges={{ household: 2 }} />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.props.accessibilityLabel)).toEqual(["List", "Pantry", "Me", "Household, 2 alerts"]);
-    expect(tabs[0].props.accessibilityState).toEqual({ selected: true });
+    expect(tabs.map((t) => t.props.accessibilityLabel)).toEqual(["Pantry", "List", "Recipes", "Me", "Household, 2 alerts"]);
+    expect(tabs.map((t) => t.props.accessibilityState.selected)).toEqual([false, true, false, false, false]);
+    expect(screen.getByTestId("tabbar-household-badge")).toBeTruthy();
   });
 
-  it("navigates to an inactive tab on press", async () => {
-    const { props, navigation } = setup(0);
-    await render(<TabBar {...props} />);
+  it("hides a zero badge", async () => {
+    await render(<TabBar active="pantry" onSelect={jest.fn()} badges={{ household: 0 }} />);
+    expect(screen.queryByTestId("tabbar-household-badge")).toBeNull();
+    expect(screen.getByLabelText("Household")).toBeTruthy();
+  });
+
+  it("reports the pressed station, including the active one (used to go back out of the shelves)", async () => {
+    const onSelect = jest.fn();
+    await render(<TabBar active="pantry" onSelect={onSelect} />);
+    fireEvent.press(screen.getByLabelText("Recipes"));
     fireEvent.press(screen.getByLabelText("Pantry"));
-    expect(navigation.navigate).toHaveBeenCalledWith("cabinet", undefined);
+    expect(onSelect.mock.calls).toEqual([["recipes"], ["pantry"]]);
   });
 });

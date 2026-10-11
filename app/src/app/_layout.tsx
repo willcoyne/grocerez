@@ -11,6 +11,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { makeQueryClient, setupReactQueryNative } from "@/api/queryClient";
 import { ErrorState, LoadingState, ToastProvider } from "@/components/ui";
 import { SocketProvider } from "@/realtime/SocketProvider";
+import { ThemeProvider } from "@/features/theme/ThemeProvider";
 import { ActiveGroupProvider, useActiveGroup } from "@/state/ActiveGroupContext";
 import { AuthProvider, useAuth } from "@/state/AuthContext";
 import { errorMessage } from "@/api/client";
@@ -38,9 +39,11 @@ export default function RootLayout() {
             <ActiveGroupProvider>
               <SocketProvider>
                 <ToastProvider>
-                  <StatusBar style="dark" />
-                  {/* A font failure falls back to system fonts rather than blocking the app. */}
-                  <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+                  <ThemeProvider>
+                    <StatusBar style="dark" />
+                    {/* A font failure falls back to system fonts rather than blocking the app. */}
+                    <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+                  </ThemeProvider>
                 </ToastProvider>
               </SocketProvider>
             </ActiveGroupProvider>
@@ -104,6 +107,8 @@ export function RootNavigator({ fontsReady = true }: { fontsReady?: boolean }) {
 
       <Stack.Protected guard={inApp}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* Shopping mode: full-screen 3D store aisle, only reachable with a household (app/shopping.tsx). */}
+        <Stack.Screen name="shopping" options={{ headerShown: false, gestureEnabled: true }} />
         <Stack.Screen name="scanner" options={{ presentation: "fullScreenModal", title: "Scan" }} />
         <Stack.Screen name="item-detail/[id]" options={{ presentation: "modal", title: "Item" }} />
         <Stack.Screen name="expiration-check" options={{ presentation: "modal", title: "Expiration dates" }} />

@@ -9,7 +9,7 @@ import { pressedOpacity, size } from "@/theme";
 
 import { EMPTY_FILTERS, SHELF_GROUPS, type PantryFilters } from "../types";
 import { FilterChip } from "./Chip";
-import { CALORIE_STEPS, GROUP_LABEL, NUTRI_SCORE, allergenLabel, pantry, softShadow } from "./palette";
+import { allergenLabel, CALORIE_STEPS, GROUP_LABEL, NUTRI_SCORE, type OverlayPalette, shadowFor, useOverlayPalette, useOverlayStyles } from "./palette";
 
 export type FilterSheetProps = {
   visible: boolean;
@@ -26,6 +26,8 @@ function toggle<T>(list: T[], value: T): T[] {
 
 /** Bottom sheet with Allergies / Nutrition / Shelf / Status filters. Pure UI: emits the next PantryFilters. */
 export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }: FilterSheetProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   if (!visible) return null;
   const set = (patch: Partial<PantryFilters>) => onChange({ ...filters, ...patch });
   const hasMine = myAllergens.length > 0;
@@ -49,7 +51,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
       <Animated.View
         entering={SlideInDown.springify().damping(18)}
         exiting={SlideOutDown.duration(200)}
-        style={[styles.sheet, softShadow]}
+        style={[styles.sheet, shadowFor(P)]}
         accessibilityViewIsModal>
         <View style={styles.handle} />
         <View style={styles.header}>
@@ -62,7 +64,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
             accessibilityLabel="Reset filters"
             testID="pantry-filter-reset"
             style={({ pressed }) => [styles.textBtn, pressed && { opacity: pressedOpacity }]}>
-            <AppText variant="bodyS" weight="bold" style={{ color: pantry.oakDark }}>
+            <AppText variant="bodyS" weight="bold" style={{ color: P.oakDark }}>
               Reset
             </AppText>
           </Pressable>
@@ -72,7 +74,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
           <Section title="Allergies">
             <ToggleRow
               testID="pantry-filter-safe"
-              icon={<ShieldCheck size={22} color={pantry.green} />}
+              icon={<ShieldCheck size={22} color={P.green} />}
               title="Safe for me"
               subtitle={hasMine ? `Hide anything with ${mineLabel}` : "Add your allergies on the Me tab to use this"}
               value={filters.safeForMe}
@@ -95,9 +97,9 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
                     label={name}
                     accessibilityLabel={`Hide ${name}${mine ? ", one of your allergies" : ""}${covered ? ", covered by Safe for me" : ""}`}
                     selected={selected}
-                    selectedBg={pantry.redInk}
-                    idleBorder={mine ? pantry.red : undefined}
-                    icon={<Ban size={16} color="#FFFFFF" strokeWidth={2.75} />}
+                    selectedBg={P.redInk}
+                    idleBorder={mine ? P.red : undefined}
+                    icon={<Ban size={16} color={P.onAccent} strokeWidth={2.75} />}
                     onPress={() => {
                       if (!covered) set({ excludeAllergens: toggle(filters.excludeAllergens, a) });
                     }}
@@ -129,7 +131,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
                       selected && { backgroundColor: bg },
                       pressed && { opacity: pressedOpacity },
                     ]}>
-                    <AppText variant="bodyL" weight="heavy" style={{ color: selected ? fg : pantry.ink }}>
+                    <AppText variant="bodyL" weight="heavy" style={{ color: selected ? fg : P.ink }}>
                       {letter.toUpperCase()}
                     </AppText>
                     {selected ? (
@@ -160,7 +162,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
                       selected && styles.segmentOn,
                       pressed && { opacity: pressedOpacity },
                     ]}>
-                    <AppText variant="bodyS" weight="bold" style={{ color: selected ? "#FFFFFF" : pantry.ink }}>
+                    <AppText variant="bodyS" weight="bold" style={{ color: selected ? P.onAccent : P.ink }}>
                       {step == null ? "Any" : `≤ ${step}`}
                     </AppText>
                   </Pressable>
@@ -208,7 +210,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
             accessibilityLabel="Done"
             testID="pantry-filter-done"
             style={({ pressed }) => [styles.done, pressed && { opacity: pressedOpacity }]}>
-            <AppText variant="bodyL" weight="bold" style={{ color: "#FFFFFF" }}>
+            <AppText variant="bodyL" weight="bold" style={{ color: P.onAccent }}>
               Done
             </AppText>
           </Pressable>
@@ -219,6 +221,7 @@ export function FilterSheet({ visible, filters, onChange, onClose, myAllergens }
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
+  const styles = useOverlayStyles(makeStyles);
   return (
     <View style={styles.section}>
       <AppText variant="micro" accessibilityRole="header" style={styles.sectionTitle}>
@@ -230,9 +233,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function YouTag({ inverted }: { inverted: boolean }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   return (
     <View style={[styles.you, inverted && styles.youInverted]}>
-      <AppText variant="micro" weight="heavy" style={[styles.youText, { color: inverted ? pantry.redInk : "#FFFFFF" }]}>
+      <AppText variant="micro" weight="heavy" style={[styles.youText, { color: inverted ? P.redInk : P.onAccent }]}>
         You
       </AppText>
     </View>
@@ -256,6 +261,8 @@ function ToggleRow({
   icon?: ReactNode;
   testID?: string;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   return (
     <Pressable
       testID={testID}
@@ -268,11 +275,11 @@ function ToggleRow({
       style={({ pressed }) => [styles.toggleRow, pressed && { opacity: pressedOpacity }, disabled && styles.disabled]}>
       {icon}
       <View style={styles.toggleText}>
-        <AppText variant="bodyL" weight="bold" style={{ color: pantry.ink }}>
+        <AppText variant="bodyL" weight="bold" style={{ color: P.ink }}>
           {title}
         </AppText>
         {subtitle ? (
-          <AppText variant="caption" style={{ color: pantry.muted }}>
+          <AppText variant="caption" style={{ color: P.muted }}>
             {subtitle}
           </AppText>
         ) : null}
@@ -280,9 +287,9 @@ function ToggleRow({
       <View style={[styles.track, value && styles.trackOn]}>
         <View style={[styles.thumb, value && styles.thumbOn]}>
           {value ? (
-            <Check size={14} color={pantry.green} strokeWidth={3} />
+            <Check size={14} color={P.green} strokeWidth={3} />
           ) : (
-            <X size={14} color={pantry.muted} strokeWidth={3} />
+            <X size={14} color={P.muted} strokeWidth={3} />
           )}
         </View>
       </View>
@@ -290,23 +297,24 @@ function ToggleRow({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: pantry.backdrop },
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+  backdrop: { backgroundColor: P.backdrop },
   sheet: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     maxHeight: "88%",
-    backgroundColor: pantry.cream,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: P.panel,
+    borderTopLeftRadius: P.r(28),
+    borderTopRightRadius: P.r(28),
     borderTopWidth: 4,
     borderLeftWidth: 1,
     borderRightWidth: 1,
-    borderColor: pantry.oak,
+    borderColor: P.border,
   },
-  handle: { alignSelf: "center", width: 44, height: 5, borderRadius: 3, backgroundColor: "#D9C3A5", marginTop: 10 },
+  handle: { alignSelf: "center", width: 44, height: 5, borderRadius: P.r(3), backgroundColor: P.idleBorder, marginTop: 10 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -315,52 +323,52 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
-  title: { color: pantry.oakInk },
+  title: { color: P.oakInk },
   textBtn: { minHeight: size.hit, minWidth: size.hit, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
   scroll: { flexGrow: 0 },
   content: { paddingHorizontal: 20, paddingBottom: 12, gap: 14 },
-  section: { gap: 10, padding: 14, borderRadius: 20, backgroundColor: "#FFFDF8", borderWidth: 1, borderColor: "#EADBC6" },
-  sectionTitle: { color: pantry.oakDark },
-  hint: { color: pantry.muted },
+  section: { gap: 10, padding: 14, borderRadius: P.r(20), backgroundColor: P.panelAlt, borderWidth: 1, borderColor: P.divider },
+  sectionTitle: { color: P.oakDark },
+  hint: { color: P.muted },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   score: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: P.r(26),
     borderWidth: 3,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: pantry.cream,
+    backgroundColor: P.cream,
   },
   scoreMark: { position: "absolute", bottom: 3 },
-  scoreDot: { position: "absolute", bottom: 6, width: 6, height: 6, borderRadius: 3 },
+  scoreDot: { position: "absolute", bottom: 6, width: 6, height: 6, borderRadius: P.r(3) },
   segment: {
     minHeight: size.hit,
     minWidth: 56,
     paddingHorizontal: 12,
-    borderRadius: 22,
+    borderRadius: P.r(22),
     borderWidth: 1.5,
-    borderColor: "#D9C3A5",
-    backgroundColor: pantry.cream,
+    borderColor: P.idleBorder,
+    backgroundColor: P.cream,
     alignItems: "center",
     justifyContent: "center",
   },
-  segmentOn: { backgroundColor: pantry.oakDark, borderColor: pantry.oakDark },
-  you: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8, backgroundColor: pantry.redInk },
-  youInverted: { backgroundColor: "#FFFFFF" },
+  segmentOn: { backgroundColor: P.oakDark, borderColor: P.oakDark },
+  you: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: P.r(8), backgroundColor: P.redInk },
+  youInverted: { backgroundColor: P.onAccent },
   youText: { letterSpacing: 0.5 },
   toggleRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 },
   toggleText: { flex: 1, gap: 2 },
   disabled: { opacity: 0.55 },
-  track: { width: 52, height: 32, borderRadius: 16, backgroundColor: "#E3D5C2", padding: 3, justifyContent: "center" },
-  trackOn: { backgroundColor: pantry.green },
-  thumb: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  track: { width: 52, height: 32, borderRadius: P.r(16), backgroundColor: P.track, padding: 3, justifyContent: "center" },
+  trackOn: { backgroundColor: P.green },
+  thumb: { width: 26, height: 26, borderRadius: P.r(13), backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   thumbOn: { alignSelf: "flex-end" },
-  footer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, borderTopWidth: 1, borderTopColor: "#EADBC6" },
+  footer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, borderTopWidth: 1, borderTopColor: P.divider },
   done: {
     minHeight: size.btnLg,
-    borderRadius: 26,
-    backgroundColor: pantry.oakDark,
+    borderRadius: P.r(26),
+    backgroundColor: P.oakDark,
     alignItems: "center",
     justifyContent: "center",
   },

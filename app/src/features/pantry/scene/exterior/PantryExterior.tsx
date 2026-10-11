@@ -6,8 +6,9 @@ import { type ThreeEvent, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import { Mesh } from "three";
 
+import { useSceneTheme } from "../../../theme/ThemeProvider";
 import type { PantryPhase } from "../../types";
-import { createAnimState, updateExterior } from "./animation";
+import { createAnimState, type ExteriorInput, updateExterior } from "./animation";
 import { createExterior, getSharedGeometry, HIT_BOX, NOTE_HIT } from "./builders";
 import { listLines } from "./list";
 import { getMaterials } from "./materials";
@@ -25,6 +26,12 @@ export type PantryExteriorProps = {
   onListPress?: () => void;
   /** 0 = note pinned .. 1 = lifted off toward the camera (the `list` phase clock, see motion.ts) */
   listProgress?: number;
+  /**
+   * Live phase clock (motion.ts PhaseClock; `open` is the LINEAR door clock). When given, the doors read it every
+   * frame instead of `openProgress`, so they move in step with the camera, without React-render lag or the
+   * re-render quantisation of `openProgress` (which made the last degrees of a close stutter).
+   */
+  clock?: { readonly current: { readonly open: number } };
 };
 
 const noRaycast = () => {};
@@ -34,18 +41,29 @@ function setCursor(cursor: string) {
   if (doc?.body) doc.body.style.cursor = cursor;
 }
 
-export function PantryExterior({ phase, openProgress, listPreview, onPress, onListPress, listProgress = 0 }: PantryExteriorProps) {
-  const exterior = useMemo(() => createExterior(), []);
+export function PantryExterior({
+  phase,
+  openProgress,
+  listPreview,
+  onPress,
+  onListPress,
+  listProgress = 0,
+  clock,
+}: PantryExteriorProps) {
+  const theme = useSceneTheme();
+  const exterior = useMemo(() => createExterior(theme), [theme]);
   const anim = useRef(createAnimState());
-  const input = useRef({ phase, openProgress, listProgress });
+  const input = useRef<ExteriorInput>({ phase, openProgress, listProgress });
   const pressRef = useRef(onPress);
   const listPressRef = useRef(onListPress);
+  const clockRef = useRef(clock);
 
   useEffect(() => {
     input.current = { phase, openProgress, listProgress };
     pressRef.current = onPress;
     listPressRef.current = onListPress;
-  }, [phase, openProgress, listProgress, onPress, onListPress]);
+    clockRef.current = clock;
+  }, [phase, openProgress, listProgress, onPress, onListPress, clock]);
 
   useEffect(() => () => exterior.dispose(), [exterior]);
 
@@ -55,6 +73,7 @@ export function PantryExterior({ phase, openProgress, listPreview, onPress, onLi
   }, [exterior, linesKey]);
 
   useFrame((state, delta) => {
+    input.current.openClock = clockRef.current?.current.open;
     updateExterior(exterior, anim.current, input.current, state.clock.elapsedTime, Math.min(delta, 0.1));
   });
 
@@ -68,8 +87,8 @@ export function PantryExterior({ phase, openProgress, listPreview, onPress, onLi
   }, [tappable, anim]);
   const listTappable = tappable && !!onListPress;
 
-  const { hit: hitGeo, noteHit: noteHitGeo } = getSharedGeometry();
-  const hitMat = getMaterials().hit;
+  const { hit: hitGeo, noteHit: noteHitGeo } = getSharedGeometry(theme);
+  const hitMat = getMaterials(theme).hit;
 
   return (
     <group>

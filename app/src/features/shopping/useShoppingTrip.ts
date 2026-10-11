@@ -24,7 +24,10 @@ export type Flight = { id: string; dir: "in" | "out"; startedAt: number };
 
 export type ShoppingTrip = ReturnType<typeof useShoppingTrip>;
 
-export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean } = {}) {
+export function useShoppingTrip(
+  groupId: string,
+  opts: { reducedMotion?: boolean; /** an item is being put back on its shelf (e.g. scroll to it) */ onUndo?: (id: string) => void } = {},
+) {
   const connected = useSocketConnected();
   // Live sync from the socket; poll every 5 s while it is down.
   const list = useShoppingList(groupId, { refetchInterval: connected ? false : 5000 });
@@ -38,13 +41,17 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
   const checkRef = useRef(check.mutateAsync);
   const completeRef = useRef(complete.mutateAsync);
   const toastRef = useRef(toast);
+  const onUndoRef = useRef(opts.onUndo);
   useEffect(() => {
     checkRef.current = check.mutateAsync;
     completeRef.current = complete.mutateAsync;
     toastRef.current = toast;
+    onUndoRef.current = opts.onUndo;
   });
 
   const [batcher] = useState(
+    // The ref is only read when the batcher completes (timer / event), never during render.
+    // eslint-disable-next-line react-hooks/refs
     () => new TripBatcher({ complete: () => completeRef.current().then((r) => r.movedToCabinet), graceMs: GRACE_MS }),
   );
   const [snap, setSnap] = useState<TripBatcherSnapshot>(() => batcher.snapshot());
@@ -90,7 +97,7 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
     const sub = AppState.addEventListener("change", (s) => {
       if (s !== "active") batcher.flush();
     });
-    return () => sub.remove();
+    return () => sub?.remove();
   }, [batcher]);
 
   // Rows already checked when the screen opened (left over from a closed app) go in the cart and complete after the grace.
@@ -143,6 +150,7 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
         toastRef.current("Already on its way to your pantry");
         return false;
       }
+      onUndoRef.current?.(id);
       launch(id, "out");
       batcher.track(id, false, checkRef.current({ id, checked: false })).catch(() => {});
       return true;
@@ -180,6 +188,18 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
 
   const finish = useCallback(() => batcher.flush(), [batcher]);
 
+  /**
+   * A row was already checked somewhere else on this screen (the camera ScanSheet saved the check itself): play the
+   * hop into the cart and add it to this trip's batch so it moves to the pantry with the rest.
+   */
+  const addedElsewhere = useCallback(
+    (id: string) => {
+      launch(id, "in");
+      batcher.adopt([id]);
+    },
+    [batcher, launch],
+  );
+
   // ---- derived view data ----
   const items: StoreItem[] = useMemo(() => rows.map((r) => toStoreItem(r, meId)), [rows, meId]);
   const sections = useMemo(() => buildStoreSections(items), [items]);
@@ -206,6 +226,7 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
     undo,
     toggle,
     finish,
+    addedElsewhere,
     canUndo: (id: string) => batcher.canUndo(id),
   };
 }

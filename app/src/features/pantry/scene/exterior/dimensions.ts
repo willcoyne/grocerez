@@ -23,7 +23,7 @@ export const PANTRY_DIMENSIONS = {
   /** EZ sign hangs from a nail on the wall */
   signNail: [0.98, 4.3, -0.93] as const,
   /** paper shopping list pinned on the right stile: centre, size, tilt (radians about z) */
-  note: { x: 0.99, y: 2.1, z: 0.004, width: 0.23, height: 0.37, rotZ: -0.06 },
+  note: { x: 1.02, y: 2.1, z: 0.004, width: 0.23, height: 0.37, rotZ: -0.06 },
   /** back wall plane and floor */
   wallZ: -0.95,
   /** everything worth framing (incl. the stool + plant at the right) */

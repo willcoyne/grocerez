@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { AppText } from "@/components/ui";
 import { pressedOpacity, size } from "@/theme";
 
-import { pantry } from "./palette";
+import { useOverlayPalette } from "./palette";
 
 /**
  * Toggle chip for the filter sheet. Selection is shown by fill + a check (or custom) icon + accessibilityState,
@@ -16,9 +16,9 @@ export function FilterChip({
   accessibilityLabel,
   selected,
   onPress,
-  selectedBg = pantry.oakDark,
-  selectedFg = "#FFFFFF",
-  idleBorder = "#D9C3A5",
+  selectedBg,
+  selectedFg,
+  idleBorder,
   icon,
   accessory,
   testID,
@@ -36,6 +36,10 @@ export function FilterChip({
   accessory?: ReactNode;
   testID?: string;
 }) {
+  const P = useOverlayPalette();
+  const bg = selectedBg ?? P.oakDark;
+  const fg = selectedFg ?? P.onAccent;
+  const border = idleBorder ?? P.idleBorder;
   return (
     <Pressable
       testID={testID}
@@ -46,11 +50,12 @@ export function FilterChip({
       hitSlop={4}
       style={({ pressed }) => [
         styles.chip,
-        selected ? { backgroundColor: selectedBg, borderColor: selectedBg } : { borderColor: idleBorder },
+        { backgroundColor: P.cream, borderRadius: P.r(22), borderWidth: P.bw(1.5) },
+        selected ? { backgroundColor: bg, borderColor: bg } : { borderColor: border },
         pressed && { opacity: pressedOpacity },
       ]}>
-      {selected ? (icon ?? <Check size={16} color={selectedFg} strokeWidth={3} />) : null}
-      <AppText variant="bodyS" weight="bold" style={{ color: selected ? selectedFg : pantry.ink }}>
+      {selected ? (icon ?? <Check size={16} color={fg} strokeWidth={3} />) : null}
+      <AppText variant="bodyS" weight="bold" style={{ color: selected ? fg : P.ink }}>
         {label}
       </AppText>
       {accessory ? <View>{accessory}</View> : null}
@@ -65,8 +70,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingHorizontal: 14,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    backgroundColor: pantry.cream,
   },
 });

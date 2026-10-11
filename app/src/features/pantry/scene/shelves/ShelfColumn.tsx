@@ -5,10 +5,13 @@
  * Column centred at x = 0, content starts at y = 0 and goes DOWN, shelf front edge at z = 0. Wooden boards with
  * a labelled front lip, side uprights and a beadboard back panel continue far above and below the content.
  * Only rows within ±VIRTUAL_RANGE of the view are mounted; boards/lips/glass are instanced (one draw call each).
+ * Materials, label font and the fridge/freezer lights follow the active theme (shelves/materials.ts, themeLights).
  */
 import type { Allergen } from "@contracts/dietary";
 import { memo, useLayoutEffect, useMemo } from "react";
 
+import { themeLights } from "../../../theme/canvas";
+import { useSceneTheme } from "../../../theme/ThemeProvider";
 import type { PantryItem, ShelfSection } from "../../types";
 import { FoodItem } from "../food/FoodItem";
 import { Appliance } from "./Appliance";
@@ -28,7 +31,7 @@ import {
   UPRIGHT_THICKNESS,
   visibleWindow,
 } from "./layout";
-import { shelfAssets } from "./materials";
+import { EDGE_STRIP_H, shelfAssets } from "./materials";
 import { ShelfLabel } from "./ShelfLabel";
 
 export type ShelfColumnProps = {
@@ -42,6 +45,8 @@ export type ShelfColumnProps = {
   highlightId?: string | null;
   /** the item showing its back label (rotated 180° about Y) */
   flippedId?: string | null;
+  /** OS "reduce motion": the flip snaps instead of turning */
+  reducedMotion?: boolean;
 };
 
 // vertical offsets relative to a row's shelf surface
@@ -54,7 +59,7 @@ const TRIM_H = LIP_HEIGHT * 0.78;
 const TRIM_Y = -0.007 - TRIM_H / 2 + 0.006;
 const LABEL_MAX_W = INNER_WIDTH - 0.24;
 
-export function ShelfColumn({ sections, scrollY, myAllergens, dim, onItemPress, highlightId, flippedId }: ShelfColumnProps) {
+export function ShelfColumn({ sections, scrollY, myAllergens, dim, onItemPress, highlightId, flippedId, reducedMotion = false }: ShelfColumnProps) {
   const layout = useMemo(() => computeLayout(sections), [sections]);
   const [wb, wt] = visibleWindow(scrollY);
 
@@ -82,6 +87,7 @@ export function ShelfColumn({ sections, scrollY, myAllergens, dim, onItemPress, 
           onItemPress={onItemPress}
           highlightId={highlightId ?? null}
           flippedId={flippedId ?? null}
+          reducedMotion={reducedMotion}
         />
       ))}
       {appliances.map((block) => (
@@ -96,7 +102,7 @@ export function ShelfColumn({ sections, scrollY, myAllergens, dim, onItemPress, 
 
 /** Side uprights + beadboard back, stretched over the mounted window (2 + 1 draw calls, no matter how far). */
 const WoodFrame = memo(function WoodFrame({ bottom, top }: { bottom: number; top: number }) {
-  const { geometries: G, materials: M, textures: T } = shelfAssets();
+  const { geometries: G, materials: M, textures: T } = shelfAssets(useSceneTheme());
   const h = top - bottom;
   const mid = (top + bottom) / 2;
   const TILE_H = 3.3; // world height of one beadboard texture tile (keeps planks square-ish to the width)
@@ -128,11 +134,12 @@ const WoodFrame = memo(function WoodFrame({ bottom, top }: { bottom: number; top
 
 /** All shelf boards / lips / glass in view, instanced per part and theme. */
 const ShelfBoards = memo(function ShelfBoards({ rows }: { rows: LayoutRow[] }) {
-  const { geometries: G, materials: M } = shelfAssets();
+  const { geometries: G, materials: M, edgeGlow } = shelfAssets(useSceneTheme());
 
   const parts = useMemo(() => {
     const boards: InstanceXform[] = [];
     const lips: InstanceXform[] = [];
+    const edges: InstanceXform[] = [];
     const glass: InstanceXform[] = [];
     const glassEdges: InstanceXform[] = [];
     const trims: InstanceXform[] = [];
@@ -143,6 +150,8 @@ const ShelfBoards = memo(function ShelfBoards({ rows }: { rows: LayoutRow[] }) {
       if (r.theme === "wood") {
         boards.push({ p: [0, y - BOARD_T / 2, BOARD_Z] });
         lips.push({ p: [0, y + LIP_Y, LIP_Z] });
+        // glowing underline along the lip's front bottom edge (themes that light shelf edges)
+        edges.push({ p: [0, y + LIP_Y - LIP_HEIGHT / 2 + EDGE_STRIP_H / 2 + 0.006, 0.004] });
       } else if (r.theme === "fridge") {
         glass.push({ p: [0, y - 0.007, GLASS_Z] });
         glassEdges.push({ p: [0, y, -0.034] });
@@ -152,13 +161,14 @@ const ShelfBoards = memo(function ShelfBoards({ rows }: { rows: LayoutRow[] }) {
         frostTrims.push({ p: [0, y + TRIM_Y, -0.015] });
       }
     }
-    return { boards, lips, glass, glassEdges, trims, frostGlass, frostTrims };
+    return { boards, lips, edges, glass, glassEdges, trims, frostGlass, frostTrims };
   }, [rows]);
 
   return (
     <group>
       <Instanced geometry={G.board} material={M.wood} instances={parts.boards} max={24} castShadow receiveShadow />
       <Instanced geometry={G.lip} material={M.wood} instances={parts.lips} max={24} castShadow receiveShadow />
+      {edgeGlow ? <Instanced geometry={G.edgeStrip} material={M.edgeStrip} instances={parts.edges} max={24} /> : null}
       <Instanced geometry={G.glass} material={M.glass} instances={parts.glass} renderOrder={1} />
       <Instanced geometry={G.glassEdge} material={M.glassEdge} instances={parts.glassEdges} />
       <Instanced geometry={G.trim} material={M.steel} instances={parts.trims} castShadow />
@@ -175,11 +185,13 @@ type RowProps = {
   onItemPress: (item: PantryItem) => void;
   highlightId: string | null;
   flippedId: string | null;
+  reducedMotion: boolean;
 };
 
 /** Lip label + the items standing on one shelf. */
-const RowContents = memo(function RowContents({ row, myAllergens, dim, onItemPress, highlightId, flippedId }: RowProps) {
-  const { materials: M } = shelfAssets();
+const RowContents = memo(function RowContents({ row, myAllergens, dim, onItemPress, highlightId, flippedId, reducedMotion }: RowProps) {
+  const theme = useSceneTheme();
+  const { materials: M } = shelfAssets(theme);
   const y = row.surfaceY;
   const labelMat = row.theme === "wood" ? M.labelPaint : row.theme === "fridge" ? M.fridgeLabel : M.frostLabel;
   const labelY = row.theme === "wood" ? y + LIP_Y : y + TRIM_Y;
@@ -192,7 +204,8 @@ const RowContents = memo(function RowContents({ row, myAllergens, dim, onItemPre
           position={[0, labelY, 0.0005]}
           material={labelMat}
           maxWidth={LABEL_MAX_W}
-          highlightMaterial={row.theme === "wood" ? M.labelHighlight : undefined}
+          highlightMaterial={row.theme === "wood" ? (M.labelHighlight ?? undefined) : undefined}
+          theme={theme}
         />
       ) : null}
       {row.items.map(({ item, position }) => (
@@ -204,6 +217,7 @@ const RowContents = memo(function RowContents({ row, myAllergens, dim, onItemPre
           dimmed={dim(item)}
           highlighted={item.id === highlightId}
           flipped={item.id === flippedId}
+          reducedMotion={reducedMotion}
           myAllergens={myAllergens}
           onPress={() => onItemPress(item)}
         />
@@ -217,6 +231,7 @@ const RowContents = memo(function RowContents({ row, myAllergens, dim, onItemPre
  * count → no shader recompiles while scrolling); switched off when their compartment isn't in view or absent.
  */
 function ApplianceLights({ blocks, window: win }: { blocks: ApplianceBlock[]; window: [number, number] }) {
+  const L = themeLights(useSceneTheme());
   const fridge = blocks.find((b) => b.theme === "fridge");
   const freezer = blocks.find((b) => b.theme === "freezer");
   const on = (b: ApplianceBlock | undefined) => !!b && overlaps(b.bottom, b.top, win);
@@ -226,15 +241,15 @@ function ApplianceLights({ blocks, window: win }: { blocks: ApplianceBlock[]; wi
   return (
     <group>
       <pointLight
-        color="#EAF4FF"
-        intensity={on(fridge) ? 1.8 : 0}
+        color={L.fridge.color}
+        intensity={on(fridge) ? L.fridge.intensity : 0}
         distance={reach(fridge)}
         decay={1.2}
         position={place(fridge)}
       />
       <pointLight
-        color="#9FD8FF"
-        intensity={on(freezer) ? 1.6 : 0}
+        color={L.freezer.color}
+        intensity={on(freezer) ? L.freezer.intensity : 0}
         distance={reach(freezer)}
         decay={1.2}
         position={place(freezer)}

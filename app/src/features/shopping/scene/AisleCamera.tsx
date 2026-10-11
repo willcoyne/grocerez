@@ -11,6 +11,8 @@ import type * as THREE from "three";
 import { aisleScrollBounds, cameraDistance, EYE_Y, halfWidthAt, LOOK_Y, type AisleLayout } from "./layout";
 import type { AisleScroll } from "./useAisleScroll";
 
+const YAW_OFFSET = 0.35;
+
 export type CameraBus = { x: number; dist: number; aspect: number };
 
 export function AisleCamera({
@@ -40,8 +42,9 @@ export function AisleCamera({
     scroll.pxToWorld.current = (halfWidthAt(dist, aspect) * 2) / Math.max(1, size.width);
     scroll.step(dt);
     const x = scroll.state.current.y;
-    camera.position.set(x, EYE_Y, dist);
-    camera.lookAt(x, LOOK_Y, 0);
+    // A slight yaw down the aisle (walking direction) gives depth without hiding the shelf face.
+    camera.position.set(x - YAW_OFFSET, EYE_Y, dist);
+    camera.lookAt(x + YAW_OFFSET * 0.4, LOOK_Y, 0);
     bus.current.x = x;
     bus.current.dist = dist;
     bus.current.aspect = aspect;

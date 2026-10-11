@@ -1,33 +1,38 @@
-/* eslint-disable react/no-unknown-property -- R3F JSX props (args, attach, ...) are valid three.js props */
-/** Native store canvas: `@react-three/fiber/native` through expo-gl. Same look as StoreCanvas.tsx. */
+/** Native store canvas: `@react-three/fiber/native` through expo-gl. Same (themed) look as StoreCanvas.tsx. */
 import { Canvas } from "@react-three/fiber/native";
 import { StyleSheet, View } from "react-native";
 import * as THREE from "three";
 
-import { CAMERA_FOV, STORE_SKY, type StoreCanvasProps } from "./storeConfig";
+import { ThemeCanvasSetup } from "../../pantry/scene/ThemeCanvasSetup";
+import { themeCanvasProps } from "../../theme/canvas";
+import { useSceneTheme } from "../../theme/ThemeProvider";
+import { CAMERA_FOV, type StoreCanvasProps } from "./storeConfig";
+import { storeCanvasLook } from "./storeTheme";
 
 export type { StoreCanvasProps } from "./storeConfig";
 
 export function StoreCanvas({ children, active = true, testID }: StoreCanvasProps) {
+  const theme = useSceneTheme();
+  const cp = themeCanvasProps(theme);
+  const look = storeCanvasLook(theme);
   return (
-    <View style={styles.fill} testID={testID} collapsable={false}>
+    <View style={[styles.fill, { backgroundColor: look.background }]} testID={testID} collapsable={false}>
       <Canvas
         style={StyleSheet.absoluteFill}
         frameloop={active ? "always" : "never"}
-        shadows={{ enabled: true, type: THREE.PCFShadowMap }}
+        shadows={cp.shadows}
         camera={{ fov: CAMERA_FOV, near: 0.05, far: 80, position: [0, 1.6, 7] }}
         onCreated={({ gl }) => {
-          gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.toneMappingExposure = 1.1;
+          gl.toneMapping = cp.toneMapping;
+          gl.toneMappingExposure = look.exposure;
           gl.outputColorSpace = THREE.SRGBColorSpace;
         }}
       >
-        <color attach="background" args={[STORE_SKY]} />
-        <fog attach="fog" args={[STORE_SKY, 16, 40]} />
+        <ThemeCanvasSetup theme={theme} background={look.background} fog={look.fog} exposure={look.exposure} />
         {children}
       </Canvas>
     </View>
   );
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1, overflow: "hidden", backgroundColor: STORE_SKY } });
+const styles = StyleSheet.create({ fill: { flex: 1, overflow: "hidden" } });

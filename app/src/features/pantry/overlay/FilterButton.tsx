@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 
 import { AppText } from "@/components/ui";
 
-import { pantry } from "./palette";
+import { useOverlayPalette } from "./palette";
 import { RoundButton } from "./RoundButton";
 import { useOverlayInsets } from "./useOverlayInsets";
 
@@ -17,16 +17,17 @@ export function FilterButton({
   activeCount: number;
   bottomOffset?: number;
 }) {
+  const P = useOverlayPalette();
   const inset = useOverlayInsets(bottomOffset);
   const label = activeCount > 0 ? `Filters, ${activeCount} active` : "Filters";
   return (
     <View style={[styles.pos, { right: inset.right, bottom: inset.bottom }]} pointerEvents="box-none">
       <RoundButton testID="pantry-filter-button" label={label} hint="Filter what shows on the shelves" onPress={onPress}>
-        <SlidersHorizontal size={26} color={pantry.oakDark} strokeWidth={2.5} />
+        <SlidersHorizontal size={26} color={P.oakDark} strokeWidth={2.5} />
       </RoundButton>
       {activeCount > 0 ? (
-        <View style={styles.badge} pointerEvents="none" testID="pantry-filter-badge" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-          <AppText variant="micro" weight="heavy" style={styles.badgeText}>
+        <View style={[styles.badge, { backgroundColor: P.green, borderColor: P.cream, borderRadius: P.r(12) }]} pointerEvents="none" testID="pantry-filter-badge" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+          <AppText variant="micro" weight="heavy" style={[styles.badgeText, { color: P.onAccent }]}>
             {activeCount > 9 ? "9+" : String(activeCount)}
           </AppText>
         </View>
@@ -44,12 +45,9 @@ const styles = StyleSheet.create({
     minWidth: 24,
     height: 24,
     paddingHorizontal: 6,
-    borderRadius: 12,
-    backgroundColor: pantry.green,
     borderWidth: 2,
-    borderColor: pantry.cream,
     alignItems: "center",
     justifyContent: "center",
   },
-  badgeText: { color: "#FFFFFF", letterSpacing: 0 },
+  badgeText: { letterSpacing: 0 },
 });

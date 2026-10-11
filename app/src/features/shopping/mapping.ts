@@ -57,6 +57,8 @@ export type StoreItem = {
   mine: boolean;
   /** Flags for other members (badge on the price tag). */
   others: AllergenFlag[];
+  /** Price-tag badge naming member + allergen (all flags, "You" for me). */
+  badge: string | null;
 };
 
 const uniq = <T,>(xs: T[]) => [...new Set(xs)];
@@ -76,11 +78,12 @@ export function toPantryItem(row: ShoppingListItem): PantryItem {
     caloriesPerServing: null,
     healthScore: null,
     imageUrl: null,
-  } satisfies PantryItem;
+  };
   // Optional label fields some PantryItem versions carry (round-2 "flip" back label). Spread so the literal never trips
   // excess-property checks whichever version of the type is in the tree.
   const extra = { ingredients: null, servingSize: null };
-  return { ...extra, ...base };
+  const item: PantryItem = { ...extra, ...base };
+  return item;
 }
 
 export function toStoreItem(row: ShoppingListItem, meId: string | null | undefined): StoreItem {
@@ -90,6 +93,7 @@ export function toStoreItem(row: ShoppingListItem, meId: string | null | undefin
     aisle: aisleFor(row.item.category),
     mine: !!meId && row.allergenFlags.some((f) => f.userId === meId),
     others: row.allergenFlags.filter((f) => f.userId !== meId),
+    badge: tagBadge(row.allergenFlags, meId),
   };
 }
 
@@ -100,16 +104,20 @@ export function allergenSummary(flags: AllergenFlag[], meId: string | null | und
   return `Contains ${parts.join(", ")}`;
 }
 
-/** Short badge text for the 3D price tag: "! ANN · PEANUTS" or "! 2 MEMBERS". */
-export function othersBadge(others: AllergenFlag[]): string | null {
-  if (others.length === 0) return null;
-  const people = uniq(others.map((f) => f.displayName));
-  if (people.length === 1) {
-    const allergens = uniq(others.map((f) => f.allergen.replace(/_/g, " ")));
-    const text = `${people[0]} · ${allergens.join(", ")}`;
-    return text.length > 22 ? `${people[0]} · ${allergens.length} allergens` : text;
-  }
-  return `${people.length} members`;
+/**
+ * Short badge text for the 3D price tag, naming member and allergen: "Ann · peanuts", "You · milk, eggs",
+ * "You +1 · 3 allergens" when it would not fit. null when nobody is flagged.
+ */
+export function tagBadge(flags: AllergenFlag[], meId: string | null | undefined): string | null {
+  if (flags.length === 0) return null;
+  const name = (f: AllergenFlag) => (f.userId === meId ? "You" : f.displayName);
+  // Me first, then others in server order.
+  const ordered = [...flags].sort((a, b) => Number(b.userId === meId) - Number(a.userId === meId));
+  const people = uniq(ordered.map(name));
+  const allergens = uniq(ordered.map((f) => f.allergen.replace(/_/g, " ")));
+  const who = people.length === 1 ? people[0] : `${people[0]} +${people.length - 1}`;
+  const text = `${who} · ${allergens.join(", ")}`;
+  return text.length > 24 ? `${who} · ${allergens.length === 1 ? allergens[0] : `${allergens.length} allergens`}` : text;
 }
 
 export type StoreSection = { aisle: AisleKey; label: string; theme: AisleTheme; items: StoreItem[] };

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { PantryItem } from "../../types";
 import { BackLabel } from "./BackLabel";
+import { backPanelFor } from "./backPanel";
+import { flipEase, flipPose, stepFlip } from "./flipMotion";
 import { foodKindFor, foodVariantFor } from "./foodKind";
 import { getFoodShape, HIT_BOX, SLOTS } from "./geometries";
 import {
@@ -22,6 +24,8 @@ import { NameTag } from "./NameTag";
 import { foodColorsFor } from "./palette";
 
 export { foodKindFor } from "./foodKind";
+export { FLIP_DURATION_S, FLIP_POP, flipEase, flipPose, stepFlip } from "./flipMotion";
+export { backPanelFor, flippedLabelFrame, type BackPanel, type LabelFrame } from "./backPanel";
 
 /** Pointer travel (CSS px / device-independent px) above which a press counts as a drag, not a tap. */
 export const TAP_SLOP_PX = 8;
@@ -34,33 +38,6 @@ export function isTap(e: Pick<ThreeEvent<MouseEvent>, "delta">): boolean {
 /** Seconds of bounce + bright ring after a search hit, before settling to a steady ring. */
 export const HIGHLIGHT_INTRO_S = 2;
 
-/** Seconds for the 180° flip to the back label (and back). */
-export const FLIP_DURATION_S = 0.6;
-/** While flipped the item pops toward the viewer (clears the shelf lip and neighbours), lifts and grows a bit. */
-export const FLIP_POP = { forward: 0.34, lift: 0.05, arc: 0.05, scale: 0.15 } as const;
-
-/** easeInOutCubic */
-export function flipEase(p: number): number {
-  const t = Math.min(1, Math.max(0, p));
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-/** Advance linear flip progress toward `target` (0 front, 1 back) by `dt` seconds. */
-export function stepFlip(progress: number, target: 0 | 1, dt: number): number {
-  const step = Math.min(dt, 0.1) / FLIP_DURATION_S; // clamp dt so a stalled frame doesn't teleport
-  return target > progress ? Math.min(target, progress + step) : Math.max(target, progress - step);
-}
-
-/** Pose of the flip/pop groups for an eased progress `e` ∈ [0,1]. */
-export function flipPose(e: number) {
-  return {
-    rotY: Math.PI * e,
-    z: FLIP_POP.forward * e,
-    y: FLIP_POP.lift * e + FLIP_POP.arc * Math.sin(Math.PI * e),
-    scale: 1 + FLIP_POP.scale * e,
-  };
-}
-
 export type FoodItemProps = {
   item: PantryItem;
   position: [number, number, number];
@@ -72,11 +49,13 @@ export type FoodItemProps = {
   flipped?: boolean;
   /** viewer's allergens, shown in red on the back label */
   myAllergens?: Allergen[];
+  /** OS "reduce motion": the flip snaps instead of turning */
+  reducedMotion?: boolean;
+  /** draw the small name tag in front of the item (default true; the store has its own shelf-edge tags) */
+  showTag?: boolean;
 };
 
 const NO_ALLERGENS: Allergen[] = [];
-/** Back label bottom edge above the shelf (local y). */
-const BACK_LABEL_BOTTOM = 0.02;
 
 const HALO_GEO = new THREE.PlaneGeometry(1, 1);
 const RING_GEO = new THREE.RingGeometry(0.175, 0.205, 40).rotateX(-Math.PI / 2);
@@ -95,6 +74,8 @@ export function FoodItem({
   onPress,
   flipped = false,
   myAllergens = NO_ALLERGENS,
+  reducedMotion = false,
+  showTag = true,
 }: FoodItemProps) {
   const { name, brand, category, location } = item;
   const kind = useMemo(() => foodKindFor({ name, brand, category, location }), [name, brand, category, location]);
@@ -103,16 +84,8 @@ export function FoodItem({
   const colors = useMemo(() => foodColorsFor({ name, brand }, kind, variant), [name, brand, kind, variant]);
 
   const mats = useMemo(() => createSlotMaterials(shape, colors), [shape, colors]);
-  /** z of the mesh's back face, so the label sits just behind it */
-  const backZ = useMemo(() => {
-    let minZ = 0;
-    for (const g of Object.values(shape.parts)) {
-      if (!g) continue;
-      if (!g.boundingBox) g.computeBoundingBox();
-      minZ = Math.min(minZ, g.boundingBox!.min.z);
-    }
-    return minZ - 0.012;
-  }, [shape]);
+  /** where the label is printed on this shape's back face */
+  const panel = backPanelFor(kind, variant);
   // the back label is built lazily on the first flip, then kept (cheap to show again)
   const [backBuilt, setBackBuilt] = useState(flipped);
   if (flipped && !backBuilt) setBackBuilt(true);
@@ -175,16 +148,13 @@ export function FoodItem({
       if (hh?.uniforms) hh.uniforms.uIntensity.value = (intro ? 0.5 + 0.2 * Math.sin(ht * 8) : 0.28) * dimK;
     }
     if (body.current) body.current.position.y = bounce;
-    const next = stepFlip(flipP.current, flipped ? 1 : 0, delta);
+    const next = reducedMotion ? (flipped ? 1 : 0) : stepFlip(flipP.current, flipped ? 1 : 0, delta);
     if (next !== appliedP.current) {
       flipP.current = next;
       appliedP.current = next;
       const pose = flipPose(flipEase(flipP.current));
       if (flip.current) flip.current.rotation.y = pose.rotY;
-      if (pop.current) {
-        pop.current.position.set(0, pose.y, pose.z);
-        pop.current.scale.setScalar(pose.scale);
-      }
+      if (pop.current) pop.current.position.set(0, pose.y, pose.z);
       if (back.current) back.current.visible = flipP.current > 0.001;
     }
     // billboard the halos toward the camera
@@ -221,10 +191,10 @@ export function FoodItem({
               return <mesh key={slot} geometry={g} material={m} castShadow={slot === "primary" && !dimmed} receiveShadow={false} />;
             })}
           </group>
-          <NameTag name={name} low={item.status === "running_low"} warn={glow} dimmed={dimmed} />
+          {showTag ? <NameTag name={name} low={item.status === "running_low"} warn={glow} dimmed={dimmed} /> : null}
           {backBuilt ? (
-            <group ref={back} position={[0, BACK_LABEL_BOTTOM, backZ]}>
-              <BackLabel item={item} kind={kind} myAllergens={myAllergens} />
+            <group ref={back}>
+              <BackLabel item={item} kind={kind} panel={panel} myAllergens={myAllergens} />
             </group>
           ) : null}
         </group>

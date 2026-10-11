@@ -212,13 +212,8 @@ function eggs(): FoodShape {
   }
   // lid hinged at the back top edge, tipped open
   const lidG = xf(box(0.3, 0.012, 0.14, 0.005), { p: [0, 0.006, 0.07] });
+  // (the lid's outside faces the back, where the flipped item shows its printed label: keep it flat, see backPanel.ts)
   b.add("primary", hinge(lidG, -1.85, [0, 0.06, -0.07]));
-  for (const x of [-0.09, 0, 0.09]) {
-    for (const z of [0.035, 0.105]) {
-      const dome = xf(sphere(0.03, 8, 4), { p: [x, 0.012, z], s: [1, 0.65, 1] });
-      b.add("primary", hinge(dome, -1.85, [0, 0.06, -0.07]));
-    }
-  }
   return b.build({ primary: { roughness: 0.95 }, light: { color: "#F3E1C6", roughness: 0.6 } }, 0.2);
 }
 

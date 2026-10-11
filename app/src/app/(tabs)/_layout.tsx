@@ -1,30 +1,24 @@
 import { Tabs } from "expo-router/js-tabs";
-import type { ComponentProps } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAlertCount } from "@/components/AlertsSection";
 import { TAB_BAR_HEIGHT, TabBar, useToastBottomInset } from "@/components/ui";
+import { navTabFor, requestStation, useCurrentStation } from "@/features/pantry/roomNav";
 import { useExpirationReminders } from "@/notifications/useExpirationReminders";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { color } from "@/theme";
 
-type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>["tabBar"]>>[0];
-
-/** Route names that exist only to redirect and never show as a tab. */
-const HIDDEN_TABS = new Set(["index"]);
-
-/** The custom TabBar renders every route it is given, so drop the redirect-only routes (and remap the focus index). */
-function VisibleTabBar(props: TabBarProps) {
-  const { state } = props;
-  const routes = state.routes.filter((r) => !HIDDEN_TABS.has(r.name));
-  const focusedKey = state.routes[state.index]?.key;
-  const index = Math.max(0, routes.findIndex((r) => r.key === focusedKey));
-  return <TabBar {...props} state={{ ...state, routes, index }} />;
+/** The nav bar drives the camera in the one persistent 3D room (features/pantry/roomNav.ts), not the router. */
+function RoomTabBar({ alertCount }: { alertCount: number }) {
+  const station = useCurrentStation();
+  return <TabBar active={navTabFor(station)} onSelect={requestStation} badges={{ household: alertCount }} />;
 }
 
 /**
- * Tabs in order: Pantry (home, route `cabinet`), List, Me, Household. "/" (index) redirects to the Pantry.
- * Each screen renders its own header; the Pantry scene fills the area above the tab bar.
+ * One real screen: the 3D room (route `cabinet`, PantryScreen). The nav bar's Pantry · List · Recipes · Me · Household
+ * move the camera between stations in that room and open their sheets (SPEC.md round 3).
+ * The old tab routes stay as hidden redirects so deep links keep working: "/" → the room, `/list`, `/me`, `/group`
+ * → the room at that station (`/cabinet?station=…`).
  */
 export default function TabsLayout() {
   const groupId = useRequiredGroupId();
@@ -36,13 +30,13 @@ export default function TabsLayout() {
   return (
     <Tabs
       initialRouteName="cabinet"
-      tabBar={(props) => <VisibleTabBar {...props} />}
+      tabBar={() => <RoomTabBar alertCount={alertCount} />}
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: color.bg } }}
     >
       <Tabs.Screen name="cabinet" options={{ title: "Pantry" }} />
-      <Tabs.Screen name="list" options={{ title: "List" }} />
-      <Tabs.Screen name="me" options={{ title: "Me" }} />
-      <Tabs.Screen name="group" options={{ title: "Household", tabBarBadge: alertCount > 0 ? alertCount : undefined }} />
+      <Tabs.Screen name="list" options={{ href: null }} />
+      <Tabs.Screen name="me" options={{ href: null }} />
+      <Tabs.Screen name="group" options={{ href: null }} />
       <Tabs.Screen name="index" options={{ href: null }} />
     </Tabs>
   );

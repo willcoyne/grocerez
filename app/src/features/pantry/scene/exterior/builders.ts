@@ -1,6 +1,7 @@
 // Pure three.js construction of the pantry exterior (no React), so it can be previewed outside the app and the
-// R3F component stays thin. Shared geometry is built lazily once per JS context and never disposed; only the
-// shopping-list text is per instance.
+// R3F component stays thin. Shared geometry is built lazily once per theme (vertex tints come from the theme's
+// exteriorPalette, 3D text from the theme font) and kept until another theme's geometry is built; only the
+// shopping-list text is per instance. The room's wall / floor / baseboard are drawn by RoomShell (scene/room).
 import {
   BoxGeometry,
   BufferGeometry,
@@ -19,13 +20,15 @@ import {
   Vector2,
   Vector3,
   BufferAttribute,
-  Color,
+  type Material,
 } from "three";
 
 import { PANTRY_DIMENSIONS as D } from "./dimensions";
+import { getActiveTheme } from "../../../theme/store";
+import type { SceneTheme } from "../../../theme/types";
 import { advanceOf, textGeometry } from "./font";
-import { applyWoodUV, bevelBox, merge, place, prep, tint, type Vec3, woodPiece } from "./geometry";
-import { getMaterials, PALETTE } from "./materials";
+import { applyWoodUV, merge, mergeGrouped, place, prep, tint, type Vec3, woodPiece } from "./geometry";
+import { type ExteriorPalette, exteriorPalette, getMaterials } from "./materials";
 
 export { LIST_FALLBACK, listLines } from "./list";
 export const GROCER = "Grocer";
@@ -66,7 +69,8 @@ function leaf(w: number, h: number, t: number): BufferGeometry {
 const STOOL_POS: Vec3 = [1.82, 0, 0.42];
 const SEAT_TOP = 0.585;
 
-function buildStaticWood(): BufferGeometry {
+/** Carcass, crown and stool; group 0 = wood, group 1 = the crown's cove step (an edge strip in glowing themes). */
+function buildStaticWood(P: ExteriorPalette): BufferGeometry {
   const { width, height, depth, opening } = D;
   const sideW = width / 2 - opening.maxX; // 0.25
   const parts: BufferGeometry[] = [];
@@ -79,7 +83,7 @@ function buildStaticWood(): BufferGeometry {
         size: [sideW, height, depth],
         pos: [s * (opening.maxX + sideW / 2), height / 2, midZ],
         grain: "y",
-        color: PALETTE.wood,
+        color: P.wood,
         r: 0.022,
       }),
     );
@@ -90,14 +94,14 @@ function buildStaticWood(): BufferGeometry {
       size: [innerW + 0.02, height - opening.maxY, depth],
       pos: [0, (height + opening.maxY) / 2, midZ],
       grain: "x",
-      color: PALETTE.wood,
+      color: P.wood,
       r: 0.018,
     }),
     woodPiece({
       size: [innerW + 0.02, opening.minY, depth],
       pos: [0, opening.minY / 2, midZ],
       grain: "x",
-      color: PALETTE.wood,
+      color: P.wood,
       r: 0.012,
     }),
     // back panel (dark so the shelves read)
@@ -105,7 +109,7 @@ function buildStaticWood(): BufferGeometry {
       size: [innerW + 0.02, opening.maxY - opening.minY + 0.02, 0.05],
       pos: [0, (opening.maxY + opening.minY) / 2, -depth + 0.025],
       grain: "y",
-      color: PALETTE.interior,
+      color: P.interior,
       r: 0,
     }),
     // interior linings (darker inside faces)
@@ -113,28 +117,28 @@ function buildStaticWood(): BufferGeometry {
       size: [0.006, opening.maxY - opening.minY, -opening.minZ - 0.02],
       pos: [opening.minX + 0.003, (opening.maxY + opening.minY) / 2, opening.minZ / 2 - 0.01],
       grain: "y",
-      color: "#6E4A2C",
+      color: P.liningSide,
       r: 0,
     }),
     woodPiece({
       size: [0.006, opening.maxY - opening.minY, -opening.minZ - 0.02],
       pos: [opening.maxX - 0.003, (opening.maxY + opening.minY) / 2, opening.minZ / 2 - 0.01],
       grain: "y",
-      color: "#6E4A2C",
+      color: P.liningSide,
       r: 0,
     }),
     woodPiece({
       size: [innerW, 0.006, -opening.minZ - 0.02],
       pos: [0, opening.maxY - 0.003, opening.minZ / 2 - 0.01],
       grain: "z",
-      color: "#634127",
+      color: P.liningTop,
       r: 0,
     }),
     woodPiece({
       size: [innerW, 0.006, -opening.minZ - 0.02],
       pos: [0, opening.minY + 0.003, opening.minZ / 2 - 0.01],
       grain: "z",
-      color: "#7A5333",
+      color: P.liningBottom,
       r: 0,
     }),
     // plinth / kick board, a touch proud and darker
@@ -142,23 +146,25 @@ function buildStaticWood(): BufferGeometry {
       size: [width + 0.06, 0.1, depth + 0.03],
       pos: [0, 0.05, midZ + 0.005],
       grain: "x",
-      color: PALETTE.woodDark,
+      color: P.woodDark,
       r: 0.02,
     }),
-    // cove step under the crown
-    woodPiece({
-      size: [width + 0.12, 0.09, depth + 0.06],
-      pos: [0, height + 0.04, midZ + 0.02],
-      grain: "x",
-      color: PALETTE.crown,
-      r: 0.025,
-    }),
+  );
+  // cove step under the crown (built in its original order so every piece keeps its grain offset)
+  const edge = woodPiece({
+    size: [width + 0.12, 0.09, depth + 0.06],
+    pos: [0, height + 0.04, midZ + 0.02],
+    grain: "x",
+    color: P.crown,
+    r: 0.025,
+  });
+  parts.push(
     // chunky crown board
     woodPiece({
       size: [D.crownWidth, D.crownTop - height - 0.07, D.crownFrontZ - D.wallZ - 0.02],
       pos: [0, (D.crownTop + height + 0.07) / 2, (D.crownFrontZ + D.wallZ + 0.02) / 2],
       grain: "x",
-      color: PALETTE.wood,
+      color: P.wood,
       r: 0.04,
       jitter: 0.02,
     }),
@@ -180,7 +186,7 @@ function buildStaticWood(): BufferGeometry {
         ],
         22,
       ),
-      PALETTE.wood,
+      P.wood,
       { grain: "x", pos: [sx, 0, sz] },
     ),
   );
@@ -199,32 +205,30 @@ function buildStaticWood(): BufferGeometry {
           0.022,
           7,
         ),
-        PALETTE.woodDark,
+        P.woodDark,
         { grain: "y" },
       ),
     );
   }
   const ringY = 0.2;
   parts.push(
-    prep(new TorusGeometry(0.15 + (seatUnder - ringY) * Math.tan(splay), 0.011, 5, 24), PALETTE.woodDark, {
+    prep(new TorusGeometry(0.15 + (seatUnder - ringY) * Math.tan(splay), 0.011, 5, 24), P.woodDark, {
       grain: "x",
       pos: [sx, ringY, sz],
       rot: [Math.PI / 2, 0, 0],
     }),
   );
 
-  return merge(parts);
+  return mergeGrouped([parts, [edge]]);
 }
 
-function buildStaticPaint(): BufferGeometry {
+function buildStaticPaint(P: ExteriorPalette): BufferGeometry {
   const parts: BufferGeometry[] = [];
-  // baseboard along the wall
-  parts.push(place(tint(applyWoodUV(bevelBox(16, 0.15, 0.035, 0.008), "x"), PALETTE.cream), [0, 0.075, D.wallZ + 0.018]));
   // nail for the EZ sign
   const [nx, ny, nz] = D.signNail;
   parts.push(
-    prep(new CylinderGeometry(0.006, 0.006, 0.06, 6), PALETTE.nail, { pos: [nx, ny, nz + 0.03], rot: [Math.PI / 2, 0, 0] }),
-    prep(new CylinderGeometry(0.016, 0.016, 0.008, 10), PALETTE.nail, {
+    prep(new CylinderGeometry(0.006, 0.006, 0.06, 6), P.nail, { pos: [nx, ny, nz + 0.03], rot: [Math.PI / 2, 0, 0] }),
+    prep(new CylinderGeometry(0.016, 0.016, 0.008, 10), P.nail, {
       pos: [nx, ny, nz + 0.06],
       rot: [Math.PI / 2, 0, 0],
     }),
@@ -247,19 +251,19 @@ function buildStaticPaint(): BufferGeometry {
         ],
         18,
       ),
-      PALETTE.terracotta,
+      P.terracotta,
       { pos: [sx, SEAT_TOP, sz] },
     ),
-    prep(new CylinderGeometry(0.101, 0.101, 0.012, 16), PALETTE.soil, { pos: [sx, SEAT_TOP + 0.152, sz] }),
+    prep(new CylinderGeometry(0.101, 0.101, 0.012, 16), P.soil, { pos: [sx, SEAT_TOP + 0.152, sz] }),
   );
   return merge(parts);
 }
 
-function buildPlant(): BufferGeometry {
+function buildPlant(P: ExteriorPalette): BufferGeometry {
   const [sx, , sz] = STOOL_POS;
   const base: Vec3 = [sx, SEAT_TOP + 0.158, sz];
   const parts: BufferGeometry[] = [];
-  const greens = [PALETTE.leaf, PALETTE.leafDark, PALETTE.leafLight];
+  const greens = [P.leaf, P.leafDark, P.leafLight];
   // a plump upright rosette (the oval in the drawing)
   const leaves: { h: number; w: number; tilt: number; yaw: number }[] = [
     { h: 0.34, w: 0.06, tilt: 0.05, yaw: 0 },
@@ -287,7 +291,7 @@ function buildPlant(): BufferGeometry {
       new Vector3(s * 0.3, 0.53, 0.04),
     ].map((p) => p.add(new Vector3(...base)));
     const curve = new CatmullRomCurve3(pts);
-    parts.push(prep(new TubeGeometry(curve, 16, 0.0065, 4, false), PALETTE.leafDark));
+    parts.push(prep(new TubeGeometry(curve, 16, 0.0065, 4, false), P.leafDark));
     // little leaves along the tendril
     [0.45, 0.75, 1].forEach((t, k) => {
       const p = curve.getPointAt(t);
@@ -307,7 +311,8 @@ function buildPlant(): BufferGeometry {
 
 export const KNOB_LOCAL: Vec3 = [D.door.width - 0.075, 1.25, 0];
 
-function buildDoor(): BufferGeometry {
+/** Door leaf; group 0 = wood, group 1 = the mid-rail sill (an edge strip in glowing themes). */
+function buildDoor(P: ExteriorPalette): BufferGeometry {
   const { width: W, height: H, thickness: T } = D.door;
   const parts: BufferGeometry[] = [];
   const outerStile = 0.1;
@@ -318,14 +323,14 @@ function buildDoor(): BufferGeometry {
   const spanC = (spanL + spanR) / 2;
   const zc = -T / 2;
   parts.push(
-    woodPiece({ size: [outerStile, H, T], pos: [outerStile / 2, H / 2, zc], grain: "y", color: PALETTE.wood, r: 0.012 }),
-    woodPiece({ size: [innerStile, H, T], pos: [W - innerStile / 2, H / 2, zc], grain: "y", color: PALETTE.wood, r: 0.012 }),
-    woodPiece({ size: [spanW + 0.02, 0.11, T * 0.94], pos: [spanC, H - 0.055, zc], grain: "x", color: PALETTE.wood, r: 0.01 }),
-    woodPiece({ size: [spanW + 0.02, 0.13, T * 0.94], pos: [spanC, 0.065, zc], grain: "x", color: PALETTE.wood, r: 0.01 }),
-    woodPiece({ size: [spanW + 0.02, 0.15, T * 0.94], pos: [spanC, 0.9, zc], grain: "x", color: PALETTE.wood, r: 0.01 }),
-    // the little ledge across the mid rail (drawn as a protruding sill)
-    woodPiece({ size: [W - 0.02, 0.045, T + 0.045], pos: [W / 2, 0.99, -T + (T + 0.045) / 2], grain: "x", color: PALETTE.crown, r: 0.013 }),
+    woodPiece({ size: [outerStile, H, T], pos: [outerStile / 2, H / 2, zc], grain: "y", color: P.wood, r: 0.012 }),
+    woodPiece({ size: [innerStile, H, T], pos: [W - innerStile / 2, H / 2, zc], grain: "y", color: P.wood, r: 0.012 }),
+    woodPiece({ size: [spanW + 0.02, 0.11, T * 0.94], pos: [spanC, H - 0.055, zc], grain: "x", color: P.wood, r: 0.01 }),
+    woodPiece({ size: [spanW + 0.02, 0.13, T * 0.94], pos: [spanC, 0.065, zc], grain: "x", color: P.wood, r: 0.01 }),
+    woodPiece({ size: [spanW + 0.02, 0.15, T * 0.94], pos: [spanC, 0.9, zc], grain: "x", color: P.wood, r: 0.01 }),
   );
+  // the little ledge across the mid rail (drawn as a protruding sill)
+  const sill = woodPiece({ size: [W - 0.02, 0.045, T + 0.045], pos: [W / 2, 0.99, -T + (T + 0.045) / 2], grain: "x", color: P.crown, r: 0.013 });
   // louvres
   const slat = (y0: number, y1: number) => {
     const pitch = 0.06;
@@ -338,7 +343,7 @@ function buildDoor(): BufferGeometry {
           pos: [spanC, y0 + p * (i + 0.5), zc],
           rot: [0.78, 0, 0],
           grain: "x",
-          color: PALETTE.slat,
+          color: P.slat,
           r: 0,
           jitter: 0.04,
         }),
@@ -347,7 +352,7 @@ function buildDoor(): BufferGeometry {
   };
   slat(1.015, H - 0.11);
   slat(0.13, 0.825);
-  return merge(parts);
+  return mergeGrouped([parts, [sill]]);
 }
 
 function buildKnob(): BufferGeometry {
@@ -375,16 +380,16 @@ function buildKnob(): BufferGeometry {
 
 export type LetterLayout = { ch: string; geometry: BufferGeometry; x: number; halfW: number };
 
-function buildLetters(): { letters: LetterLayout[]; z: number } {
+function buildLetters(P: ExteriorPalette, theme: SceneTheme): { letters: LetterLayout[]; z: number } {
   const size = D.lettersSize;
   const gap = 0.024;
   const geos = [...GROCER].map((ch) => {
-    const g = textGeometry(ch, { size, depth: 0.12, bevel: 0.028, bevelSegments: 3, curveSegments: 5 });
+    const g = textGeometry(ch, { size, depth: 0.12, bevel: 0.028, bevelSegments: 3, curveSegments: 5 }, theme);
     g.computeBoundingBox();
     const bb = g.boundingBox!;
     g.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
     applyWoodUV(g, "y", ch.charCodeAt(0));
-    tint(g, PALETTE.woodLight, 0.03, ch.charCodeAt(0));
+    tint(g, P.woodLight, 0.03, ch.charCodeAt(0));
     g.computeBoundingBox();
     g.computeBoundingSphere();
     return { ch, geometry: g as BufferGeometry, w: bb.max.x - bb.min.x };
@@ -401,35 +406,36 @@ function buildLetters(): { letters: LetterLayout[]; z: number } {
 // ---------------------------------------------------------------------------------------------------------------
 // EZ sign (local space: origin at the nail; the sign group rotates about it)
 
-function buildSign(): BufferGeometry {
+/** Sign; group 0 = board (+ screw eyes, string), 1 = border strips, 2 = "EZ" lettering. */
+function buildSign(P: ExteriorPalette, theme: SceneTheme): BufferGeometry {
   const pw = 0.62;
   const ph = 0.34;
   const pd = 0.045;
   const cy = -0.44;
   const cz = 0.04;
   const top = cy + ph / 2;
-  const parts: BufferGeometry[] = [
-    woodPiece({ size: [pw, ph, pd], pos: [0, cy, cz], grain: "x", color: PALETTE.wood, r: 0.018 }),
-    // raised border frame for a crafted look
-    woodPiece({ size: [pw - 0.04, 0.02, 0.012], pos: [0, top - 0.035, cz + pd / 2 + 0.004], grain: "x", color: PALETTE.crown, r: 0.005 }),
-    woodPiece({ size: [pw - 0.04, 0.02, 0.012], pos: [0, cy - ph / 2 + 0.035, cz + pd / 2 + 0.004], grain: "x", color: PALETTE.crown, r: 0.005 }),
+  const parts: BufferGeometry[] = [woodPiece({ size: [pw, ph, pd], pos: [0, cy, cz], grain: "x", color: P.wood, r: 0.018 })];
+  // raised border frame for a crafted look
+  const frame = [
+    woodPiece({ size: [pw - 0.04, 0.02, 0.012], pos: [0, top - 0.035, cz + pd / 2 + 0.004], grain: "x", color: P.crown, r: 0.005 }),
+    woodPiece({ size: [pw - 0.04, 0.02, 0.012], pos: [0, cy - ph / 2 + 0.035, cz + pd / 2 + 0.004], grain: "x", color: P.crown, r: 0.005 }),
   ];
   // "EZ" burned into a lighter plaque
-  const ez = textGeometry("EZ", { size: 0.2, depth: 0.022, bevel: 0.006, bevelSegments: 2, curveSegments: 4 });
+  const ez = textGeometry("EZ", { size: 0.2, depth: 0.022, bevel: 0.006, bevelSegments: 2, curveSegments: 4 }, theme);
   ez.computeBoundingBox();
   const bb = ez.boundingBox!;
   ez.translate(-(bb.min.x + bb.max.x) / 2, cy - (bb.min.y + bb.max.y) / 2, cz + pd / 2 - 0.002 - bb.min.z);
-  parts.push(prep(ez, "#6B3E1C", { grain: "y" }));
+  const text = prep(ez, P.ezText, { grain: "y" });
   // screw eyes + triangular string up to the nail
   const eyes: Vec3[] = [
     [-pw / 2 + 0.07, top + 0.004, cz],
     [pw / 2 - 0.07, top + 0.004, cz],
   ];
   for (const eye of eyes) {
-    parts.push(prep(new TorusGeometry(0.012, 0.004, 4, 10), PALETTE.nail, { pos: [eye[0], eye[1] + 0.01, eye[2]] }));
-    parts.push(prep(cylinderBetween([0, 0.004, 0.05], [eye[0], eye[1] + 0.018, eye[2]], 0.0035, 0.0035, 4), PALETTE.string));
+    parts.push(prep(new TorusGeometry(0.012, 0.004, 4, 10), P.nail, { pos: [eye[0], eye[1] + 0.01, eye[2]] }));
+    parts.push(prep(cylinderBetween([0, 0.004, 0.05], [eye[0], eye[1] + 0.018, eye[2]], 0.0035, 0.0035, 4), P.string));
   }
-  return merge(parts);
+  return mergeGrouped([parts, frame, [text]]);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -457,10 +463,10 @@ function buildPaper(): BufferGeometry {
   return g;
 }
 
-function buildPin(): BufferGeometry {
+function buildPin(P: ExteriorPalette): BufferGeometry {
   return merge([
-    prep(new SphereGeometry(0.018, 10, 8), PALETTE.pin, { pos: [0, NOTE_PIN_Y, 0.028] }),
-    prep(new CylinderGeometry(0.009, 0.013, 0.014, 10), PALETTE.pin, {
+    prep(new SphereGeometry(0.018, 10, 8), P.pin, { pos: [0, NOTE_PIN_Y, 0.028] }),
+    prep(new CylinderGeometry(0.009, 0.013, 0.014, 10), P.pin, {
       pos: [0, NOTE_PIN_Y, 0.012],
       rot: [Math.PI / 2, 0, 0],
     }),
@@ -469,20 +475,20 @@ function buildPin(): BufferGeometry {
 
 const LIST_MAX_W = 0.18;
 
-function fitLine(text: string, size: number): { text: string; scale: number } {
+function fitLine(text: string, size: number, theme: SceneTheme): { text: string; scale: number } {
   let t = text;
   const minScale = 0.62;
-  const w = advanceOf(t, size);
+  const w = advanceOf(t, size, theme);
   if (w <= LIST_MAX_W) return { text: t, scale: 1 };
   if (w * minScale <= LIST_MAX_W) return { text: t, scale: LIST_MAX_W / w };
-  while (t.length > 2 && advanceOf(t + "..", size) * minScale > LIST_MAX_W) t = t.slice(0, -1);
+  while (t.length > 2 && advanceOf(t + "..", size, theme) * minScale > LIST_MAX_W) t = t.slice(0, -1);
   return { text: t.trimEnd() + "..", scale: minScale };
 }
 
-export function buildListText(lines: string[]): BufferGeometry {
+export function buildListText(lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const z = 0.0055;
-  const title = textGeometry("List", { size: 0.052, depth: 0.0015, curveSegments: 3 });
+  const title = textGeometry("List", { size: 0.052, depth: 0.0015, curveSegments: 3 }, theme);
   title.computeBoundingBox();
   const tb = title.boundingBox!;
   title.translate(-(tb.min.x + tb.max.x) / 2, 0.072, z);
@@ -492,9 +498,9 @@ export function buildListText(lines: string[]): BufferGeometry {
   parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [0.026, 0.062, z], [0, 0, -0.06]));
   lines.slice(0, 3).forEach((line, i) => {
     const size = 0.038;
-    const fitted = fitLine(line, size);
+    const fitted = fitLine(line, size, theme);
     if (!fitted.text.trim()) return;
-    const g = textGeometry(fitted.text, { size, depth: 0.0015, curveSegments: 3 });
+    const g = textGeometry(fitted.text, { size, depth: 0.0015, curveSegments: 3 }, theme);
     g.scale(fitted.scale, fitted.scale, 1);
     g.translate(-0.086, 0.002 - i * 0.064, z);
     parts.push(g);
@@ -504,32 +510,6 @@ export function buildListText(lines: string[]): BufferGeometry {
   for (const p of parts) p.deleteAttribute("uv");
   for (const p of parts) p.setAttribute("uv", new BufferAttribute(new Float32Array(p.getAttribute("position").count * 2), 2));
   return merge(parts);
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// room
-
-function buildWall(): BufferGeometry {
-  const g = new PlaneGeometry(16, 9, 1, 8);
-  g.translate(0, 4.5, D.wallZ);
-  const pos = g.getAttribute("position");
-  const colors = new Float32Array(pos.count * 3);
-  const lo = new Color("#E9D9C5");
-  const hi = new Color(PALETTE.wall);
-  const c = new Color();
-  for (let i = 0; i < pos.count; i++) {
-    c.copy(lo).lerp(hi, Math.min(1, pos.getY(i) / 4.5));
-    colors.set([c.r, c.g, c.b], i * 3);
-  }
-  g.setAttribute("color", new BufferAttribute(colors, 3));
-  return g;
-}
-
-function buildFloor(): BufferGeometry {
-  const g = new PlaneGeometry(16, 10);
-  g.rotateX(-Math.PI / 2);
-  g.translate(0, 0, D.wallZ + 5);
-  return g;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -545,45 +525,57 @@ type Shared = {
   sign: BufferGeometry;
   paper: BufferGeometry;
   pin: BufferGeometry;
-  wall: BufferGeometry;
-  floor: BufferGeometry;
   hit: BufferGeometry;
   noteHit: BufferGeometry;
 };
 
-let shared: Shared | null = null;
+/** Theme-dependent geometry (vertex tints, theme font), keyed by theme id. */
+const shared = new Map<string, Shared>();
+let hitGeos: { hit: BufferGeometry; noteHit: BufferGeometry } | null = null;
 
-export function getSharedGeometry(): Shared {
-  if (shared) return shared;
-  const { letters, z } = buildLetters();
-  shared = {
-    wood: buildStaticWood(),
-    paint: buildStaticPaint(),
-    plant: buildPlant(),
-    door: buildDoor(),
+function disposeShared(s: Shared) {
+  for (const g of [s.wood, s.paint, s.plant, s.door, s.knob, s.sign, s.paper, s.pin]) g.dispose();
+  for (const l of s.letters) l.geometry.dispose();
+}
+
+export function getSharedGeometry(theme: SceneTheme = getActiveTheme()): Shared {
+  const hit = shared.get(theme.id);
+  if (hit) return hit;
+  // Only one theme is on screen at a time: free the previous theme's geometry (three re-uploads it if still drawn).
+  for (const [id, old] of shared) {
+    disposeShared(old);
+    shared.delete(id);
+  }
+  const P = exteriorPalette(theme);
+  hitGeos ??= { hit: new BoxGeometry(2.7, 4.2, 1.5), noteHit: new BoxGeometry(NOTE_HIT.size[0], NOTE_HIT.size[1], NOTE_HIT.size[2]) };
+  const { letters, z } = buildLetters(P, theme);
+  const s: Shared = {
+    wood: buildStaticWood(P),
+    paint: buildStaticPaint(P),
+    plant: buildPlant(P),
+    door: buildDoor(P),
     knob: buildKnob(),
     letters,
     lettersZ: z,
-    sign: buildSign(),
+    sign: buildSign(P, theme),
     paper: buildPaper(),
-    pin: buildPin(),
-    wall: buildWall(),
-    floor: buildFloor(),
-    hit: new BoxGeometry(2.7, 4.2, 1.5),
-    noteHit: new BoxGeometry(NOTE_HIT.size[0], NOTE_HIT.size[1], NOTE_HIT.size[2]),
+    pin: buildPin(P),
+    hit: hitGeos.hit,
+    noteHit: hitGeos.noteHit,
   };
-  return shared;
+  shared.set(theme.id, s);
+  return s;
 }
 
 /** Tap target that covers the body, doors and letters generously. */
 export const HIT_BOX = { position: [0, 2.1, -0.25] as Vec3 };
 /**
- * Tap target for the pinned list: generously larger than the paper (about 1.6x) and deep enough that its front face
+ * Tap target for the pinned list: generously larger than the paper (about 1.8x wide) and deep enough that its front face
  * (z = 0.62) sits in front of HIT_BOX's (z = 0.5), so the nearest hit is always the note and the doors stay shut.
  */
 export const NOTE_HIT = {
   position: [D.note.x + 0.02, D.note.y, 0.27] as Vec3,
-  size: [0.36, 0.56, 0.7] as Vec3,
+  size: [0.44, 0.62, 0.7] as Vec3,
 };
 
 export type ExteriorHandles = {
@@ -599,6 +591,11 @@ export type ExteriorHandles = {
   dispose(): void;
 };
 
+/** One material when every group would get the same one (one draw call), else a per-group material array. */
+function groupMats(...mats: Material[]): Material | Material[] {
+  return mats.every((m) => m === mats[0]) ? mats[0] : mats;
+}
+
 function mesh(geo: BufferGeometry, mat: Mesh["material"], cast = true, receive = true): Mesh {
   const m = new Mesh(geo, mat);
   m.castShadow = cast;
@@ -606,15 +603,13 @@ function mesh(geo: BufferGeometry, mat: Mesh["material"], cast = true, receive =
   return m;
 }
 
-export function createExterior(): ExteriorHandles {
-  const g = getSharedGeometry();
-  const m = getMaterials();
+export function createExterior(theme: SceneTheme = getActiveTheme()): ExteriorHandles {
+  const g = getSharedGeometry(theme);
+  const m = getMaterials(theme);
   const root = new Group();
   root.name = "PantryExterior";
 
-  root.add(mesh(g.wall, m.wall, false, true));
-  root.add(mesh(g.floor, m.floor, false, true));
-  root.add(mesh(g.wood, m.wood));
+  root.add(mesh(g.wood, groupMats(m.wood, m.edge)));
   root.add(mesh(g.paint, m.paint));
   root.add(mesh(g.plant, m.leaf, true, false));
 
@@ -625,7 +620,7 @@ export function createExterior(): ExteriorHandles {
     pivot.position.set(side * hingeX, bottomY, hingeZ);
     const inner = new Group();
     if (side === 1) inner.scale.x = -1;
-    inner.add(mesh(g.door, m.wood));
+    inner.add(mesh(g.door, groupMats(m.wood, m.doorEdge)));
     const knob = mesh(g.knob, m.knob, true, false);
     knob.position.set(...KNOB_LOCAL);
     inner.add(knob);
@@ -637,7 +632,7 @@ export function createExterior(): ExteriorHandles {
   const rightDoor = makeDoor(1);
 
   const letters = g.letters.map((l) => {
-    const lm = mesh(l.geometry, m.wood);
+    const lm = mesh(l.geometry, m.letters);
     lm.position.set(l.x, D.crownTop, g.lettersZ);
     root.add(lm);
     return { mesh: lm, x: l.x, halfW: l.halfW };
@@ -645,7 +640,7 @@ export function createExterior(): ExteriorHandles {
 
   const sign = new Group();
   sign.position.set(...D.signNail);
-  sign.add(mesh(g.sign, m.wood, true, true));
+  sign.add(mesh(g.sign, groupMats(m.wood, m.signFrame, m.signText), true, true));
   root.add(sign);
 
   const note = new Group();
@@ -674,7 +669,7 @@ export function createExterior(): ExteriorHandles {
       if (key === lastKey) return;
       lastKey = key;
       textMesh.geometry.dispose();
-      textMesh.geometry = buildListText(lines);
+      textMesh.geometry = buildListText(lines, theme);
     },
     dispose() {
       // Shared geometry/materials stay alive (module level). Only per-instance text is freed; safe to call twice

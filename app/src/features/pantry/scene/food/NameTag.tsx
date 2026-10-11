@@ -2,6 +2,9 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+
+import { useSceneTheme } from "../../../theme/ThemeProvider";
+import { textScaleFor } from "../sceneTheme";
 import { truncateLabel } from "./foodKind";
 import { getTagMaterials } from "./materials";
 import { getTextGeometry, textWidth } from "./text";
@@ -26,23 +29,24 @@ function geo() {
 }
 
 /**
- * A little cream place-card standing in front of the item: name (truncated), optional red "!" badge for
- * allergen items (a shape cue, not just colour) and an orange dot when running low.
+ * A little place-card (theme paper + ink, theme font) standing in front of the item: name (truncated), optional "!"
+ * badge in the theme's allergen colour for allergen items (a shape cue, not just colour) and an orange dot when low.
  */
 export function NameTag({ name, low, warn, dimmed }: { name: string; low: boolean; warn: boolean; dimmed: boolean }) {
+  const theme = useSceneTheme();
   const g = geo();
-  const m = getTagMaterials();
+  const m = getTagMaterials(theme);
   const v = dimmed ? "dim" : "normal";
   const label = truncateLabel(name);
   const { textGeo, scale, x } = useMemo(() => {
-    const tg = getTextGeometry(label, TEXT_SIZE, TEXT_DEPTH);
+    const tg = getTextGeometry(label, TEXT_SIZE * textScaleFor(theme, "tag"), TEXT_DEPTH, theme);
     const left = warn ? 0.04 : 0.012;
     const right = low ? 0.034 : 0.012;
     const maxW = TAG_WIDTH - left - right;
     const w = textWidth(tg);
     return { textGeo: tg, scale: w > maxW ? maxW / w : 1, x: (left - right) / 2 };
-  }, [label, warn, low]);
-  const bangGeo = useMemo(() => (warn ? getTextGeometry("!", 0.026, 0.002) : null), [warn]);
+  }, [label, warn, low, theme]);
+  const bangGeo = useMemo(() => (warn ? getTextGeometry("!", 0.026, 0.002, theme) : null), [warn, theme]);
 
   return (
     <group position={[0, 0.036, 0.19]} rotation={[-0.45, 0, 0]}>

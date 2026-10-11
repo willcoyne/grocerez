@@ -9,7 +9,7 @@ import { font, maxFontScale, pressedOpacity, size } from "@/theme";
 
 import { searchItems } from "../filters";
 import type { PantryItem } from "../types";
-import { GROUP_CHIP, GROUP_LABEL, allergenLabel, pantry, softShadow } from "./palette";
+import { allergenLabel, GROUP_CHIP, GROUP_LABEL, type OverlayPalette, shadowFor, useOverlayPalette, useOverlayStyles } from "./palette";
 import { useOverlayInsets } from "./useOverlayInsets";
 
 export type SearchPanelProps = {
@@ -36,6 +36,8 @@ function SearchPanelBody({
   myAllergens,
   bottomOffset,
 }: Omit<SearchPanelProps, "visible" | "myAllergens"> & { myAllergens: Allergen[] }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const [query, setQuery] = useState("");
   const results = useMemo(() => searchItems(items, query), [items, query]);
   const inset = useOverlayInsets(bottomOffset);
@@ -61,16 +63,16 @@ function SearchPanelBody({
             entering={SlideInDown.springify().damping(18)}
             exiting={SlideOutDown.duration(180)}
             accessibilityViewIsModal
-            style={[styles.card, softShadow, { marginLeft: inset.left, marginRight: inset.right, marginBottom: inset.bottom }]}>
+            style={[styles.card, shadowFor(P), { marginLeft: inset.left, marginRight: inset.right, marginBottom: inset.bottom }]}>
             <View style={styles.inputRow}>
-              <Search size={20} color={pantry.oakDark} strokeWidth={2.5} />
+              <Search size={20} color={P.oakDark} strokeWidth={2.5} />
               <TextInput
                 testID="pantry-search-input"
                 autoFocus
                 value={query}
                 onChangeText={setQuery}
                 placeholder="Search your pantry"
-                placeholderTextColor={pantry.muted}
+                placeholderTextColor={P.muted}
                 accessibilityLabel="Search your pantry"
                 returnKeyType="search"
                 autoCorrect={false}
@@ -89,13 +91,13 @@ function SearchPanelBody({
                 accessibilityLabel="Close search"
                 hitSlop={4}
                 style={({ pressed }) => [styles.close, pressed && { opacity: pressedOpacity }]}>
-                <X size={20} color={pantry.oakDark} strokeWidth={2.5} />
+                <X size={20} color={P.oakDark} strokeWidth={2.5} />
               </Pressable>
             </View>
 
             {empty ? (
               <View style={styles.empty} testID="pantry-search-empty">
-                <AppText variant="bodyS" center style={{ color: pantry.muted }}>
+                <AppText variant="bodyS" center style={{ color: P.muted }}>
                   {empty}
                 </AppText>
               </View>
@@ -118,10 +120,13 @@ function SearchPanelBody({
 }
 
 function Separator() {
+  const styles = useOverlayStyles(makeStyles);
   return <View style={styles.sep} />;
 }
 
 function ResultRow({ item, myAllergens, onPress }: { item: PantryItem; myAllergens: Allergen[]; onPress: () => void }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const hits = item.allergens.filter((a) => myAllergens.includes(a));
   const group = GROUP_CHIP[item.group];
   const warn = hits.length ? `Contains ${hits.map(allergenLabel).join(", ")}` : null;
@@ -137,11 +142,11 @@ function ResultRow({ item, myAllergens, onPress }: { item: PantryItem; myAllerge
       accessibilityHint="Shows it on the shelf"
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
       <View style={styles.rowText}>
-        <AppText variant="bodyL" weight="heavy" numberOfLines={2} style={{ color: pantry.ink }}>
+        <AppText variant="bodyL" weight="heavy" numberOfLines={2} style={{ color: P.ink }}>
           {item.name}
         </AppText>
         {item.brand ? (
-          <AppText variant="caption" numberOfLines={1} style={{ color: pantry.muted }}>
+          <AppText variant="caption" numberOfLines={1} style={{ color: P.muted }}>
             {item.brand}
           </AppText>
         ) : null}
@@ -153,8 +158,8 @@ function ResultRow({ item, myAllergens, onPress }: { item: PantryItem; myAllerge
           </View>
           {warn ? (
             <View style={[styles.chip, styles.warnChip]} testID={`pantry-search-allergen-${item.id}`}>
-              <TriangleAlert size={12} color={pantry.redInk} strokeWidth={2.75} />
-              <AppText variant="micro" uppercase={false} style={{ color: pantry.redInk }}>
+              <TriangleAlert size={12} color={P.redInk} strokeWidth={2.75} />
+              <AppText variant="micro" uppercase={false} style={{ color: P.redInk }}>
                 {warn}
               </AppText>
             </View>
@@ -165,18 +170,19 @@ function ResultRow({ item, myAllergens, onPress }: { item: PantryItem; myAllerge
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: "rgba(43,33,24,0.18)" },
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+  backdrop: { backgroundColor: P.backdropSoft },
   anchor: { flex: 1, justifyContent: "flex-end", alignItems: "flex-start" },
   card: {
     // stretch (not width:100%) so the left/right safe-area margins shrink the card instead of pushing it off-screen
     alignSelf: "stretch",
     maxWidth: 420,
     maxHeight: "70%",
-    backgroundColor: pantry.cream,
-    borderRadius: 24,
-    borderWidth: 3,
-    borderColor: pantry.oak,
+    backgroundColor: P.panel,
+    borderRadius: P.r(24),
+    borderWidth: P.frame,
+    borderColor: P.border,
     overflow: "hidden",
   },
   inputRow: {
@@ -187,24 +193,24 @@ const styles = StyleSheet.create({
     paddingRight: 4,
     minHeight: 56,
     borderBottomWidth: 1,
-    borderBottomColor: "#EADBC6",
-    backgroundColor: "#FFFDF8",
+    borderBottomColor: P.divider,
+    backgroundColor: P.panelAlt,
   },
   input: {
     flex: 1,
     minHeight: size.input,
     fontFamily: font.bodySemi,
     fontSize: 16,
-    color: pantry.ink,
+    color: P.ink,
   },
   close: { width: size.hit, height: size.hit, alignItems: "center", justifyContent: "center" },
   empty: { paddingHorizontal: 20, paddingVertical: 24 },
   list: { flexGrow: 0 },
-  sep: { height: 1, marginHorizontal: 14, backgroundColor: "#EFE3D2" },
+  sep: { height: 1, marginHorizontal: 14, backgroundColor: P.dividerSoft },
   row: { minHeight: 64, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center" },
-  rowPressed: { backgroundColor: "#F6EAD8" },
+  rowPressed: { backgroundColor: P.pressed },
   rowText: { flex: 1, gap: 2 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
-  warnChip: { backgroundColor: pantry.redTint, borderWidth: 1, borderColor: pantry.red },
+  chip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: P.r(10) },
+  warnChip: { backgroundColor: P.redTint, borderWidth: 1, borderColor: P.red },
 });
