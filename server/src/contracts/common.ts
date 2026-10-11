@@ -13,7 +13,15 @@ export type ErrorBody = z.infer<typeof ErrorBody>;
 
 /** Dates are ISO-8601 strings on the wire. Calendar dates (expiresAt) are YYYY-MM-DD. */
 export const IsoDateTime = z.string();
-export const CalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
+export const CalendarDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD")
+  .refine((s) => {
+    const y = Number(s.slice(0, 4));
+    if (y < 2000 || y > 2100) return false;
+    const d = new Date(`${s}T00:00:00.000Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }, "expected a real calendar date between 2000 and 2100");
 
 /** Item categories in store-aisle order (the shopping list sort order). */
 export const CATEGORIES = [

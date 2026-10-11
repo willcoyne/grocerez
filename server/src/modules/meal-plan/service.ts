@@ -55,7 +55,7 @@ async function meetDeadlines(tx: Tx, groupId: string, today: string, last: strin
   const cabinet = toExpirables(await mealPlanRepo.expirable(tx, groupId));
   if (cabinet.length === 0) return;
   const late = [...byDate]
-    .map(([date, meal]) => ({ date, meal, deadline: deadlineFor(meal.uses, cabinet) }))
+    .map(([date, meal]) => ({ date, meal, deadline: deadlineFor(meal.uses, cabinet, today) }))
     .filter((x): x is typeof x & { deadline: string } => x.deadline !== null && x.deadline < x.date)
     .sort((a, b) => a.deadline.localeCompare(b.deadline));
   if (late.length === 0) return;
@@ -71,6 +71,14 @@ async function meetDeadlines(tx: Tx, groupId: string, today: string, last: strin
       break;
     }
   }
+}
+
+/** Manual plan dates: household today−7 … today+60 (keeps the swap parking date unreachable). */
+async function assertPlanDate(groupId: string, date: string) {
+  const today = await householdTodayOf(groupId);
+  const first = addDays(today, -7);
+  const last = addDays(today, 60);
+  if (date < first || date > last) throw badRequest(`Date must be between ${first} and ${last}`, "INVALID_DATE");
 }
 
 const changed = (groupId: string, by: string) => emitGroup(groupId, "meal-plan:changed", by);
@@ -103,6 +111,7 @@ export const mealPlanService = {
 
   /** POST /meal-plan: add a dinner by hand. Safety-checked like apply (422 PLAN_UNSAFE); 409 DATE_TAKEN. */
   async add(groupId: string, userId: string, body: { date: string; meal: PlanMeal }): Promise<PlannedMeal> {
+    await assertPlanDate(groupId, body.date);
     const meal = { ...body.meal, date: body.date };
     const [safety] = await assertMealsSafe(groupId, [meal], []);
     const row = await prisma.$transaction(async (tx) => {
@@ -116,6 +125,7 @@ export const mealPlanService = {
 
   /** PATCH /meal-plan/:id: move to `date`; if that day is planned, the two meals swap days (one transaction). */
   async move(groupId: string, userId: string, id: string, date: string): Promise<PlannedMeal> {
+    await assertPlanDate(groupId, date);
     const { row, wrote } = await prisma.$transaction(async (tx) => {
       await mealPlanRepo.lock(tx, groupId);
       const row = await mealPlanRepo.find(tx, groupId, id);
@@ -146,9 +156,11 @@ export const mealPlanService = {
     const items = [...new Set(meal.missing)].map((name) => ({ name, forMeals: [meal.title] }));
     await assertMealsSafe(groupId, [meal], items);
     const wanted = await resolveWanted(groupId, userId, items);
-    const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], (tx) =>
+    const { result, listChanged } = await withRegeneration(groupId, userId, [], (tx) =>
       writeWanted(tx, groupId, userId, wanted, row.agentRunId),
     );
+    // withRegeneration already emits when regeneration changed the list; otherwise emit only if rows were added.
+    if (result.ids.length > 0 && listChanged === 0) emitGroup(groupId, "shopping-list:changed", userId);
     return { added: result.ids.length, skipped: result.skipped };
   },
 
@@ -198,6 +210,7 @@ export const mealPlanService = {
     meals: PlanMeal[],
     replacePlannedMealId: string | null,
     safetyByIndex: (PlannedMealSafety | undefined)[] = [],
+    isSwap = replacePlannedMealId !== null,
   ): Promise<number> {
     // meetDeadlines may re-date a meal (new object), so safety follows the meal by title.
     const safetyOf = new Map<string, PlannedMealSafety>();
@@ -208,16 +221,16 @@ export const mealPlanService = {
     const byDate = new Map<string, PlanMeal>();
     for (const m of meals) if (m.date && m.date >= today && m.date <= last && !byDate.has(m.date)) byDate.set(m.date, m);
     await mealPlanRepo.lock(tx, groupId);
-    if (!replacePlannedMealId) await meetDeadlines(tx, groupId, today, last, byDate);
+    if (!isSwap) await meetDeadlines(tx, groupId, today, last, byDate);
 
-    if (replacePlannedMealId) {
-      const row = await mealPlanRepo.find(tx, groupId, replacePlannedMealId);
-      if (row) {
-        const date = rowDate(row);
-        const meal = byDate.get(date) ?? meals[0];
-        await mealPlanRepo.replaceMeal(tx, groupId, row.id, date, meal, runId, safeFor(meal));
-        return 1;
-      }
+    if (isSwap) {
+      const row = replacePlannedMealId ? await mealPlanRepo.find(tx, groupId, replacePlannedMealId) : null;
+      // A swap run only ever touches its own row; if that row is gone, plan nothing.
+      if (!row) return 0;
+      const date = rowDate(row);
+      const meal = byDate.get(date) ?? meals[0];
+      await mealPlanRepo.replaceMeal(tx, groupId, row.id, date, meal, runId, safeFor(meal));
+      return 1;
     }
     for (const [date, meal] of byDate) await mealPlanRepo.upsertOnDate(tx, groupId, date, meal, userId, runId, safeFor(meal));
     return byDate.size;

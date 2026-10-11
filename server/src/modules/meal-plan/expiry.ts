@@ -17,8 +17,8 @@ export const warningsFor = (uses: string[], date: string, cabinet: Expirable[]):
     .map((c) => ({ kind: "expires_before" as const, item: c.name, expiresAt: c.expiresAt }));
 
 /** Earliest expiry among the cabinet items a meal uses, or null. */
-export const deadlineFor = (uses: string[], cabinet: Expirable[]): string | null =>
-  cabinet.filter((c) => usedBy(uses, c)).reduce<string | null>((min, c) => (min === null || c.expiresAt < min ? c.expiresAt : min), null);
+export const deadlineFor = (uses: string[], cabinet: Expirable[], today?: string): string | null =>
+  cabinet.filter((c) => (today === undefined || c.expiresAt >= today) && usedBy(uses, c)).reduce<string | null>((min, c) => (min === null || c.expiresAt < min ? c.expiresAt : min), null);
 
 /** Spec §14 rule 3: items expiring by `horizon` (or already expired) and the earliest meal in today…weekEnd using each. */
 export function coverage(

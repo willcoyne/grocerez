@@ -30,6 +30,7 @@ export function handleSocketEvent(qc: QueryClient, event: string, payload: Group
       if (groupId) {
         void qc.invalidateQueries({ queryKey: keys.cabinet(groupId) });
         void qc.invalidateQueries({ queryKey: keys.alerts(groupId) });
+        void qc.invalidateQueries({ queryKey: keys.mealPlans(groupId) });
       }
       break;
     case "preferences:changed":

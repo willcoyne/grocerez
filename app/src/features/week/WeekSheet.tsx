@@ -26,6 +26,7 @@ import {
   paperStyles,
 } from "@/features/pantry/overlay/PaperSheet";
 import { pantry } from "@/features/pantry/overlay/palette";
+import { confirm } from "@/lib/confirm";
 import { plural } from "@/lib/format";
 
 import { useWeekRun, type DayPreview } from "./useWeekRun";
@@ -58,7 +59,17 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
   const proposed = v.state === "proposed" ? v.proposed : new Map<string, PlanMeal>();
 
   // "Plan a dinner with these": the earliest free date in the week (the agent already puts expiring items first).
+  // Unsaved proposal on the sheet counts as busy: starting another run would silently discard it.
+  const locked = busy || v.state === "proposed";
+  // Week full: it targets the earliest day and replaces that dinner (after a confirm).
   const freeDate = dates.find((d) => !planned.has(d));
+  const useSoonTarget = freeDate ?? dates[0];
+  const planUseSoon = async () => {
+    if (!useSoonTarget) return;
+    const existing = planned.get(useSoonTarget);
+    if (existing && !(await confirm(`Replace ${existing.meal.title}?`, `${dayLabels(useSoonTarget).spoken} has no free dinner slot.`, "Replace"))) return;
+    week.begin([useSoonTarget], "plan");
+  };
   const planWeek = () => week.begin(datesToPlan(dates, planned), "plan");
 
   let body: React.ReactNode;
@@ -79,7 +90,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
     );
   } else {
     const useSoon = (
-      <UseSoonSection items={plan.data.expiring} canPlan={!busy && !!freeDate} onPlan={() => freeDate && week.begin([freeDate], "plan")} />
+      <UseSoonSection items={plan.data.expiring} canPlan={!locked && !!useSoonTarget} onPlan={() => void planUseSoon()} />
     );
     const days = dates.map((d) => {
       const saved = planned.get(d);
@@ -90,7 +101,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
       else if (preview) row = <PreviewRow date={d} preview={preview} />;
       else if (busy && runDates.has(d)) row = <FindingRow date={d} />;
       else if (saved) row = <MealRow date={d} meal={saved.meal} warnings={saved.warnings} onPress={() => setOpenId(saved.id)} />;
-      else row = <EmptyRow date={d} disabled={busy} onPress={() => week.begin([d], "plan")} />;
+      else row = <EmptyRow date={d} disabled={locked} onPress={() => week.begin([d], "plan")} />;
       return (
         <View key={d}>
           <PaperSection title={dayLabels(d).section} testID={`week-day-${d}`} />
@@ -116,7 +127,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
           loading={week.saving}
           testID="week-save"
         />
-        <TextButton label="Discard" accessibilityLabel="Discard this plan" onPress={week.dismiss} testID="week-discard" />
+        <TextButton label="Discard" accessibilityLabel="Discard this plan" onPress={week.dismiss} disabled={week.saving} testID="week-discard" />
       </View>
     ) : dates.length ? (
       <PaperPrimaryButton
@@ -153,7 +164,8 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
             planned={open}
             dates={dates}
             expiring={plan.data?.expiring}
-            busy={busy}
+            allPlanned={inWeek}
+            busy={locked}
             onClose={() => setOpenId(null)}
             onSwap={(m) => {
               setOpenId(null);
@@ -233,19 +245,23 @@ function TextButton({
   label,
   onPress,
   accessibilityLabel,
+  disabled,
   testID,
 }: {
   label: string;
   onPress: () => void;
   accessibilityLabel?: string;
+  disabled?: boolean;
   testID?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      style={({ pressed }) => [styles.textButton, pressed && paperStyles.pressed]}
+      accessibilityState={{ disabled: !!disabled }}
+      style={({ pressed }) => [styles.textButton, disabled && styles.faint, pressed && paperStyles.pressed]}
       testID={testID}
     >
       <AppText variant="bodyS" weight="bold" style={styles.green}>

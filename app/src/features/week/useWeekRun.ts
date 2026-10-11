@@ -71,6 +71,8 @@ export function useWeekRun(groupId: string) {
   const [touched, setTouched] = useState(false);
   const starting = useRef(false);
   const applying = useRef(false);
+  /** Set synchronously on Save (mutation state lags a render), so Discard can disable right away. */
+  const [saving, setSaving] = useState(false);
   const lastStart = useRef<{ dates: string[]; kind: WeekRunKind; replacePlannedMealId?: string } | null>(null);
 
   const resumable = touched ? null : pickResumableRun(recent.data, user?.id);
@@ -108,12 +110,14 @@ export function useWeekRun(groupId: string) {
     setPendingDates([]);
     start.reset();
     applying.current = false;
+    setSaving(false);
   }
 
   function save() {
     const current = run.data;
     if (!current || applying.current) return;
     applying.current = true;
+    setSaving(true);
     apply.mutate(current.id, {
       onSuccess: async (res) => {
         const saved = res.planned ?? proposedByDate(current).size;
@@ -125,6 +129,7 @@ export function useWeekRun(groupId: string) {
       },
       onError: (e) => {
         applying.current = false;
+        setSaving(false);
         toast(
           e instanceof ApiError && e.code === "PLAN_UNSAFE"
             ? "The server's safety check rejected this plan. Try planning again."
@@ -171,5 +176,5 @@ export function useWeekRun(groupId: string) {
     // `applied` (saved here or elsewhere): the saved rows come from the meal plan; nothing left to show.
   }
 
-  return { view, begin, retry, dismiss, save, saving: apply.isPending };
+  return { view, begin, retry, dismiss, save, saving };
 }

@@ -87,10 +87,13 @@ export function deadlinesBefore(
     .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
 }
 
-/** "Spinach expires Sun 11. Move anyway?" */
-export function moveConfirmTitle(w: Deadline): string {
-  const d = dayLabels(w.expiresAt);
-  return `${w.item} expires ${d.short} ${d.section.split(" ")[1]}. Move anyway?`;
+/** "Spinach expires Sun 11. Move anyway?" / "Spinach expires Sun 11, Chicken expires Mon 12. Move anyway?" */
+export function moveConfirmTitle(...ws: Deadline[]): string {
+  const parts = ws.map((w) => {
+    const d = dayLabels(w.expiresAt);
+    return `${w.item} expires ${d.short} ${d.section.split(" ")[1]}`;
+  });
+  return `${parts.join(", ")}. Move anyway?`;
 }
 
 /** "today" / "tomorrow" / "3 days". */

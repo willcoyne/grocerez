@@ -36,7 +36,7 @@ export const agentRepo = {
   },
 
   create: (groupId: string, userId: string, prompt: string, budgetCents: number | null, replacePlannedMealId: string | null = null) =>
-    prisma.agentRun.create({ data: { groupId, userId, prompt, budgetCents, replacePlannedMealId }, select: { id: true } }),
+    prisma.agentRun.create({ data: { groupId, userId, prompt, budgetCents, replacePlannedMealId, isSwap: replacePlannedMealId !== null }, select: { id: true } }),
 
   find: (groupId: string, id: string, db: Db = prisma) => db.agentRun.findFirst({ where: { id, groupId } }),
 

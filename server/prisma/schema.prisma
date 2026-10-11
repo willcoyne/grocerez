@@ -368,6 +368,8 @@ model AgentRun {
   appliedAt   DateTime?      @map("applied_at") @db.Timestamptz(6)
   /// Swap run (spec §13): the planned meal this run replaces (its date is the only date planned).
   replacePlannedMealId String? @map("replace_planned_meal_id") @db.Uuid
+  /// True for swap runs; survives the target meal's deletion (replacePlannedMealId is then null).
+  isSwap               Boolean @default(false) @map("is_swap")
 
   group        Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)

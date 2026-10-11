@@ -22,6 +22,8 @@ export type WeekRecipeCardProps = {
   dates: string[];
   /** For the move-past-deadline check. */
   expiring?: MealPlanResponse["expiring"];
+  /** All planned dinners of the week, for the swap partner's deadline check. */
+  allPlanned?: readonly PlannedMeal[];
   /** Swap is disabled while another agent run is going. */
   busy: boolean;
   onClose: () => void;
@@ -33,7 +35,7 @@ export type WeekRecipeCardProps = {
  * A planned dinner as a paper recipe card that slides up over the Week sheet: AgentMealCard's content (photo, time and
  * servings, ingredient lines, our steps, citation, safety chip) plus Swap / Move day / Remove / Add missing to List.
  */
-export function WeekRecipeCard({ groupId, planned, dates, expiring, busy, onClose, onSwap }: WeekRecipeCardProps) {
+export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, busy, onClose, onSwap }: WeekRecipeCardProps) {
   const insets = useSafeAreaInsets();
   const { show: toast } = useToast();
   const move = useMovePlannedMeal(groupId);
@@ -51,8 +53,18 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, busy, onClos
 
   const moveTo = async (date: string) => {
     // Moving past a used item's expiry is allowed by the server; confirm first.
-    const late = deadlinesBefore(planned, expiring, date)[0];
-    if (late && !(await confirm(moveConfirmTitle(late), `${meal.title} would be on ${dayLabels(date).spoken}.`, "Move anyway"))) return;
+    // Moving onto a taken day swaps, so the partner dinner lands on this one's old (maybe later) date.
+    const partner = allPlanned?.find((p) => p.date === date && p.id !== planned.id);
+    const late = deadlinesBefore(planned, expiring, date);
+    const partnerLate = partner ? deadlinesBefore(partner, expiring, planned.date) : [];
+    if (late.length || partnerLate.length) {
+      const detail = [
+        late.length ? `${meal.title} would be on ${dayLabels(date).spoken}.` : "",
+        partnerLate.length && partner ? `${partner.meal.title} would be on ${dayLabels(planned.date).spoken}.` : "",
+      ].filter(Boolean).join(" ");
+      const all = [...late, ...partnerLate];
+      if (!(await confirm(moveConfirmTitle(...all), detail, "Move anyway"))) return;
+    }
     move.mutate(
       { id: planned.id, date },
       {

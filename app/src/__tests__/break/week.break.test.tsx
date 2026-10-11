@@ -21,7 +21,7 @@ const g = testGroup.id;
 const demoRun = demoRunJson as AgentRun;
 const meals = (): PlanMeal[] => JSON.parse(JSON.stringify(demoRun.plan!.meals));
 const planned = (id: string, date: string, meal: PlanMeal, warnings: PlannedMeal["warnings"] = []): PlannedMeal => ({
-  id, groupId: g, date, slot: "dinner", meal: { ...meal, date }, agentRunId: null, warnings, createdBy: testUser.id, createdAt: "", updatedAt: "",
+  id, groupId: g, date, slot: "dinner", meal: { ...meal, date }, agentRunId: null, safety: null, warnings, createdBy: testUser.id, createdAt: "", updatedAt: "",
 });
 const ID = (n: number) => `aaaaaaaa-0000-4000-8000-00000000000${n}`;
 const DAYS = ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-17", "2026-10-18"];

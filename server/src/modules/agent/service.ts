@@ -184,7 +184,7 @@ export const agentService = {
     const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], async (tx) => {
       if (!(await agentRepo.claimApply(tx, groupId, runId))) throw notProposed();
       const list = await writeWanted(tx, groupId, userId, wanted, runId);
-      const planned = await mealPlanService.writeForRun(tx, groupId, userId, runId, plan.meals, run.replacePlannedMealId, mealSafety);
+      const planned = await mealPlanService.writeForRun(tx, groupId, userId, runId, plan.meals, run.replacePlannedMealId, mealSafety, run.isSwap);
       return { ...list, planned };
     });
     emitGroup(groupId, "agent:changed", userId, { runId });
