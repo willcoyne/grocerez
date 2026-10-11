@@ -189,12 +189,15 @@ class EventSink:
 
     # ── steps ────────────────────────────────────────────────────────────────
 
-    async def step(self, step_id: str, label: str, status: str, detail: str | None = None) -> None:
+    async def step(self, step_id: str, label: str, status: str, detail: str | None = None,
+                   preview: dict[str, Any] | None = None) -> None:
         if self.closed or self.breaker_open:
             return
         payload: dict[str, Any] = {"id": step_id[:64], "label": (label[:200] or "..."), "status": status}
         if detail:
             payload["detail"] = detail[:500]
+        if preview:
+            payload["preview"] = preview
         self._queue.put_nowait(payload)
         if self._consumer is None or self._consumer.done():
             self._consumer = asyncio.create_task(self._consume())

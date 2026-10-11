@@ -60,6 +60,22 @@ S500 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 # ─── Plan ────────────────────────────────────────────────────────────────────
 
 
+CalendarDateStr = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+
+
+class StepPreview(BaseModel):
+    """Early peek at a meal (spec section 13) so the Week sheet can fill a day before the plan is proposed."""
+
+    date: CalendarDateStr | None
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    site: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)] | None
+
+
+class AlreadyPlanned(BaseModel):
+    date: CalendarDateStr
+    title: str
+
+
 class PlanSource(BaseModel):
     """The web recipe a meal comes from (cited; we show our own short steps and link out)."""
 
@@ -79,6 +95,8 @@ class PlanMeal(BaseModel):
     missing: list[S120] = Field(max_length=15)
     steps: list[S500] = Field(min_length=1, max_length=6)
     source: PlanSource | None = None
+    # Calendar date this dinner is planned for (spec section 13); null for plans made without a week calendar.
+    date: CalendarDateStr | None = None
     # The source's ingredient lines with quantities, for display. Empty when there is no source.
     ingredientLines: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]] = Field(
         default_factory=list, max_length=40
@@ -158,6 +176,7 @@ class AgentStepPayload(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     status: AgentStepStatus
     detail: str | None = Field(default=None, max_length=500)
+    preview: StepPreview | None = None
 
 
 class AgentStep(AgentStepPayload):
@@ -240,6 +259,10 @@ class AgentRunRequest(BaseModel):
     zipCode: str | None
     apiBaseUrl: str
     runToken: str = Field(repr=False)
+    # Dates to plan, one dinner each (spec section 13); empty for older servers (then 3 meals, days assigned).
+    dates: list[CalendarDateStr] = Field(default_factory=list, max_length=7)
+    # Meals already planned on nearby dates, so the agent avoids repeats.
+    alreadyPlanned: list[AlreadyPlanned] = Field(default_factory=list, max_length=31)
 
     @field_validator("apiBaseUrl")
     @classmethod
@@ -358,6 +381,8 @@ class RunContext:
     zip_code: str | None = None
     prompt: str = ""
     budget_cents: int | None = None
+    dates: tuple[str, ...] = ()  # one dinner per date; empty = the old behaviour (3 meals, days assigned)
+    already_planned: tuple[tuple[str, str], ...] = ()  # (date, title)
 
 
 @dataclass
@@ -376,6 +401,9 @@ class RunState:
     pending_finds: int = 0  # find_recipe calls in flight (pricing waits until they finish)
     to_buy_ok: bool = False  # the "To buy" pseudo-meal passed the last safety check
     cabinet_names: set[str] = field(default_factory=set)  # normalized cabinet item names
+    expiry_days: dict[str, int] = field(default_factory=dict)  # normalized cabinet name -> days until expiry
+    done_previews: dict[str, dict[str, Any]] = field(default_factory=dict)  # step key -> preview for its "done" event
+    previewed: set[str] = field(default_factory=set)  # meal titles whose preview was already sent
     fatal_status: int | None = None  # 401/403 from the server: stop the run
     proposal_failures: int = 0
     missing_nudged: bool = False
