@@ -16,7 +16,9 @@ set -euo pipefail
 
 API="${API:-http://localhost:3000/api}"
 USER_ID="${USER_ID:-00000000-0000-4000-8000-000000000101}"
-PROMPT="${PROMPT:-Plan 4 dinners for this week. Use what's expiring first, keep it under \$60, and make sure everyone can eat it.}"
+# Default kept in its own variable: macOS bash 3.2 treats the apostrophe inside ${VAR:-...} as a quote.
+DEFAULT_PROMPT="Plan 4 dinners for this week. Use what's expiring first, keep it under \$60, and make sure everyone can eat it."
+PROMPT="${PROMPT:-$DEFAULT_PROMPT}"
 BUDGET="${BUDGET:-6000}"
 TIMEOUT="${TIMEOUT:-150}"
 
@@ -25,7 +27,7 @@ demo_hdr=()
 [ -n "${DEMO_KEY:-}" ] && demo_hdr=(-H "x-demo-key: ${DEMO_KEY}")
 
 echo "1/5 login-as ${USER_ID}"
-TOKEN=$(curl -fsS -X POST "${demo_hdr[@]}" "$API/dev/login-as/$USER_ID" | jq -r .token)
+TOKEN=$(curl -fsS -X POST ${demo_hdr[@]+"${demo_hdr[@]}"} "$API/dev/login-as/$USER_ID" | jq -r .token)
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 echo "2/5 find the group"

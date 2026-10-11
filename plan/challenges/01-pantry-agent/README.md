@@ -190,7 +190,7 @@ All tool HTTP: `httpx`, 10 s timeout, 1 retry on 5xx/timeout, and a non-2xx resp
   | `estimate_prices` | Pricing 6 missing items… | $38–$46 (AI estimate) |
   | `propose_plan` | Finishing the plan… | Plan ready |
 - A synthetic step "Drafting meals…" is posted after `get_shopping_list` completes. The model's thinking time doesn't otherwise show up as a step.
-- **Budget** hook: if there are more than 25 tool calls, cancel the run. Wall clock is capped at 90 s (`asyncio.wait_for`). On any exception,
+- **Budget** hook: if there are more than 25 tool calls, cancel the run. Wall clock is capped at 105 s (`asyncio.wait_for`; measured ~85 s per run on the shared Akamai endpoint at ~15–20 tok/s, below the server's 120 s timeout). On any exception,
   post `failed {message}` (user-safe text, details in logs).
 - Log per run: provider, model id, tool-call count, token usage (from the Strands result metrics), duration. Send these in the `proposed`
   payload's `meta` so the server stores them on the run.
@@ -198,7 +198,7 @@ All tool HTTP: `httpx`, 10 s timeout, 1 retry on 5xx/timeout, and a non-2xx resp
 ### 4.7 Service layout
 ```
 agent/
-  requirements.txt        # pin exact versions installed at kickoff: strands-agents, strands-agents-tools, fastapi, uvicorn, httpx, pydantic
+  requirements.txt        # pinned: strands-agents[openai,anthropic]==1.59.0 (extras required for the providers), strands-agents-tools, fastapi, uvicorn, httpx, pydantic
   requirements-dev.txt    # pytest, pytest-asyncio, respx
   Dockerfile  .env.example  README.md (run + env only)
   app/main.py             # FastAPI: POST /runs (X-Agent-Secret, 202, background task), GET /health

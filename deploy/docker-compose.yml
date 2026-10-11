@@ -102,16 +102,24 @@ services:
       AGENT_PROVIDER: ${AGENT_PROVIDER:-akamai}
       PRICE_PROVIDER: ${PRICE_PROVIDER:-akamai}
       AKAMAI_INFERENCE_URL: ${AKAMAI_INFERENCE_URL:-https://ws.akamai-workshops.com/v1}
-      AKAMAI_INFERENCE_KEY: ${AKAMAI_INFERENCE_KEY:-}
+      AKAMAI_INFERENCE_KEY: ${AKAMAI_INFERENCE_KEY:?set AKAMAI_INFERENCE_KEY in deploy/.env}
+      AKAMAI_ENABLE_THINKING: ${AKAMAI_ENABLE_THINKING:-false}
       AKAMAI_MODEL: ${AKAMAI_MODEL:-hackathon-chat}
       AKAMAI_IMAGE_MODEL: ${AKAMAI_IMAGE_MODEL:-hackathon-image}
       AKAMAI_EMBEDDING_MODEL: ${AKAMAI_EMBEDDING_MODEL:-hackathon-embedding}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in deploy/.env}
+      # Fallback provider only (AGENT_PROVIDER=anthropic); may be empty for an Akamai-only agent.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-25}
-      AGENT_RUN_TIMEOUT_S: ${AGENT_RUN_TIMEOUT_S:-90}
+      AGENT_RUN_TIMEOUT_S: ${AGENT_RUN_TIMEOUT_S:-105}
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
   caddy:
     image: caddy:2

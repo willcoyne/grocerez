@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     agent_shared_secret: str = Field(default="", repr=False)
     agent_max_tool_calls: int = 25
-    agent_run_timeout_s: float = 90.0
+    agent_run_timeout_s: float = 105.0  # shared Akamai endpoint runs ~85 s; server gives up at 120 s
     http_timeout_s: float = 10.0
     max_tokens: int = 4000
     temperature: float = 0.3
