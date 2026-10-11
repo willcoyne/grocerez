@@ -123,7 +123,7 @@ EOF
 log "Copying the repo"
 rsync -az --delete -e "${SSH[*]}" \
   --exclude .git --exclude node_modules --exclude '.claude' --exclude dev-console --exclude 'server/generated' \
-  --exclude 'server/.env' --exclude 'app/.env' --exclude 'app/dist' --exclude '.expo' \
+  --exclude 'server/.env' --exclude 'app/.env' --exclude 'deploy/linode/.token' --exclude 'app/dist' --exclude '.expo' \
   "$ROOT/" "root@$IP:/opt/grocerez/"
 log "Building and starting (first build takes a few minutes)"
 "${SSH[@]}" "root@$IP" 'cd /opt/grocerez && docker compose -f deploy/linode/compose.yml --env-file deploy/linode/.env up -d --build --remove-orphans'
