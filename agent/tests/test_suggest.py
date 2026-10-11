@@ -167,7 +167,9 @@ async def test_suggest_recipes_browses_with_expiring_items_and_returns_a_compact
     assert body["mustUse"] == ["Milk", "Tomatoes", "Spinach", "Chicken Breast", "Beans", "Peppers"]
     assert search.calls[0].request.headers["authorization"].startswith("Bearer ")
     assert [s["id"] for s in out] == ["00000001", "00000002", "00000003"]
-    assert set(out[0]) == {"id", "title", "site", "minutes", "uses", "missingCount"}
+    assert set(out[0]) == {"id", "title", "site", "minutes", "uses", "missingCount", "usesExpiring"}
+    assert out[0]["usesExpiring"] == ["Spinach", "Chicken Breast"]
+    assert "usesExpiring" not in out[2]  # nothing expiring in the saffron stew
     assert out[0]["uses"] == ["Spinach", "Chicken Breast"] and out[0]["missingCount"] == 1  # lemon
     assert out[2]["missingCount"] == 8
     assert state.done_labels["suggest_recipes"] == "3 dinners that fit"
@@ -267,6 +269,79 @@ async def test_use_recipe_when_safety_is_down_says_so_and_stores_nothing(
     await t["suggest_recipes"]()
     assert "safety check is unavailable" in await t["use_recipe"]("00000001", date="2026-10-12")
     assert state.draft_meals == {}
+
+
+def unsafe_titles(*bad):
+    def safety(request):
+        meals = json.loads(request.content)["meals"]
+        return httpx.Response(200, json={"meals": [
+            {"title": m["title"], "unknown": [], "passes": m["title"] not in bad,
+             "problems": [] if m["title"] not in bad else [{"ingredient": "X", "reason": "unverifiable", "members": []}]}
+            for m in meals]})
+    return safety
+
+
+@respx.mock
+async def test_use_recipe_auto_substitutes_the_next_best_after_a_safety_rejection(
+    ctx, client, sink, state, settings, make_pricer
+):
+    mock_world()
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=unsafe_titles("Spinach Chicken Rice"))
+    t = tools_for(replace(ctx, dates=DATES), client, sink, state, settings, make_pricer)
+    await t["suggest_recipes"]()
+    out = json.loads(await t["use_recipe"]("00000001", date="2026-10-13"))
+    assert out["found"] is True and out["title"] == "Tomato Garlic Beans"
+    assert out["note"] == "Picked Tomato Garlic Beans instead: Spinach Chicken Rice wasn't safe"
+    assert state.draft_meals["Tomato Garlic Beans"]["date"] == "2026-10-13"  # the date is claimed
+    assert "Spinach Chicken Rice" not in state.draft_meals
+
+
+@respx.mock
+async def test_parallel_rejections_never_share_a_substitute(ctx, client, sink, state, settings, make_pricer):
+    hits = [hit(n, f"Dish {n}", [f"1 cup thing{n}"]) for n in range(1, 6)]
+    mock_world(hits=hits)
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=unsafe_titles("Dish 1", "Dish 2"))
+    t = tools_for(replace(ctx, dates=DATES), client, sink, state, settings, make_pricer)
+    await t["suggest_recipes"]()
+    await asyncio.gather(t["use_recipe"]("00000001", date="2026-10-12"), t["use_recipe"]("00000002", date="2026-10-13"))
+    assert sorted(state.draft_meals) == ["Dish 3", "Dish 4"]
+
+
+@respx.mock
+async def test_use_recipe_gives_up_after_two_extra_tries(ctx, client, sink, state, settings, make_pricer):
+    hits = [hit(n, f"Dish {n}", [f"1 cup thing{n}"]) for n in range(1, 6)]
+    _, _, safety = mock_world(hits=hits)
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=unsafe_titles(*(f"Dish {n}" for n in range(1, 6))))
+    t = tools_for(replace(ctx, dates=DATES), client, sink, state, settings, make_pricer)
+    await t["suggest_recipes"]()
+    before = len(respx.calls)
+    out = await t["use_recipe"]("00000001", date="2026-10-12")
+    assert out.startswith("error: 'Dish 1' is not safe") and "Pick a different id" in out
+    assert len(respx.calls) - before == 3  # the pick plus exactly 2 substitutes, then it stops
+    assert state.draft_meals == {}
+
+
+@respx.mock
+async def test_find_recipe_stops_after_three_calls(ctx, client, sink, state, settings, make_pricer):
+    _, search, _ = mock_world(hits=[])
+    t = tools_for(ctx, client, sink, state, settings, make_pricer)
+    for i in range(3):
+        assert "budget" not in await t["find_recipe"](f"idea {i}")
+    searches = search.call_count
+    out = json.loads(await t["find_recipe"]("idea 4"))
+    assert out == {"found": False, "note": "budget used, write it yourself"}
+    assert search.call_count == searches  # nothing was searched
+
+
+@respx.mock
+async def test_tavily_is_searched_at_most_twice_per_run(ctx, client, sink, state, make_pricer):
+    s = tav_settings()
+    mock_world(hits=[])
+    tavily = respx.post(TAVILY).mock(return_value=httpx.Response(200, json={"results": []}))
+    t = tools_for(ctx, client, sink, state, s, make_pricer, recipes=web_service(s))
+    for i in range(3):  # each call would run 2 queries on its own: 6 searches without the budget
+        assert json.loads(await t["find_recipe"](f"idea {i}"))["found"] is False
+    assert tavily.call_count == 2
 
 
 # ─── find_recipe distance threshold ──────────────────────────────────────────

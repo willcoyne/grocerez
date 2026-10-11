@@ -44,6 +44,9 @@ NUDGE_BEFORE_MS = 45_000  # skip the "add missing items" nudge when too little t
 PRICE_WAIT_S = 8.0
 INDEX_MAX_DISTANCE = 0.45  # cosine distance above which an index hit is not "the dish you asked for"
 SUGGEST_LIMIT = 10  # the frozen contract caps limit at 10
+MAX_TAVILY_SEARCHES = 2  # per run: web searches are the slow, costly part of find_recipe
+MAX_FIND_CALLS = 3  # per run
+MAX_SUBSTITUTES = 2  # extra suggestions use_recipe tries after a safety rejection
 FAIL_LIMIT = 3
 FAIL_LIMIT_LATE = 2  # after LATE_MS only two proposal attempts fit in the wall clock
 LATE_MS = 70_000
@@ -686,6 +689,10 @@ def build_tools(
                 " ".join([f"{core} easy dinner recipe", *terms]),  # ONE simpler retry when nothing passes
             ]
             for attempt, query in enumerate(queries):
+                if state.tavily_searches >= MAX_TAVILY_SEARCHES:
+                    log.info("find_recipe %r: Tavily budget used", idea)
+                    break
+                state.tavily_searches += 1
                 winner = await _round(query, must_use, avoid, tried)
                 if winner:
                     source = "tavily"
@@ -801,18 +808,28 @@ def build_tools(
             state.done_labels["suggest_recipes"] = "No suggestions, searching by idea"
             return _j({"suggestions": [], "note": "Nothing to browse. Use find_recipe(idea) per date, or write the meal."})
         out = []
+        state.suggest_order = []
+        expiring = {_norm(m) for m in must}
         for r in found:
             p = _to_parsed(r)
             state.suggested[str(r.id)[:8]] = p
-            out.append({"id": str(r.id)[:8], "title": _clip(r.title, 70), "site": r.site, "minutes": r.minutes,
-                        "uses": list(r.uses)[:4], "missingCount": len(_meal_from(p)["missing"])})
+            state.suggest_order.append(str(r.id)[:8])
+            item = {"id": str(r.id)[:8], "title": _clip(r.title, 70), "site": r.site, "minutes": r.minutes,
+                    "uses": list(r.uses)[:4], "missingCount": len(_meal_from(p)["missing"])}
+            soon = [u for u in r.uses if have_item(u, expiring)]
+            if soon:
+                item["usesExpiring"] = soon[:4]
+            out.append(item)
         state.done_labels["suggest_recipes"] = f"{len(out)} dinners that fit"
         return _j(out)
+
+    reserved: set[str] = set()  # short ids claimed by a use_recipe call (picked or substituted) this run
 
     @tool
     async def use_recipe(id: str, date: str | None = None) -> str:
         """Use one of the suggest_recipes results for a date (YYYY-MM-DD). Builds the meal from its ingredient lines,
-        runs the safety check and stores it for propose_plan. Call once per date, all in the same turn."""
+        runs the safety check and stores it for propose_plan. If the pick is unsafe, the next best unused suggestion
+        is used automatically. Call once per date, all in the same turn."""
         rid = str(strip_nul(id)).strip()[:36]
         key = "use_" + rid[:8]
         rec = state.suggested.get(rid[:8])
@@ -820,6 +837,7 @@ def build_tools(
             return "error: unknown recipe id; use an id from suggest_recipes, or call find_recipe(idea) for this date."
         if rec.url in state.used_urls:
             return "error: that recipe is already used for another date; pick a different id."
+        reserved.add(rid[:8])
         state.pending_finds += 1
         try:
             meal = _meal_from(rec)
@@ -827,15 +845,36 @@ def build_tools(
             if results is None:
                 state.done_labels[key] = "Couldn't check that recipe"
                 return "error: the safety check is unavailable right now; try another id or find_recipe(idea)."
-            if not results[0].passes:
-                why = "; ".join(f"{p.reason} ({p.ingredient})" for p in results[0].problems[:3]) or "failed"
-                log.info("use_recipe rejected: %s: unsafe: %s", rec.url, why)
-                state.done_labels[key] = "That recipe isn't safe here"
-                return f"error: '{rec.title}' is not safe for this household ({why}). Pick a different id."
-            return await _finalize(meal, rec, results[0], key, date)
+            if results[0].passes:
+                return await _finalize(meal, rec, results[0], key, date)
+            why = _why(results[0])
+            log.info("use_recipe rejected: %s: unsafe: %s", rec.url, why)
+            for sid in _next_unused()[:MAX_SUBSTITUTES]:
+                reserved.add(sid)  # claimed before any await: parallel use_recipe calls never share a substitute
+                sub = state.suggested[sid]
+                sub_meal = _meal_from(sub)
+                chk = await _batch(safety_payload([sub_meal], to_buy=False))
+                if not chk or not chk[0].passes:
+                    log.info("use_recipe substitute rejected: %s: %s", sub.url, _why(chk[0]) if chk else "no result")
+                    continue
+                out = await _finalize(sub_meal, sub, chk[0], key, date)
+                if out.startswith("{"):
+                    data = json.loads(out)
+                    data["note"] = _clip(f"Picked {sub.title} instead: {rec.title} wasn't safe", 160)
+                    return _j(data)
+            state.done_labels[key] = "That recipe isn't safe here"
+            return f"error: '{rec.title}' is not safe for this household ({why}). Pick a different id."
         finally:
             state.pending_finds -= 1
             _maybe_price()
+
+    def _why(res: SafetyMealOut) -> str:
+        return "; ".join(f"{p.reason} ({p.ingredient})" for p in res.problems[:3]) or "failed"
+
+    def _next_unused() -> list[str]:
+        """Suggestions not yet picked, in the server's ranking order."""
+        return [sid for sid in state.suggest_order if sid not in reserved
+                and state.suggested[sid].url not in state.used_urls]
 
     async def _round(query: str, must_use: list[str], avoid: list[str], tried: set[str]):
         """Tavily: one search + parallel fetch + ranked batch safety check. Returns (meal, recipe, result) or None."""
@@ -882,6 +921,10 @@ def build_tools(
         ones with avoid items) for the given YYYY-MM-DD date. A safe match is stored for propose_plan; do not re-send
         it. Call once per idea, all ideas in the same turn."""
         idea = " ".join(str(strip_nul(idea)).split())[:120] or "dinner"
+        if state.find_calls >= MAX_FIND_CALLS:
+            state.done_labels[step_key(idea)] = "Writing this one myself"
+            return _j({"found": False, "note": "budget used, write it yourself"})
+        state.find_calls += 1
         state.pending_finds += 1
         try:
             return await _find(idea, step_key(idea), _strs(strip_nul(must_use or []))[:5],

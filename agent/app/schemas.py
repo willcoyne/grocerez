@@ -405,6 +405,9 @@ class RunState:
     list_names: set[str] = field(default_factory=set)  # singular-normalized names already on the list
     used_urls: set[str] = field(default_factory=set)  # recipe pages already chosen this run
     suggested: dict[str, Any] = field(default_factory=dict)  # short id -> ParsedRecipe from suggest_recipes
+    suggest_order: list[str] = field(default_factory=list)  # short ids in the server's ranking (substitutes)
+    tavily_searches: int = 0  # Tavily searches spent this run (budget MAX_TAVILY_SEARCHES)
+    find_calls: int = 0  # find_recipe calls this run (budget MAX_FIND_CALLS)
     pending_finds: int = 0  # find_recipe calls in flight (pricing waits until they finish)
     to_buy_ok: bool = False  # the "To buy" pseudo-meal passed the last safety check
     cabinet_names: set[str] = field(default_factory=set)  # normalized cabinet item names
