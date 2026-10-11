@@ -43,7 +43,7 @@ export function pickResumableRun(
 
 /**
  * Start a Pantry Agent run → 202 {runId}. Never retried automatically (rate-limited 10/hour/group).
- * Errors: 503 NOT_CONFIGURED (no agent on this server → the app falls back to /recipes), 503 AGENT_UNAVAILABLE, 429.
+ * Errors: 503 NOT_CONFIGURED (no agent on this server → the sheet says the planner isn't set up), 503 AGENT_UNAVAILABLE, 429.
  */
 export function useStartAgentRun(groupId: string) {
   return useMutation({

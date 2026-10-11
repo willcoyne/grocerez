@@ -1,4 +1,5 @@
 import type { AgentRun, AgentStep } from "@contracts/agent";
+import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -25,6 +26,7 @@ const STEP_SOURCE: Record<string, { who: string; what: string }> = {
   get_shopping_list: { who: "Agent tool → Server", what: "GET /groups/:gid/shopping-list (don't add twice)" },
   get_wants: { who: "Agent tool → Server", what: "GET /groups/:gid/preferences?userId=all" },
   drafting: { who: "Model (Akamai)", what: "hackathon-chat writes the meals" },
+  find_recipe: { who: "Agent tool → Web", what: "Tavily search → recipe page JSON-LD → server safety check → cite (else AI-created)" },
   check_meal_safety: { who: "Agent tool → Server code", what: "POST /groups/:gid/agent/safety-check (deterministic, not the model)" },
   revise_meal: { who: "Agent tool", what: "patches one meal, re-checks only it" },
   estimate_prices: { who: "Price sub-agent (Akamai)", what: "second Strands agent, runs in the background once safety passes" },
@@ -36,10 +38,11 @@ const FLOW: { n: string; title: string; body: string }[] = [
   { n: "2", title: "Server → Agent", body: "POST agent:8000/runs with X-Agent-Secret. The Python service (FastAPI + Strands) starts the run in the background." },
   { n: "3", title: "Agent reads", body: "Tools call the normal REST API with the run token: household, cabinet, list, wants. Same authz as the user; read-only." },
   { n: "4", title: "Model drafts", body: "Akamai hackathon-chat (Qwen, OpenAI-compatible) drafts meals that use expiring items." },
-  { n: "5", title: "Safety in code", body: "Every meal goes through the server's deterministic allergen/diet check. Failures go back to the model to fix." },
-  { n: "6", title: "Prices", body: "Once safety passes, a second Strands agent prices the missing items in the background (≤ 8 s, else skipped). Labeled \"AI estimate\"." },
-  { n: "7", title: "Propose", body: "propose_plan validates and posts the plan. Every step is posted to /internal/agent-events → server emits agent:changed → app refetches." },
-  { n: "8", title: "Human applies", body: "You tap Add. Server re-checks safety, writes the list in one transaction, emits shopping-list:changed → every phone updates." },
+  { n: "5", title: "Find a real recipe", body: "Tavily search → recipe page JSON-LD → safety check → cite. find_recipe searches allowlisted recipe sites, parses the page's schema.org Recipe, safety-checks its real ingredients, and cites the first one that passes. None passes → the model's own meal, labeled \"AI-created\"." },
+  { n: "6", title: "Safety in code", body: "Every meal goes through the server's deterministic allergen/diet check. Failures go back to the model to fix." },
+  { n: "7", title: "Prices", body: "Once safety passes, a second Strands agent prices the missing items in the background (≤ 8 s, else skipped). Labeled \"AI estimate\"." },
+  { n: "8", title: "Propose", body: "propose_plan validates and posts the plan. Every step is posted to /internal/agent-events → server emits agent:changed → app refetches." },
+  { n: "9", title: "Human applies", body: "You tap Add. Server re-checks safety, writes the list in one transaction, emits shopping-list:changed → every phone updates." },
 ];
 
 export default function AgentFlowScreen() {
@@ -182,6 +185,19 @@ function Trace({ run, loading }: { run: AgentRun | undefined; loading: boolean }
                   <Text style={styles.flowTitle}>
                     {m.day ?? "–"} · {m.title} · {m.minutes} min
                   </Text>
+                  {m.source ? (
+                    <Text
+                      style={[styles.xs, styles.link]}
+                      accessibilityRole="link"
+                      accessibilityLabel={`Open the full recipe on ${m.source.site}`}
+                      onPress={() => void WebBrowser.openBrowserAsync(m.source!.url)}
+                    >
+                      source: {m.source.site} · {m.source.url} ↗
+                    </Text>
+                  ) : (
+                    <Text style={styles.xs}>source: none (AI-created)</Text>
+                  )}
+                  {m.ingredientLines.length ? <Text style={styles.xs}>recipe lines: {m.ingredientLines.join("; ")}</Text> : null}
                   <Text style={styles.xs}>ingredients: {m.ingredients.join(", ")}</Text>
                   <Text style={styles.xs}>uses (cabinet): {m.uses.join(", ") || "–"}</Text>
                   <Text style={styles.xs}>missing (to buy): {m.missing.join(", ") || "–"}</Text>
@@ -248,6 +264,7 @@ const styles = StyleSheet.create({
   flowTitle: { fontWeight: "600", fontSize: fontSize.sm, color: colors.text },
   small: { fontSize: fontSize.sm, color: colors.text, marginTop: spacing.xs },
   xs: { fontSize: fontSize.xs, color: colors.textMuted },
+  link: { color: colors.primary, textDecorationLine: "underline" },
   error: { color: colors.danger, marginTop: spacing.sm },
   box: { borderWidth: 1.5, borderRadius: radius.md, padding: spacing.sm },
   boxTitle: { fontWeight: "700", fontSize: fontSize.sm, color: colors.text },

@@ -10,7 +10,7 @@ import { ErrorState } from "./States";
 import { useToast } from "./Toast";
 import { Button, Card, SectionHeader } from "./ui";
 
-/** Group tab → Alerts: expiring soon (tap → ItemDetail, "Find recipes") and possible recalls (Dismiss). */
+/** Group tab → Alerts: expiring soon (tap → ItemDetail, "Plan meals" → the Pantry Agent) and possible recalls (Dismiss). */
 export function AlertsSection({ groupId }: { groupId: string }) {
   const alerts = useAlerts(groupId);
   const dismiss = useDismissRecall(groupId);
@@ -34,7 +34,7 @@ export function AlertsSection({ groupId }: { groupId: string }) {
               <View style={styles.gap}>
                 <View style={styles.rowBetween}>
                   <Text style={styles.label}>Expiring soon</Text>
-                  <Button title="✨ Find recipes" variant="ghost" compact onPress={() => router.push("/recipes")} />
+                  <Button title="✨ Plan meals" variant="ghost" compact onPress={() => router.push("/agent")} />
                 </View>
                 {alerts.data.expiring.map((c) => (
                   <Pressable

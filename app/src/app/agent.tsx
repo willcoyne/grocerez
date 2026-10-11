@@ -99,10 +99,6 @@ function LiveFlow({ groupId }: { groupId: string }) {
       { prompt: prompt.trim(), budgetCents: budget },
       {
         onSuccess: (res) => setStarted({ groupId, runId: res.runId }),
-        // No agent on this server: the quick recipe screen is the fallback.
-        onError: (e) => {
-          if (e instanceof ApiError && e.code === "NOT_CONFIGURED") router.replace("/recipes");
-        },
         onSettled: () => {
           starting.current = false;
         },
@@ -117,13 +113,13 @@ function LiveFlow({ groupId }: { groupId: string }) {
   }
 
   const failed = (message: string) => (
-    <Failed message={message} onRetry={startRun} onRecipes={() => router.replace("/recipes")} retrying={start.isPending} />
+    <Failed message={message} onRetry={startRun} onClose={() => router.back()} retrying={start.isPending} />
   );
 
   if (!runId) {
-    if (start.isError && !(start.error instanceof ApiError && start.error.code === "NOT_CONFIGURED")) {
-      return failed(startError(start.error));
-    }
+    // No agent on this server (AGENT_URL unset): say so plainly; retrying won't help.
+    if (start.error instanceof ApiError && start.error.code === "NOT_CONFIGURED") return <NotSetUp onClose={() => router.back()} />;
+    if (start.isError) return failed(startError(start.error));
     return (
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <AiLabel text="AI agent" />
@@ -191,7 +187,7 @@ function Running({ steps, onCancel, reconnecting }: { steps: AgentStep[]; onCanc
   );
 }
 
-function Failed({ message, onRetry, onRecipes, retrying }: { message: string; onRetry: () => void; onRecipes: () => void; retrying?: boolean }) {
+function Failed({ message, onRetry, onClose, retrying }: { message: string; onRetry: () => void; onClose: () => void; retrying?: boolean }) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Card>
@@ -202,9 +198,18 @@ function Failed({ message, onRetry, onRecipes, retrying }: { message: string; on
           {message}
         </Text>
         <Button title="Try again" loading={retrying} onPress={onRetry} />
-        <Button title="Use quick recipes instead" variant="secondary" onPress={onRecipes} />
+        <Button title="Close" variant="secondary" onPress={onClose} />
       </Card>
     </ScrollView>
+  );
+}
+
+/** 503 NOT_CONFIGURED: this server has no meal-planning agent. */
+function NotSetUp({ onClose }: { onClose: () => void }) {
+  return (
+    <EmptyState title="The meal planner isn't set up on this server" message="Everything else in GrocerEZ keeps working. Ask whoever runs your server to turn on the planning agent.">
+      <Button title="Close" variant="secondary" onPress={onClose} />
+    </EmptyState>
   );
 }
 
