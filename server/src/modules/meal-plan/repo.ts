@@ -21,6 +21,14 @@ export const mealPlanRepo = {
       orderBy: { date: "asc" },
     }),
 
+  /** Cabinet items that can expire (in stock or running low, with a date), soonest first. */
+  expirable: (db: Db, groupId: string) =>
+    db.cabinetItem.findMany({
+      where: { groupId, status: { in: ["in_stock", "running_low"] }, expiresAt: { not: null } },
+      select: { id: true, expiresAt: true, item: { select: { name: true } } },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+    }),
+
   find: (db: Db, groupId: string, id: string) => db.plannedMeal.findFirst({ where: { id, groupId } }),
 
   findByDate: (db: Db, groupId: string, date: string) =>

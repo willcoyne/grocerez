@@ -6,6 +6,7 @@ import { fromCalendarDate, groupTimeZone, householdToday, toCalendarDate } from 
 import { emitGroup } from "../../lib/realtime.js";
 import { assertMealsSafe, resolveWanted, writeWanted, type Skipped } from "../agent/listWriter.js";
 import { withRegeneration } from "../shopping-list/engine.js";
+import { coverage, deadlineFor, toExpirables, warningsFor, type Expirable } from "./expiry.js";
 import { mealPlanRepo, rowDate, type PlannedMealRow } from "./repo.js";
 
 const MAX_RANGE_DAYS = 31;
@@ -20,9 +21,12 @@ const daysBetween = (a: string, b: string) => Math.round((fromCalendarDate(b).ge
 
 export const householdTodayOf = async (groupId: string) => toCalendarDate(householdToday(await groupTimeZone(prisma, groupId)))!;
 
-function toPlanned(r: PlannedMealRow): PlannedMeal {
+const usesOf = (r: PlannedMealRow) => ((r.meal as { uses?: string[] } | null)?.uses ?? []);
+
+function toPlanned(r: PlannedMealRow, cabinet: Expirable[]): PlannedMeal {
   const date = rowDate(r);
   return {
+    warnings: warningsFor(usesOf(r), date, cabinet),
     id: r.id,
     groupId: r.groupId,
     date,
@@ -41,6 +45,33 @@ function storedMeal(r: PlannedMealRow): PlanMeal {
   return parsed.data;
 }
 
+/**
+ * Spec §14: a meal dated after the expiry of a cabinet item it uses moves to the latest FREE date in today…deadline
+ * (free = nothing planned there and not taken by another meal of this apply). No free date → it keeps its date (warned on read).
+ * Mutates `byDate`. Tightest deadlines are placed first.
+ */
+async function meetDeadlines(tx: Tx, groupId: string, today: string, last: string, byDate: Map<string, PlanMeal>) {
+  const cabinet = toExpirables(await mealPlanRepo.expirable(tx, groupId));
+  if (cabinet.length === 0) return;
+  const late = [...byDate]
+    .map(([date, meal]) => ({ date, meal, deadline: deadlineFor(meal.uses, cabinet) }))
+    .filter((x): x is typeof x & { deadline: string } => x.deadline !== null && x.deadline < x.date)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline));
+  if (late.length === 0) return;
+  const existing = new Set((await mealPlanRepo.list(tx, groupId, today, last)).map(rowDate));
+  const claimed = new Set(byDate.keys());
+  for (const x of late) {
+    for (let d = x.deadline; d >= today; d = addDays(d, -1)) {
+      if (existing.has(d) || claimed.has(d)) continue;
+      byDate.delete(x.date);
+      claimed.delete(x.date);
+      claimed.add(d);
+      byDate.set(d, { ...x.meal, date: d });
+      break;
+    }
+  }
+}
+
 const changed = (groupId: string, by: string) => emitGroup(groupId, "meal-plan:changed", by);
 
 export const mealPlanService = {
@@ -51,8 +82,22 @@ export const mealPlanService = {
     const to = q.to ?? addDays(from, 6);
     if (from > to) throw badRequest("`from` must not be after `to`", "INVALID_RANGE");
     if (daysBetween(from, to) + 1 > MAX_RANGE_DAYS) throw badRequest(`At most ${MAX_RANGE_DAYS} days at a time`, "INVALID_RANGE");
-    const rows = await mealPlanRepo.list(prisma, groupId, from, to);
-    return { from, to, today, meals: rows.map(toPlanned) };
+    const weekEnd = addDays(today, 6);
+    // One cabinet query + one planned-meals query covering both the requested range and today…today+6.
+    const [cabinet, rows] = await Promise.all([
+      mealPlanRepo.expirable(prisma, groupId).then(toExpirables),
+      mealPlanRepo.list(prisma, groupId, from < today ? from : today, to > weekEnd ? to : weekEnd),
+    ]);
+    const expiring = coverage(
+      cabinet,
+      rows.map((r) => ({ id: r.id, date: rowDate(r), uses: usesOf(r) })),
+      today,
+      weekEnd,
+      addDays(today, 7),
+      daysBetween,
+    );
+    const meals = rows.filter((r) => rowDate(r) >= from && rowDate(r) <= to).map((r) => toPlanned(r, cabinet));
+    return { from, to, today, meals, expiring };
   },
 
   /** POST /meal-plan: add a dinner by hand. Safety-checked like apply (422 PLAN_UNSAFE); 409 DATE_TAKEN. */
@@ -65,7 +110,7 @@ export const mealPlanService = {
       return mealPlanRepo.create(tx, groupId, body.date, meal, userId, null);
     });
     changed(groupId, userId);
-    return toPlanned(row);
+    return toPlanned(row, toExpirables(await mealPlanRepo.expirable(prisma, groupId)));
   },
 
   /** PATCH /meal-plan/:id: move to `date`; if that day is planned, the two meals swap days (one transaction). */
@@ -84,7 +129,7 @@ export const mealPlanService = {
       return { row: await mealPlanRepo.setDate(tx, groupId, row.id, date, storedMeal(row)), wrote: true };
     });
     if (wrote) changed(groupId, userId);
-    return toPlanned(row);
+    return toPlanned(row, toExpirables(await mealPlanRepo.expirable(prisma, groupId)));
   },
 
   async remove(groupId: string, userId: string, id: string): Promise<void> {
@@ -157,6 +202,7 @@ export const mealPlanService = {
     const byDate = new Map<string, PlanMeal>();
     for (const m of meals) if (m.date && m.date >= today && m.date <= last && !byDate.has(m.date)) byDate.set(m.date, m);
     await mealPlanRepo.lock(tx, groupId);
+    if (!replacePlannedMealId) await meetDeadlines(tx, groupId, today, last, byDate);
 
     if (replacePlannedMealId) {
       const row = await mealPlanRepo.find(tx, groupId, replacePlannedMealId);

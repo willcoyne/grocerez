@@ -45,3 +45,13 @@ export function normalize(input: string): string {
   }
   return head + last;
 }
+
+/** True when the normalized `needle` appears as whole words inside the normalized `haystack`. */
+export const containsWholeWords = (haystack: string, needle: string): boolean =>
+  needle !== "" && ` ${haystack} `.includes(` ${needle} `);
+
+/** Whole-word containment in both directions ("baby spinach" ~ "spinach"). */
+export const namesMatch = (a: string, b: string): boolean => {
+  const [x, y] = [normalize(a), normalize(b)];
+  return containsWholeWords(x, y) || containsWholeWords(y, x);
+};

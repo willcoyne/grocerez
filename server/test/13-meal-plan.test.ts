@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { config } from "../src/config.js";
 import type { AgentPlan, AgentRunRequest, PlanMeal } from "../src/contracts/agent.js";
 import { prisma } from "../src/db.js";
+import { fromCalendarDate } from "../src/lib/expiration.js";
 import { agentClient } from "../src/lib/agentClient.js";
 import { setIo } from "../src/lib/realtime.js";
 import { addDays, mealPlanService } from "../src/modules/meal-plan/service.js";
@@ -275,5 +276,90 @@ describe("13 agent runs on dates", () => {
     expect(run.steps).toEqual([
       { seq: 0, id: "find_recipe:1", label: "Found: Lemon chicken", status: "done", preview, at: expect.any(String) },
     ]);
+  });
+});
+
+describe("13 expiration-aware plan (spec §14)", () => {
+  const stock = async (groupId: string, name: string, expires: string | null, status: "in_stock" | "running_low" = "in_stock") =>
+    prisma.cabinetItem.create({
+      data: { groupId, itemId: await itemId(name), status, ...(expires ? { expiresAt: fromCalendarDate(expires), expirationSource: "manual" as const } : {}) },
+    });
+  const week = async (u: TestUser, groupId: string) => (await api().get(`/api/groups/${groupId}/meal-plan`).set(u.auth)).body;
+  const spinachPlan = (dates: string[]) => {
+    const p = datedPlan(dates);
+    p.meals = p.meals.map((m) => ({ ...m, uses: ["Spinach"] }));
+    return p;
+  };
+
+  it("GET computes warnings for used items that expire before the meal's date (whole-word, both directions)", async () => {
+    const { owner, g, today } = await home();
+    await stock(g.id, "Spinach", addDays(today, 2));
+    const d1 = addDays(today, 2), d2 = addDays(today, 3), d3 = addDays(today, 4);
+    await plan(owner, g.id, d1, dinner("On deadline"));
+    await plan(owner, g.id, d2, dinner("Late", { uses: ["Baby Spinach"] }));
+    await plan(owner, g.id, d3, dinner("Unrelated", { uses: ["Rice"] }));
+    const meals = (await week(owner, g.id)).meals as { meal: PlanMeal; warnings: unknown[] }[];
+    expect(meals.map((m) => [m.meal.title, m.warnings])).toEqual([
+      ["On deadline", []],
+      ["Late", [{ kind: "expires_before", item: "Spinach", expiresAt: addDays(today, 2) }]],
+      ["Unrelated", []],
+    ]);
+  });
+
+  it("expiring covers planned and unplanned items, soonest first; expired items have daysLeft < 0 and no meal", async () => {
+    const { owner, g, today } = await home();
+    await stock(g.id, "Spinach", addDays(today, 3));
+    await stock(g.id, "Garlic", addDays(today, 5));
+    await stock(g.id, "Rice", addDays(today, -2));
+    await stock(g.id, "Milk", addDays(today, 8)); // beyond the 7-day window
+    await stock(g.id, "Eggs", null); // no date
+    const m = (await plan(owner, g.id, addDays(today, 2), dinner("Spinach night", { uses: ["Spinach", "Rice"] }))).body;
+    const body = await week(owner, g.id);
+    expect(body.expiring).toEqual([
+      { cabinetItemId: expect.any(String), name: "Rice", expiresAt: addDays(today, -2), daysLeft: -2, plannedOn: null, plannedMealId: null },
+      { cabinetItemId: expect.any(String), name: "Spinach", expiresAt: addDays(today, 3), daysLeft: 3, plannedOn: addDays(today, 2), plannedMealId: m.id },
+      { cabinetItemId: expect.any(String), name: "Garlic", expiresAt: addDays(today, 5), daysLeft: 5, plannedOn: null, plannedMealId: null },
+    ]);
+    // The meal also uses expired Rice → warned.
+    expect(body.meals[0].warnings).toEqual([{ kind: "expires_before", item: "Rice", expiresAt: addDays(today, -2) }]);
+  });
+
+  it("a move past the deadline is allowed but returns warnings; POST warns too", async () => {
+    const { owner, g, today } = await home();
+    await stock(g.id, "Spinach", addDays(today, 1));
+    const a = (await plan(owner, g.id, addDays(today, 1))).body;
+    expect(a.warnings).toEqual([]);
+    const moved = await api().patch(`/api/groups/${g.id}/meal-plan/${a.id}`).set(owner.auth).send({ date: addDays(today, 4) });
+    expect(moved.status).toBe(200);
+    expect(moved.body.warnings).toEqual([{ kind: "expires_before", item: "Spinach", expiresAt: addDays(today, 1) }]);
+    const added = await plan(owner, g.id, addDays(today, 5));
+    expect(added.body.warnings).toHaveLength(1);
+  });
+
+  it("apply moves a late meal to the latest free date <= the deadline", async () => {
+    const { owner, g, today } = await home();
+    await stock(g.id, "Spinach", addDays(today, 2));
+    await plan(owner, g.id, addDays(today, 2), dinner("Already there")); // blocks the deadline day itself
+    const runId = await proposed(owner, g.id, spinachPlan([addDays(today, 5)]));
+    const res = await api().post(`/api/groups/${g.id}/agent/runs/${runId}/apply`).set(owner.auth).send({});
+    expect(res.status).toBe(200);
+    const meals = (await week(owner, g.id)).meals as { date: string; agentRunId: string | null; warnings: unknown[]; meal: PlanMeal }[];
+    expect(meals.map((m) => [m.date, m.agentRunId === runId, m.meal.date, m.warnings.length])).toEqual([
+      [addDays(today, 1), true, addDays(today, 1), 0],
+      [addDays(today, 2), false, addDays(today, 2), 0],
+    ]);
+  });
+
+  it("apply keeps the date when no free slot exists before the deadline, and GET warns", async () => {
+    const { owner, g, today } = await home();
+    await stock(g.id, "Spinach", today);
+    await plan(owner, g.id, today, dinner("Tonight")); // the only date <= deadline is taken
+    const late = addDays(today, 3);
+    const runId = await proposed(owner, g.id, spinachPlan([late]));
+    await api().post(`/api/groups/${g.id}/agent/runs/${runId}/apply`).set(owner.auth).send({}).expect(200);
+    const meals = (await week(owner, g.id)).meals as { date: string; agentRunId: string | null; warnings: unknown[] }[];
+    const kept = meals.find((m) => m.agentRunId === runId)!;
+    expect(kept.date).toBe(late);
+    expect(kept.warnings).toEqual([{ kind: "expires_before", item: "Spinach", expiresAt: today }]);
   });
 });

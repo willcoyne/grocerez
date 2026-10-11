@@ -4,7 +4,7 @@ import { DIETS, type Allergen, type Diet } from "../../contracts/dietary.js";
 import type { Item } from "../../contracts/items.js";
 import { allergensInText } from "../../lib/allergens.js";
 import { conflicts } from "../../lib/diets.js";
-import { normalize } from "../../lib/normalize.js";
+import { containsWholeWords, normalize } from "../../lib/normalize.js";
 import { itemsRepo, searchRowToItem } from "../items/repo.js";
 import { agentRepo } from "./repo.js";
 
@@ -73,8 +73,8 @@ export async function catalogMatch(ingredient: string): Promise<{ verified: Item
   if (res.match === "exact") return { verified: res.results[0], fallback: null };
   // Containment is checked on every returned candidate: search_items classifies multi-word inputs like
   // "Fresh Basil" as `none` (similarity below the suggestion cut-off) while still returning Basil as similar.
-  const padded = ` ${normalize(ingredient)} `;
-  const contained = res.results.find((r) => padded.includes(` ${r.normalizedName} `)) ?? null;
+  const norm = normalize(ingredient);
+  const contained = res.results.find((r) => containsWholeWords(norm, r.normalizedName)) ?? null;
   return { verified: contained, fallback: res.match === "suggested" ? res.results[0] : null };
 }
 
