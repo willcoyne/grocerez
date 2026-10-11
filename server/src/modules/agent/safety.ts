@@ -5,6 +5,7 @@ import type { Item } from "../../contracts/items.js";
 import { allergensInText } from "../../lib/allergens.js";
 import { conflicts } from "../../lib/diets.js";
 import { containsWholeWords, normalize } from "../../lib/normalize.js";
+import { semanticVerified } from "../../lib/semanticIngredient.js";
 import { itemsRepo, searchRowToItem } from "../items/repo.js";
 import { agentRepo } from "./repo.js";
 
@@ -50,13 +51,16 @@ function reasonsFor(m: Member, text: string, category: string | null): string[] 
 async function analyse(ingredient: string): Promise<Analysis> {
   const m = await catalogMatch(ingredient);
   const hit = m.verified ?? m.fallback;
-  const keywordHit = allergensInText(ingredient).length > 0 || conflicts(ingredient, [...DIETS], []).length > 0;
   return {
     text: withCatalog(ingredient, hit?.defaultAllergens ?? []),
     category: hit?.category ?? null,
-    unknown: !m.verified && !keywordHit,
+    unknown: isUnverified(ingredient, m.verified),
   };
 }
+
+/** An ingredient is unverifiable when no catalog item is verified for it and its own text has no allergen/diet keyword. */
+export const isUnverified = (ingredient: string, verified: Item | null): boolean =>
+  !verified && allergensInText(ingredient).length === 0 && conflicts(ingredient, [...DIETS], []).length === 0;
 
 /**
  * The catalog item an ingredient name really is: `verified` = an EXACT hit, or a candidate whose normalized name is
@@ -68,14 +72,21 @@ export async function catalogMatch(ingredient: string): Promise<{ verified: Item
   // The spelling search only (same match/results as itemsService.search), without its semantic `related` lookup:
   // that would cost one Akamai embedding call per unmatched ingredient and we never use it here.
   const rows = await itemsRepo.search(prisma, ingredient).catch(() => []);
-  if (rows.length === 0) return { verified: null, fallback: null };
+  if (rows.length === 0) return withSemantic(ingredient, { verified: null, fallback: null });
   const res = { match: rows[0].match, results: rows.map(searchRowToItem) };
   if (res.match === "exact") return { verified: res.results[0], fallback: null };
   // Containment is checked on every returned candidate: search_items classifies multi-word inputs like
   // "Fresh Basil" as `none` (similarity below the suggestion cut-off) while still returning Basil as similar.
   const norm = normalize(ingredient);
   const contained = res.results.find((r) => containsWholeWords(norm, r.normalizedName)) ?? null;
-  return { verified: contained, fallback: res.match === "suggested" ? res.results[0] : null };
+  return withSemantic(ingredient, { verified: contained, fallback: res.match === "suggested" ? res.results[0] : null });
+}
+
+/** Last resort when exact and whole-word matching fail: the semantically nearest catalog item (lib/semanticIngredient). */
+async function withSemantic(ingredient: string, m: { verified: Item | null; fallback: Item | null }) {
+  if (m.verified) return m;
+  const sem = await semanticVerified(ingredient);
+  return sem ? { verified: sem.item, fallback: m.fallback } : m;
 }
 
 /** Reason used when an allergy household can't be sure about an ingredient (user decision: unverifiable fails). */

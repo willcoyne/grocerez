@@ -294,6 +294,9 @@ describe("12 recipe index: search", () => {
         recipe("b-none", "Beef Bourguignon", ["beef"], ["Beef", "Carrots"], ["main course"], "Site F"),
       ],
     }).expect(200);
+    // Kale, Okra, etc. aren't catalog items, so ingest flags them unverified (allergy households skip such recipes;
+    // see 12-semantic-ingredients). This test is about ranking, so mark them verified.
+    await prisma.$executeRaw`UPDATE recipes SET unverified = '{}' WHERE url LIKE ${HOST + "b-%"}`;
     unconfigure(); // browse ranks without embeddings
     const { owner, g } = await household({ allergens: ["milk"] });
     const res = await search(owner, g.id, { query: "(ignored)", browse: true, mustUse: ["Kale", "Okra"], limit: 8 });

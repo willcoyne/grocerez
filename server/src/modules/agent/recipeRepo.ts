@@ -34,7 +34,16 @@ const dinnerOnly = (f: DinnerFilter) => Prisma.sql`(
   array_to_string(course, ' | ') ~* ${f.mainCourse}
   OR (array_to_string(course, ' | ') !~* ${f.excludedCourse} AND title !~* ${f.nonDinnerTitle}))`;
 
-const COLUMNS = Prisma.sql`id, url, site, title, image_url AS "imageUrl", minutes, servings,
+/** Postgres array literal ({"a","b"}) for a text[] value inside a text[] parameter. */
+const pgArray = (xs: string[]) => `{${xs.map((x) => `"${x.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+
+/**
+ * Households with allergies only see recipes whose every ingredient is verified against the catalog (the same rule
+ * safety.ts applies at plan time), so the agent never loops on suggestions that the safety check will fail.
+ */
+const verifiedOnly = (excluded: Allergen[]) => (excluded.length > 0 ? Prisma.sql`cardinality(unverified) = 0` : Prisma.sql`true`);
+
+const COLUMNS =Prisma.sql`id, url, site, title, image_url AS "imageUrl", minutes, servings,
   ingredient_lines AS "ingredientLines", ingredients, course`;
 
 /** The recipe index (challenge 01 §12). Global (not group data): written by the crawler, read through search. */
@@ -43,15 +52,18 @@ export const recipeRepo = {
    * Upsert by url. A row keeps its embedding only while title and ingredients (the embedded text) are unchanged.
    * Returns what still needs an embedding for `model`.
    */
-  upsert: async (r: IndexedRecipe, course: string[], allergens: Allergen[], model: string) => {
+  upsert: async (r: IndexedRecipe, course: string[], allergens: Allergen[], unverified: string[], model: string) => {
     const [row] = await prisma.$queryRaw<(EmbedTodo & { needsEmbedding: boolean })[]>`
-      INSERT INTO recipes (url, site, title, image_url, minutes, servings, ingredient_lines, ingredients, course, allergens)
+      INSERT INTO recipes (url, site, title, image_url, minutes, servings, ingredient_lines, ingredients, course, allergens,
+                           unverified, verified_at)
       VALUES (${r.url}, ${r.site}, ${r.title}, ${r.imageUrl}, ${r.minutes}, ${r.servings},
-              ${r.ingredientLines}::text[], ${r.ingredients}::text[], ${course}::text[], ${allergens}::allergen[])
+              ${r.ingredientLines}::text[], ${r.ingredients}::text[], ${course}::text[], ${allergens}::allergen[],
+              ${unverified}::text[], now())
       ON CONFLICT (url) DO UPDATE SET
         site = EXCLUDED.site, title = EXCLUDED.title, image_url = EXCLUDED.image_url, minutes = EXCLUDED.minutes,
         servings = EXCLUDED.servings, ingredient_lines = EXCLUDED.ingredient_lines, ingredients = EXCLUDED.ingredients,
-        course = EXCLUDED.course, allergens = EXCLUDED.allergens, crawled_at = now(),
+        course = EXCLUDED.course, allergens = EXCLUDED.allergens, unverified = EXCLUDED.unverified, verified_at = now(),
+        crawled_at = now(),
         embedding = CASE WHEN recipes.title = EXCLUDED.title AND recipes.ingredients = EXCLUDED.ingredients
                          THEN recipes.embedding END,
         embedding_model = CASE WHEN recipes.title = EXCLUDED.title AND recipes.ingredients = EXCLUDED.ingredients
@@ -69,6 +81,24 @@ export const recipeRepo = {
       SELECT id, title, ingredients FROM recipes
       WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM ${model}
       ORDER BY created_at LIMIT ${limit}::int`,
+
+  /** Rows to (re)verify, keyset-paged by id: never verified (verified_at IS NULL), or every row when `all`. */
+  verifyBatch: (all: boolean, afterId: string, limit: number) =>
+    prisma.$queryRaw<(IndexedRecipe & { id: string })[]>`
+      SELECT id, url, site, title, image_url AS "imageUrl", minutes, servings, ingredient_lines AS "ingredientLines",
+             ingredients, course
+      FROM recipes
+      WHERE id > ${afterId}::uuid AND (${all}::boolean OR verified_at IS NULL)
+      ORDER BY id LIMIT ${limit}::int`,
+
+  /** Stores computed allergens + unverified for a batch in ONE statement. */
+  setFacts: (rows: { id: string; allergens: Allergen[]; unverified: string[] }[]) =>
+    prisma.$executeRaw`
+      UPDATE recipes r SET allergens = v.a::allergen[], unverified = v.u::text[], verified_at = now()
+      FROM unnest(${rows.map((x) => x.id)}::uuid[],
+                  ${rows.map((x) => pgArray(x.allergens))}::text[],
+                  ${rows.map((x) => pgArray(x.unverified))}::text[]) AS v(id, a, u)
+      WHERE r.id = v.id`,
 
   /** Stores a batch of embeddings in ONE statement. */
   setEmbeddings: (rows: { id: string; vector: number[] }[], model: string) =>
@@ -102,7 +132,7 @@ export const recipeRepo = {
           SELECT ${COLUMNS}, (embedding::vector(1024) <=> ${v}::vector(1024))::float8 AS distance
           FROM recipes
           WHERE vector_dims(embedding) = 1024 AND embedding_model = ${model}
-            AND NOT (allergens && ${excluded}::allergen[]) AND ${dinnerOnly(f)}
+            AND NOT (allergens && ${excluded}::allergen[]) AND ${verifiedOnly(excluded)} AND ${dinnerOnly(f)}
           ORDER BY embedding::vector(1024) <=> ${v}::vector(1024)
           LIMIT ${take}::int`,
       ]);
@@ -112,7 +142,7 @@ export const recipeRepo = {
       SELECT ${COLUMNS}, (embedding <=> ${v}::vector)::float8 AS distance
       FROM recipes
       WHERE embedding_model = ${model} AND vector_dims(embedding) = ${vector.length}::int
-        AND NOT (allergens && ${excluded}::allergen[]) AND ${dinnerOnly(f)}
+        AND NOT (allergens && ${excluded}::allergen[]) AND ${verifiedOnly(excluded)} AND ${dinnerOnly(f)}
       ORDER BY embedding <=> ${v}::vector
       LIMIT ${take}::int`;
   },
@@ -139,7 +169,7 @@ export const recipeRepo = {
       FROM (
         SELECT r.*, ${mustHit} AS must_hit, ${approxCoverage} AS approx_coverage
         FROM recipes r
-        WHERE NOT (r.allergens && ${excluded}::allergen[]) AND ${dinnerOnly(f)}
+        WHERE NOT (r.allergens && ${excluded}::allergen[]) AND ${verifiedOnly(excluded)} AND ${dinnerOnly(f)}
       ) c
       WHERE must_hit OR approx_coverage >= ${minCoverage}::float8
       ORDER BY must_hit DESC, approx_coverage DESC, id
