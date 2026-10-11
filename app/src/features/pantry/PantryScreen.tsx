@@ -92,8 +92,8 @@ export const SHELF_ORIGIN: Vec3 = [0, 2.9, -0.3];
 /** Phase timings in seconds. */
 export const DURATIONS = {
   normal: { open: 1.6, zoom: 1.2, pull: 1.1, doorDelay: 0.35, doorClose: 1.1, list: 1.4 },
-  /** The user's "fast animations" setting (state/uiPrefs.tsx): about half as long. */
-  fast: { open: 0.8, zoom: 0.6, pull: 0.55, doorDelay: 0.15, doorClose: 0.55, list: 0.7 },
+  /** The user's "fast" setting (state/uiPrefs.tsx): no animations, every move cuts straight to its view. */
+  fast: { open: 0, zoom: 0, pull: 0, doorDelay: 0, doorClose: 0, list: 0 },
   reduced: { open: 0.3, zoom: 0, pull: 0, doorDelay: 0, doorClose: 0.3, list: 0 },
 } as const;
 type Durations = (typeof DURATIONS)["normal" | "fast" | "reduced"];
@@ -139,9 +139,10 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
   const scan = useCallback(() => router.push("/scanner?mode=add-to-cabinet"), [router]);
   const data = usePantry(groupId);
   const insets = useSafeAreaInsets();
-  const reducedMotion = useReducedMotion();
+  // OS "reduce motion" or the user's "fast" setting: the camera cuts instead of gliding, items flip without easing.
   const motion = useMotion();
-  const durations = reducedMotion ? DURATIONS.reduced : motion === "fast" ? DURATIONS.fast : DURATIONS.normal;
+  const reducedMotion = useReducedMotion() || motion === "fast";
+  const durations = motion === "fast" ? DURATIONS.fast : reducedMotion ? DURATIONS.reduced : DURATIONS.normal;
 
   const [phase, setPhase] = useState<PantryPhase>("closed");
   const [leaving, setLeaving] = useState(false);
@@ -506,7 +507,6 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
               frame={PANTRY_DIMENSIONS.bounds}
               focus={focus}
               reducedMotion={reducedMotion}
-              speed={motion === "fast" ? 2 : 1}
               station={away}
               onArrive={onArrive}
               noteTarget={noteTargetRef}

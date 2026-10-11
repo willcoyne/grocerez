@@ -1,7 +1,7 @@
 /**
  * Per-user interface preferences, saved on the account (PATCH /me) so they follow the user to every device:
  * - uiMode: "room" = the fun 3D pantry room (features/pantry), "simple" = plain screens with no 3D or animation;
- * - motion: the 3D room's animation speed ("fast" ≈ half as long);
+ * - motion: the 3D room's animations: "normal", or "fast" = none (every move cuts straight to its view);
  * - theme: the room's look (features/theme). The theme store stays the source of truth while the app runs;
  *   <ThemeUserSync/> loads the signed-in user's theme into it and saves every change back to their account.
  * Both switch instantly (optimistic) and roll back with a toast if the save fails.

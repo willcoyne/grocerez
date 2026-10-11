@@ -9,6 +9,7 @@ import { ActivityIndicator, Animated, Platform, Pressable, StyleSheet, View, typ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "@/components/ui";
+import { useMotion } from "@/state/uiPrefs";
 import { font } from "@/theme";
 
 import { type OverlayPalette, pantry, shadowFor, useOverlayPalette, useOverlayStyles } from "./palette";
@@ -61,12 +62,13 @@ export function PaperSheet({ testID, title, closeLabel, onClose, subheader, chil
   const styles = useOverlayStyles(makeStyles);
   const paper = useOverlayStyles(makePaperStyles);
   const insets = useSafeAreaInsets();
-  // Paper "lands" from the lifted 3D note: fade + settle.
-  const [appear] = useState(() => new Animated.Value(0));
+  // Paper "lands" from the lifted 3D note: fade + settle (the user's "fast" setting: it's just there).
+  const fast = useMotion() === "fast";
+  const [appear] = useState(() => new Animated.Value(fast ? 1 : 0));
   useEffect(() => {
-    if (page) return;
+    if (page || fast) return;
     Animated.spring(appear, { toValue: 1, useNativeDriver: Platform.OS !== "web", friction: 8, tension: 70 }).start();
-  }, [appear, page]);
+  }, [appear, page, fast]);
 
   if (page) {
     return (

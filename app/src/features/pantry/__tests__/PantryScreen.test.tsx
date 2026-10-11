@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react-native";
 
-import { renderWithProviders } from "@/test-utils";
+import { renderWithProviders, testUser } from "@/test-utils";
 
 import { setRanOutPrompt } from "@/features/cabinet/ranOutStore";
 import { disposeThemeCaches } from "@/features/theme/materials";
@@ -295,6 +295,13 @@ describe("pinned shopping list", () => {
     await tick(1.6);
     expect(mockExterior.props.listProgress).toBe(0);
     expect(screen.getByLabelText("Open pantry")).toBeTruthy();
+  });
+
+  it("with the user's fast setting there is no flight: the list opens on the next frame", async () => {
+    await renderWithProviders(<PantryScreen />, { auth: { user: { ...testUser, motion: "fast" } } });
+    await act(async () => mockExterior.props.onListPress!());
+    await tick(0.1);
+    expect(screen.getByTestId("list-note")).toBeTruthy();
   });
 
   it("has an accessible List button that does the same as tapping the note", async () => {

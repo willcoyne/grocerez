@@ -15,8 +15,8 @@ const CHOICES = [
 ] as const;
 
 const SPEEDS = [
-  { mode: "normal", label: "Normal", hint: "Full door, camera and paper animations", Icon: Gauge },
-  { mode: "fast", label: "Fast", hint: "Animations take about half as long", Icon: Zap },
+  { mode: "normal", label: "Normal", hint: "Doors swing, the camera glides, papers lift", Icon: Gauge },
+  { mode: "fast", label: "Fast", hint: "No animations: cuts straight to each view", Icon: Zap },
 ] as const;
 
 /** Two-way choice for the Me screens: 3D room or simple screens. */
