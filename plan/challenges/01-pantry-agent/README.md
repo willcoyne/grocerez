@@ -520,3 +520,42 @@ The goal: faster lookups, a higher hit rate, and more of the run on Akamai. Cont
    - Rank by cosine distance, minus a boost for each `mustUse` item used.
    - Return the top `limit`.
 4. **Agent:** `find_recipe` queries the index first, then runs the same per-candidate meal build and safety check. If there's no index hit, no safe candidate, or the index isn't available, it falls back to the Tavily path from §11, unchanged.
+
+## 13. Week calendar on the pantry (decided 2026-10-11)
+
+The meal plan lives as a **week calendar pinned under the shopping List on the 3D pantry door**, in the List's paper
+style. It replaces the standalone "Plan our week" modal as the home of the feature.
+
+**Look.** It matches the List sheet exactly: lined paper, red margin line, red pushpin, a struck-through handwritten title ("~~Week~~"),
+brown small-caps day labels, the same row typography, and a green full-width primary button. It reuses the List's sheet component and
+tokens wherever possible.
+
+1. **On the pantry door.** A second pinned paper note sits just below the List note. It previews the next 3–4 days
+   ("Mon Chicken…", "Wed —"). Tap it to open the Week sheet.
+2. **Week sheet.** Header: "~~Week~~", the date range (e.g. Oct 12–18), and "N dinners planned · M to buy". Then one section per day
+   (MON 12 … SUN 18):
+   - a planned dinner row: title, time, citation ("Delish ↗") or "✨ AI-created", and "uses spinach";
+   - or an empty-day row: "+ Plan a dinner".
+
+   The bottom primary button is **"✨ Plan our week"** (or "Re-plan" when days are already planned).
+3. **Tap a day → paper recipe card.** It slides up with:
+   - the photo, time and servings;
+   - the ingredient lines, then our short steps;
+   - "Recipe from {site} ↗";
+   - safety line chips.
+
+   Actions: **Swap** (the agent finds an alternative for that day), **Move day**, **Remove**, and **Add missing to List**.
+4. **Agent run on the sheet.** While the agent works, its steps appear as handwritten lines at the top of the sheet
+   ("Reading the cabinet… ✓"), and **day rows fill in as each recipe is found**. Then come the proposed meals, a confirm
+   ("Add 6 items & save week"), and the server writing both the planned meals and the list items.
+
+**Needed behind it (new):**
+- **A saved week plan.** A `planned_meals` table: group_id, date, slot ('dinner'), meal jsonb (PlanMeal), agent_run_id, created_by,
+  timestamps; unique (group_id, date, slot).
+- **Endpoints:** GET the plan for a date range; move; remove; manual add; swap (an agent run for one date). Apply writes planned_meals
+  for the run's dates plus the list items in one transaction.
+- **Realtime:** a `meal-plan:changed` signal.
+- **Runs that target specific dates:** the whole week, "plan this day", or a swap.
+- **Progressive fill:** a step event carries an optional meal preview {date, title, site}, so rows fill before `proposed`.
+- The existing agent sheet and trace screen stay as the internals and the dev view. The calendar becomes the user-facing entry
+  point. The Household "Plan our week" button and the alerts "Plan meals" both open the Week sheet.
