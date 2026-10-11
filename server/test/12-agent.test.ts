@@ -286,8 +286,6 @@ describe("12 agent: apply", () => {
     expect(added.get("Avocados")!.note).toBe("✨ for Spinach and black bean quesadillas");
     expect(added.get("Basil")!.note).toBe("✨ for Tomato pasta with spinach");
 
-    // Basil wasn't in the catalog: created through the POST /items path.
-    expect(await prisma.item.findFirst({ where: { name: "Basil" } })).toBeTruthy();
 
     const rows = await prisma.shoppingListItem.findMany({ where: { groupId: g.id }, include: { item: true } });
     expect(rows.map((r) => r.item.name).sort()).toEqual(["Avocados", "Basil", "Ginger", "Salsa", "Zucchini"]);
@@ -321,6 +319,26 @@ describe("12 agent: apply", () => {
     expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
     expect(emitsOf("shopping-list:changed", g2.id)).toHaveLength(1);
     expect(await prisma.shoppingListItem.count({ where: { groupId: g2.id, agentRunId: run2 } })).toBe(4);
+  });
+
+  it("an unverifiable item: 422 PLAN_UNSAFE in an allergy household; created via POST /items and added otherwise", async () => {
+    const odd = `Zzqxv Spice ${Date.now()}`;
+    const p = plan();
+    p.missingItems.push({ name: odd, forMeals: [p.meals[0].title] });
+
+    const { owner, g } = await household(); // Carson (peanuts), Maya (milk)
+    const runId = await proposedRun(owner, g.id, p);
+    const res = await api().post(`/api/groups/${g.id}/agent/runs/${runId}/apply`).set(owner.auth).send({});
+    expect([res.status, res.body.error.code]).toEqual([422, "PLAN_UNSAFE"]);
+    expect(JSON.stringify(res.body.error.details)).toContain("couldn't verify ingredients (allergy household)");
+
+    const solo = await makeUser();
+    const sg = await makeGroup(solo);
+    const run2 = await proposedRun(solo, sg.id, p);
+    const ok = await api().post(`/api/groups/${sg.id}/agent/runs/${run2}/apply`).set(solo.auth).send({});
+    expect(ok.status).toBe(200);
+    expect(ok.body.items.map((r: { item: { name: string } }) => r.item.name)).toContain(odd);
+    expect(await prisma.item.findFirst({ where: { name: odd } })).toBeTruthy();
   });
 
   it("apply on a running run → 409", async () => {

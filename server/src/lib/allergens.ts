@@ -5,14 +5,20 @@ import type { Allergen } from "../contracts/dietary.js";
  * Matching is on whole words / phrases in lower-cased text.
  */
 export const ALLERGEN_KEYWORDS: Record<Allergen, string[]> = {
-  milk: ["milk", "dairy", "whey", "casein", "caseinate", "lactose", "butter", "cream", "cheese", "yogurt", "ghee", "buttermilk"],
-  eggs: ["egg", "eggs", "albumin", "mayonnaise", "meringue"],
+  milk: [
+    "milk", "dairy", "whey", "casein", "caseinate", "lactose", "butter", "cream", "cheese", "yogurt", "ghee", "buttermilk",
+    "nutella", "pesto", "paneer", "ricotta", "parmesan", "mozzarella", "mascarpone", "queso",
+  ],
+  eggs: ["egg", "eggs", "albumin", "mayonnaise", "meringue", "mayo", "aioli"],
   fish: ["fish", "anchovy", "anchovies", "salmon", "tuna", "cod", "tilapia", "sardine", "sardines", "trout", "halibut", "pollock"],
   shellfish: ["shellfish", "shrimp", "prawn", "prawns", "crab", "lobster", "crayfish", "crustacean", "crustaceans", "mollusc", "molluscs", "clam", "clams", "oyster", "oysters", "mussel", "mussels", "scallop", "scallops"],
-  tree_nuts: ["tree nut", "tree nuts", "almond", "almonds", "walnut", "walnuts", "cashew", "cashews", "pecan", "pecans", "pistachio", "pistachios", "hazelnut", "hazelnuts", "macadamia", "brazil nut", "brazil nuts", "nuts"],
-  peanuts: ["peanut", "peanuts", "groundnut", "groundnuts", "arachis"],
-  wheat: ["wheat", "flour", "semolina", "durum", "spelt", "farina", "couscous", "bulgur"],
-  soy: ["soy", "soya", "soybean", "soybeans", "tofu", "edamame", "miso", "tempeh", "lecithin (soy)"],
+  tree_nuts: ["tree nut", "tree nuts", "almond", "almonds", "walnut", "walnuts", "cashew", "cashews", "pecan", "pecans", "pistachio", "pistachios", "hazelnut", "hazelnuts", "macadamia", "brazil nut", "brazil nuts", "nuts", "nutella", "pesto", "praline", "marzipan"],
+  peanuts: ["peanut", "peanuts", "groundnut", "groundnuts", "arachis", "pb", "satay"],
+  wheat: [
+    "wheat", "flour", "semolina", "durum", "spelt", "farina", "couscous", "bulgur",
+    "shoyu", "soy sauce", "panko", "breadcrumbs", "noodles",
+  ],
+  soy: ["soy", "soya", "soybean", "soybeans", "tofu", "edamame", "miso", "tempeh", "lecithin (soy)", "shoyu", "tamari", "soy sauce"],
   sesame: ["sesame", "tahini"],
   gluten: ["gluten", "wheat", "barley", "rye", "malt", "triticale", "spelt", "seitan"],
 };
@@ -27,7 +33,8 @@ const OFF_TAGS: Record<string, Allergen> = {
 const EXCLUDE: Partial<Record<Allergen, RegExp>> = {
   milk: /(?<![a-z])((peanut|almond|nut|cocoa|apple|shea|seed|sunflower|cashew) butter|(coconut|almond|oat|soy|soya|rice|cashew) milk|milk thistle|cream of tartar)(?![a-z])/g,
   tree_nuts: /(?<![a-z])(peanuts?|groundnuts?|nutmeg|coconuts?|donuts?|doughnuts?|butternut)(?![a-z])/g,
-  wheat: /(?<![a-z])(rice|corn|almond|oat|coconut|potato|tapioca|chickpea|buckwheat) flour(?![a-z])|buckwheat/g,
+  wheat:
+    /(?<![a-z])(rice|corn|almond|oat|coconut|potato|tapioca|chickpea|buckwheat) flour(?![a-z])|buckwheat|(?<![a-z])(gluten[- ]free|gf) (soy sauce|shoyu)(?![a-z])|(?<![a-z])(rice|glass|cellophane|bean thread|sweet potato|kelp|shirataki|zucchini) noodles(?![a-z])/g,
 };
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

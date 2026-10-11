@@ -3,6 +3,7 @@ import type { SafetyCheckResponse } from "../../contracts/agent.js";
 import { DIETS, type Allergen, type Diet } from "../../contracts/dietary.js";
 import { allergensInText } from "../../lib/allergens.js";
 import { conflicts } from "../../lib/diets.js";
+import { normalize } from "../../lib/normalize.js";
 import { itemsService } from "../items/service.js";
 import { agentRepo } from "./repo.js";
 
@@ -36,21 +37,32 @@ function reasonsFor(m: Member, text: string, category: string | null): string[] 
 }
 
 /**
- * Catalog lookup for one ingredient. Any exact/suggested hit contributes its defaultAllergens and category (fail safe),
- * but only an EXACT hit (or an allergen/diet keyword in the ingredient itself) makes it "known": a fuzzy suggestion
- * ("Custard" → "Mustard") is not evidence of what the ingredient is, so it is also listed in `unknown`.
+ * Catalog lookup for one ingredient. Any exact/suggested hit contributes its defaultAllergens and category (fail safe).
+ * The ingredient is "known" (verified) when:
+ *  - the hit is EXACT, or
+ *  - a candidate's (suggested or similar) normalized name appears as whole words inside the normalized ingredient
+ *    ("Fresh Basil" ⊇ "basil", "Boneless Chicken Breast" ⊇ "chicken breast"), or
+ *  - the ingredient itself contains an allergen/diet keyword.
+ * Any other fuzzy suggestion ("Custard" → "Mustard") is not evidence of what the ingredient is → `unknown`.
  * Catalog allergens are added as keywords, "; "-separated so EXCLUDE phrases ("almond milk") can't form across them.
  */
 async function analyse(ingredient: string): Promise<Analysis> {
   const res = await itemsService.search(ingredient, prisma).catch(() => null);
-  const hit = res && res.match !== "none" ? res.results[0] : null;
+  const padded = ` ${normalize(ingredient)} `;
+  // Whole-word containment is checked on every returned candidate: search_items classifies multi-word inputs like
+  // "Fresh Basil" as `none` (similarity below the suggestion cut-off) while still returning Basil as similar.
+  const contained = res && res.match !== "exact" ? res.results.find((r) => padded.includes(` ${r.normalizedName} `)) : undefined;
+  const hit = contained ?? (res && res.match !== "none" ? res.results[0] : null);
   const keywordHit = allergensInText(ingredient).length > 0 || conflicts(ingredient, [...DIETS], []).length > 0;
   return {
     text: withCatalog(ingredient, hit?.defaultAllergens ?? []),
     category: hit?.category ?? null,
-    unknown: res?.match !== "exact" && !keywordHit,
+    unknown: res?.match !== "exact" && !contained && !keywordHit,
   };
 }
+
+/** Reason used when an allergy household can't be sure about an ingredient (user decision: unverifiable fails). */
+export const UNVERIFIED_REASON = "couldn't verify ingredients (allergy household)";
 
 function collect(problems: Map<string, Problem>, members: Member[], subject: string, text: string, category: string | null) {
   for (const m of members) {
@@ -71,10 +83,12 @@ const sortedMembers = async (groupId: string) =>
  * Pure function of DB state, evaluated against EACH member so problems name who they affect:
  *  - every ingredient: keywords + catalog allergens + catalog category;
  *  - the title and every step: keywords (people cook what the title and steps say, not just the ingredient list).
- * Known conflicts fail the meal; unknown ingredients don't.
+ * Known conflicts fail the meal. Unknown ingredients are listed in `unknown`; when ANY member has an allergen they also
+ * fail the meal (problem UNVERIFIED_REASON, naming the members with allergens). Diet-only households: unknown passes.
  */
 async function check(groupId: string, meals: SafetyMeal[]): Promise<SafetyCheckResponse> {
   const members = await sortedMembers(groupId);
+  const allergic = members.filter((m) => m.allergens.length > 0).map((m) => m.displayName);
   const cache = new Map<string, Promise<Analysis>>();
   const lookup = (ingredient: string) => {
     const key = ingredient.trim().toLowerCase();
@@ -90,7 +104,12 @@ async function check(groupId: string, meals: SafetyMeal[]): Promise<SafetyCheckR
     const analyses = await Promise.all(meal.ingredients.map(lookup));
     for (const [i, ingredient] of meal.ingredients.entries()) {
       const a = analyses[i];
-      if (a.unknown && !unknown.includes(ingredient)) unknown.push(ingredient);
+      if (a.unknown && !unknown.includes(ingredient)) {
+        unknown.push(ingredient);
+        if (allergic.length) {
+          problems.set(`${ingredient}\u0000${UNVERIFIED_REASON}`, { ingredient, reason: UNVERIFIED_REASON, members: allergic });
+        }
+      }
       collect(problems, members, ingredient, a.text, a.category);
     }
     for (const text of [meal.title, ...(meal.steps ?? [])]) collect(problems, members, text, text, null);
