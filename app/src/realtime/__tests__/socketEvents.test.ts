@@ -34,4 +34,18 @@ describe("socket events → query invalidation", () => {
     handleSocketEvent(qc, "invites:changed", { groupId: "g1" });
     expect(invalidated()).toEqual(expect.arrayContaining([keys.myInvites, keys.groupInvites("g1")]));
   });
+
+  it("agent:changed refreshes that run and the recent-runs list, in that group only", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "agent:changed", { groupId: "g1", by: "u1", runId: "r1" });
+    expect(invalidated()).toEqual(expect.arrayContaining([keys.agentRun("g1", "r1"), keys.agentRuns("g1")]));
+    expect(invalidated()).not.toContainEqual(keys.agentRuns("g2"));
+    expect(invalidated()).not.toContainEqual(keys.agentRun("g2", "r1"));
+  });
+
+  it("agent:changed without a runId still refreshes the recent-runs list", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "agent:changed", { groupId: "g1" });
+    expect(invalidated()).toEqual([keys.agentRuns("g1")]);
+  });
 });

@@ -88,6 +88,7 @@ export function RootNavigator() {
         <Stack.Screen name="expiration-check" options={{ presentation: "modal", title: "Expiration dates" }} />
         <Stack.Screen name="recipes" options={{ presentation: "modal", title: "What can we cook?" }} />
         <Stack.Screen name="prices" options={{ presentation: "modal", title: "Price estimate" }} />
+        <Stack.Screen name="agent" options={{ presentation: "modal", title: "Plan our week" }} />
       </Stack.Protected>
 
       {/* Available whenever signed in (used from onboarding / no-group too). */}

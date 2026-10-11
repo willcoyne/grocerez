@@ -10,6 +10,8 @@ import { useAuth } from "@/state/AuthContext";
 interface GroupEvent {
   groupId: string;
   by?: string | null;
+  /** Only on "agent:changed". */
+  runId?: string;
 }
 
 const SocketStatusContext = createContext<{ connected: boolean }>({ connected: false });
@@ -42,10 +44,23 @@ export function handleSocketEvent(qc: QueryClient, event: string, payload: Group
       void qc.invalidateQueries({ queryKey: keys.groups });
       if (groupId) void qc.invalidateQueries({ queryKey: keys.groupInvites(groupId) });
       break;
+    case "agent:changed":
+      if (groupId) {
+        if (payload?.runId) void qc.invalidateQueries({ queryKey: keys.agentRun(groupId, payload.runId) });
+        void qc.invalidateQueries({ queryKey: keys.agentRuns(groupId), exact: true });
+      }
+      break;
   }
 }
 
-const EVENTS = ["shopping-list:changed", "cabinet:changed", "preferences:changed", "group:changed", "invites:changed"];
+const EVENTS = [
+  "shopping-list:changed",
+  "cabinet:changed",
+  "preferences:changed",
+  "group:changed",
+  "invites:changed",
+  "agent:changed",
+];
 
 /**
  * One Socket.IO connection per session (auth = app JWT). Joins the active group's room and re-joins after
