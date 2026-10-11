@@ -15,18 +15,18 @@ function setup(index = 0) {
 }
 
 describe("TabBar", () => {
-  it("renders List, Cabinet, Me, Household in order with the active tab selected", async () => {
+  it("renders List, Pantry, Me, Household in order with the active tab selected", async () => {
     const { props } = setup(0);
     await render(<TabBar {...props} />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.props.accessibilityLabel)).toEqual(["List", "Cabinet", "Me", "Household, 2 alerts"]);
+    expect(tabs.map((t) => t.props.accessibilityLabel)).toEqual(["List", "Pantry", "Me", "Household, 2 alerts"]);
     expect(tabs[0].props.accessibilityState).toEqual({ selected: true });
   });
 
   it("navigates to an inactive tab on press", async () => {
     const { props, navigation } = setup(0);
     await render(<TabBar {...props} />);
-    fireEvent.press(screen.getByLabelText("Cabinet"));
+    fireEvent.press(screen.getByLabelText("Pantry"));
     expect(navigation.navigate).toHaveBeenCalledWith("cabinet", undefined);
   });
 });

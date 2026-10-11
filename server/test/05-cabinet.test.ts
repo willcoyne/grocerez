@@ -111,4 +111,40 @@ describe("05 cabinet", () => {
     expect((await api().post(`/api/groups/${g.id}/cabinet/${foreign.body.id}/ran-out`).set(owner.auth)).status).toBe(404);
     expect((await api().delete(`/api/groups/${g.id}/cabinet/${foreign.body.id}`).set(owner.auth)).status).toBe(404);
   });
+  it("GET returns allergens = item defaults ∪ product allergens ∪ may_contain, plus product calories, health score, ingredients and serving size", async () => {
+    const { owner, g } = await setup();
+    const milk = await itemId("Milk");
+    const plain = await api().post(`/api/groups/${g.id}/cabinet`).set(owner.auth).send({ itemId: milk });
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: milk } });
+    expect(plain.body.product).toBeNull();
+    expect(plain.body.allergens).toEqual(item.defaultAllergens);
+
+    const product = await prisma.product.create({
+      data: {
+        itemId: milk, gtin: "00070038000563", name: "Chocolate Milk", brand: "Moo", source: "manual",
+        allergens: ["soy", "milk"], mayContain: ["peanuts"], caloriesPerServing: 190.5, healthScore: "C", fetchedAt: new Date(),
+        ingredients: "Milk, sugar, cocoa, soy lecithin", servingSize: "1 cup (240 ml)",
+      },
+    });
+    await prisma.cabinetItem.update({ where: { id: plain.body.id }, data: { productId: product.id } });
+    const res = await api().get(`/api/groups/${g.id}/cabinet`).set(owner.auth);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].product).toMatchObject({
+      id: product.id, brand: "Moo", caloriesPerServing: 190.5, healthScore: "C",
+      ingredients: "Milk, sugar, cocoa, soy lecithin", servingSize: "1 cup (240 ml)",
+    });
+    // Deduped, in ALLERGENS order (milk, peanuts, soy), and the catalog default (milk) is kept.
+    expect(res.body[0].allergens).toEqual(["milk", "peanuts", "soy"]);
+  });
+  it("GET returns ingredients and servingSize as null when the linked product has no label text", async () => {
+    const { owner, g } = await setup();
+    const milk = await itemId("Milk");
+    const row = await api().post(`/api/groups/${g.id}/cabinet`).set(owner.auth).send({ itemId: milk });
+    const product = await prisma.product.create({
+      data: { itemId: milk, gtin: "00070038000570", name: "Plain Milk", source: "manual", fetchedAt: new Date() },
+    });
+    await prisma.cabinetItem.update({ where: { id: row.body.id }, data: { productId: product.id } });
+    const res = await api().get(`/api/groups/${g.id}/cabinet`).set(owner.auth);
+    expect(res.body[0].product).toMatchObject({ id: product.id, ingredients: null, servingSize: null });
+  });
 });

@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
-import ListScreen from "@/app/(tabs)/index";
+import ListScreen from "@/app/(tabs)/list";
 import { toSections } from "@/lib/listSections";
 import { apiRoutes, renderWithProviders, testGroup, testUser } from "@/test-utils";
 

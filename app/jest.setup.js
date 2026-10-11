@@ -47,3 +47,7 @@ jest.mock("socket.io-client", () => {
 jest.mock("react-native-safe-area-context", () => require("react-native-safe-area-context/jest/mock").default);
 
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }));
+
+// Reanimated 4 / worklets have no native runtime under Jest (pantry overlay animations).
+jest.mock("react-native-worklets", () => require("react-native-worklets/src/mock"));
+jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock"));
