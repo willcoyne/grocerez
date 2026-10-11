@@ -3,7 +3,7 @@
 **A shared grocery app for households. The shopping list writes itself, and an AI agent plans the week's meals around
 what you already have and what everyone can safely eat.**
 
-Live demo: **https://172-236-106-190.ip.linodeusercontent.com** (hosted on Akamai Cloud / Linode)
+Live demo: **[https://172-236-106-190.ip.linodeusercontent.com](https://172-236-106-190.ip.linodeusercontent.com)** (hosted on Akamai Cloud / Linode)
 
 ---
 
