@@ -104,6 +104,7 @@ services:
       AKAMAI_INFERENCE_URL: ${AKAMAI_INFERENCE_URL:-https://ws.akamai-workshops.com/v1}
       AKAMAI_INFERENCE_KEY: ${AKAMAI_INFERENCE_KEY:?set AKAMAI_INFERENCE_KEY in deploy/.env}
       AKAMAI_ENABLE_THINKING: ${AKAMAI_ENABLE_THINKING:-false}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       AKAMAI_MODEL: ${AKAMAI_MODEL:-hackathon-chat}
       AKAMAI_IMAGE_MODEL: ${AKAMAI_IMAGE_MODEL:-hackathon-image}
       AKAMAI_EMBEDDING_MODEL: ${AKAMAI_EMBEDDING_MODEL:-hackathon-embedding}

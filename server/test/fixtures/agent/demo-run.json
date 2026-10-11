@@ -6,14 +6,63 @@
   "budgetCents": 6000,
   "status": "proposed",
   "steps": [
-    { "seq": 0, "id": "get_household", "label": "Checking allergies: Carson (peanuts), Maya (milk)", "status": "done", "detail": "4 people", "at": "2026-10-11T18:00:00.400Z" },
-    { "seq": 1, "id": "get_cabinet", "label": "14 items · using up: spinach (2 days), chicken (3 days)", "status": "done", "at": "2026-10-11T18:00:01.100Z" },
-    { "seq": 2, "id": "get_shopping_list", "label": "3 already on the list", "status": "done", "at": "2026-10-11T18:00:01.600Z" },
-    { "seq": 3, "id": "get_wants", "label": "Checked what everyone wants", "status": "done", "at": "2026-10-11T18:00:02.000Z" },
-    { "seq": 4, "id": "drafting", "label": "Drafting 4 meals…", "status": "done", "at": "2026-10-11T18:00:09.800Z" },
-    { "seq": 5, "id": "check_meal_safety", "label": "Safety check: 4/4 pass", "status": "done", "at": "2026-10-11T18:00:10.700Z" },
-    { "seq": 6, "id": "estimate_prices", "label": "Pricing 6 missing items… $38–$46 (AI estimate)", "status": "done", "at": "2026-10-11T18:00:15.200Z" },
-    { "seq": 7, "id": "propose_plan", "label": "Plan ready", "status": "done", "at": "2026-10-11T18:00:16.900Z" }
+    {
+      "seq": 0,
+      "id": "get_household",
+      "label": "Checking allergies: Carson (peanuts), Maya (milk)",
+      "status": "done",
+      "detail": "4 people",
+      "at": "2026-10-11T18:00:00.400Z"
+    },
+    {
+      "seq": 1,
+      "id": "get_cabinet",
+      "label": "14 items · using up: spinach (2 days), chicken (3 days)",
+      "status": "done",
+      "at": "2026-10-11T18:00:01.100Z"
+    },
+    {
+      "seq": 2,
+      "id": "get_shopping_list",
+      "label": "3 already on the list",
+      "status": "done",
+      "at": "2026-10-11T18:00:01.600Z"
+    },
+    {
+      "seq": 3,
+      "id": "get_wants",
+      "label": "Checked what everyone wants",
+      "status": "done",
+      "at": "2026-10-11T18:00:02.000Z"
+    },
+    {
+      "seq": 4,
+      "id": "drafting",
+      "label": "Drafting 4 meals…",
+      "status": "done",
+      "at": "2026-10-11T18:00:09.800Z"
+    },
+    {
+      "seq": 5,
+      "id": "check_meal_safety",
+      "label": "Safety check: 4/4 pass",
+      "status": "done",
+      "at": "2026-10-11T18:00:10.700Z"
+    },
+    {
+      "seq": 6,
+      "id": "estimate_prices",
+      "label": "Pricing 6 missing items… $38–$46 (AI estimate)",
+      "status": "done",
+      "at": "2026-10-11T18:00:15.200Z"
+    },
+    {
+      "seq": 7,
+      "id": "propose_plan",
+      "label": "Plan ready",
+      "status": "done",
+      "at": "2026-10-11T18:00:16.900Z"
+    }
   ],
   "plan": {
     "meals": [
@@ -22,64 +71,236 @@
         "day": "Mon",
         "minutes": 35,
         "servings": 4,
-        "ingredients": ["Chicken Breast", "Spinach", "Rice", "Garlic", "Lemons", "Olive Oil"],
-        "uses": ["Chicken Breast", "Spinach", "Rice", "Garlic", "Olive Oil"],
-        "missing": ["Lemons"],
-        "steps": ["Cook the rice.", "Season and sear the chicken.", "Add garlic and lemon juice.", "Wilt the spinach into the rice.", "Serve the chicken over the rice."]
+        "ingredients": [
+          "Chicken Breast",
+          "Spinach",
+          "Rice",
+          "Garlic",
+          "Lemons",
+          "Olive Oil"
+        ],
+        "uses": [
+          "Chicken Breast",
+          "Spinach",
+          "Rice",
+          "Garlic",
+          "Olive Oil"
+        ],
+        "missing": [
+          "Lemons"
+        ],
+        "steps": [
+          "Cook the rice.",
+          "Season and sear the chicken.",
+          "Add garlic and lemon juice.",
+          "Wilt the spinach into the rice.",
+          "Serve the chicken over the rice."
+        ],
+        "source": {
+          "url": "https://www.example.com/recipes/lemon-garlic-chicken-spinach-rice",
+          "site": "Example Kitchen",
+          "title": "Lemon Garlic Chicken with Spinach Rice",
+          "imageUrl": "https://www.example.com/images/lemon-garlic-chicken.jpg"
+        },
+        "ingredientLines": [
+          "1.5 lb chicken breast",
+          "2 cups baby spinach",
+          "1 cup long-grain rice",
+          "3 cloves garlic, minced",
+          "1 lemon, juiced",
+          "2 tbsp olive oil"
+        ]
       },
       {
         "title": "Spinach and black bean quesadillas",
         "day": "Tue",
         "minutes": 20,
         "servings": 4,
-        "ingredients": ["Tortillas", "Black Beans", "Spinach", "Bell Peppers", "Salsa", "Avocados"],
-        "uses": ["Tortillas", "Black Beans", "Spinach", "Bell Peppers"],
-        "missing": ["Salsa", "Avocados"],
-        "steps": ["Warm the beans.", "Fill tortillas with beans, spinach and peppers.", "Toast until crisp.", "Serve with salsa and avocado."]
+        "ingredients": [
+          "Tortillas",
+          "Black Beans",
+          "Spinach",
+          "Bell Peppers",
+          "Salsa",
+          "Avocados"
+        ],
+        "uses": [
+          "Tortillas",
+          "Black Beans",
+          "Spinach",
+          "Bell Peppers"
+        ],
+        "missing": [
+          "Salsa",
+          "Avocados"
+        ],
+        "steps": [
+          "Warm the beans.",
+          "Fill tortillas with beans, spinach and peppers.",
+          "Toast until crisp.",
+          "Serve with salsa and avocado."
+        ],
+        "source": {
+          "url": "https://www.example.com/recipes/black-bean-spinach-quesadillas",
+          "site": "Example Kitchen",
+          "title": "Black Bean Spinach Quesadillas",
+          "imageUrl": null
+        },
+        "ingredientLines": [
+          "8 flour tortillas",
+          "1 can black beans, rinsed",
+          "2 cups spinach",
+          "1 bell pepper, diced",
+          "1/2 cup salsa",
+          "1 avocado"
+        ]
       },
       {
         "title": "Chicken and pepper stir fry",
         "day": "Wed",
         "minutes": 25,
         "servings": 4,
-        "ingredients": ["Chicken Breast", "Bell Peppers", "Onions", "Rice", "Ginger", "Garlic"],
-        "uses": ["Chicken Breast", "Bell Peppers", "Onions", "Rice", "Garlic"],
-        "missing": ["Ginger"],
-        "steps": ["Cook the rice.", "Stir fry the chicken.", "Add peppers, onions, garlic and ginger.", "Serve over rice."]
+        "ingredients": [
+          "Chicken Breast",
+          "Bell Peppers",
+          "Onions",
+          "Rice",
+          "Ginger",
+          "Garlic"
+        ],
+        "uses": [
+          "Chicken Breast",
+          "Bell Peppers",
+          "Onions",
+          "Rice",
+          "Garlic"
+        ],
+        "missing": [
+          "Ginger"
+        ],
+        "steps": [
+          "Cook the rice.",
+          "Stir fry the chicken.",
+          "Add peppers, onions, garlic and ginger.",
+          "Serve over rice."
+        ],
+        "source": null,
+        "ingredientLines": []
       },
       {
         "title": "Tomato pasta with spinach",
         "day": "Thu",
         "minutes": 25,
         "servings": 4,
-        "ingredients": ["Pasta", "Canned Tomatoes", "Spinach", "Garlic", "Onions", "Basil", "Zucchini"],
-        "uses": ["Pasta", "Canned Tomatoes", "Spinach", "Garlic", "Onions"],
-        "missing": ["Basil", "Zucchini"],
-        "steps": ["Boil the pasta.", "Simmer tomatoes with garlic, onion and zucchini.", "Stir in spinach and basil.", "Toss with the pasta."]
+        "ingredients": [
+          "Pasta",
+          "Canned Tomatoes",
+          "Spinach",
+          "Garlic",
+          "Onions",
+          "Basil",
+          "Zucchini"
+        ],
+        "uses": [
+          "Pasta",
+          "Canned Tomatoes",
+          "Spinach",
+          "Garlic",
+          "Onions"
+        ],
+        "missing": [
+          "Basil",
+          "Zucchini"
+        ],
+        "steps": [
+          "Boil the pasta.",
+          "Simmer tomatoes with garlic, onion and zucchini.",
+          "Stir in spinach and basil.",
+          "Toss with the pasta."
+        ],
+        "source": null,
+        "ingredientLines": []
       }
     ],
     "missingItems": [
-      { "name": "Lemons", "forMeals": ["Lemon garlic chicken with spinach rice"] },
-      { "name": "Salsa", "forMeals": ["Spinach and black bean quesadillas"] },
-      { "name": "Avocados", "forMeals": ["Spinach and black bean quesadillas"] },
-      { "name": "Ginger", "forMeals": ["Chicken and pepper stir fry"] },
-      { "name": "Basil", "forMeals": ["Tomato pasta with spinach"] },
-      { "name": "Zucchini", "forMeals": ["Tomato pasta with spinach"] }
+      {
+        "name": "Lemons",
+        "forMeals": [
+          "Lemon garlic chicken with spinach rice"
+        ]
+      },
+      {
+        "name": "Salsa",
+        "forMeals": [
+          "Spinach and black bean quesadillas"
+        ]
+      },
+      {
+        "name": "Avocados",
+        "forMeals": [
+          "Spinach and black bean quesadillas"
+        ]
+      },
+      {
+        "name": "Ginger",
+        "forMeals": [
+          "Chicken and pepper stir fry"
+        ]
+      },
+      {
+        "name": "Basil",
+        "forMeals": [
+          "Tomato pasta with spinach"
+        ]
+      },
+      {
+        "name": "Zucchini",
+        "forMeals": [
+          "Tomato pasta with spinach"
+        ]
+      }
     ],
-    "estimate": { "lowCents": 3800, "highCents": 4600, "label": "AI estimate" },
+    "estimate": {
+      "lowCents": 3800,
+      "highCents": 4600,
+      "label": "AI estimate"
+    },
     "safety": {
       "checked": true,
       "perMeal": [
-        { "title": "Lemon garlic chicken with spinach rice", "passes": true, "unknown": [] },
-        { "title": "Spinach and black bean quesadillas", "passes": true, "unknown": [] },
-        { "title": "Chicken and pepper stir fry", "passes": true, "unknown": [] },
-        { "title": "Tomato pasta with spinach", "passes": true, "unknown": [] }
+        {
+          "title": "Lemon garlic chicken with spinach rice",
+          "passes": true,
+          "unknown": []
+        },
+        {
+          "title": "Spinach and black bean quesadillas",
+          "passes": true,
+          "unknown": []
+        },
+        {
+          "title": "Chicken and pepper stir fry",
+          "passes": true,
+          "unknown": []
+        },
+        {
+          "title": "Tomato pasta with spinach",
+          "passes": true,
+          "unknown": []
+        }
       ]
     },
     "summary": "Four dinners that use up the spinach and chicken first. No peanuts or milk in any meal. Six items to buy."
   },
   "error": null,
-  "meta": { "provider": "akamai", "model": "hackathon-chat", "toolCalls": 8, "tokensIn": 9120, "tokensOut": 1840, "ms": 16900 },
+  "meta": {
+    "provider": "akamai",
+    "model": "hackathon-chat",
+    "toolCalls": 8,
+    "tokensIn": 9120,
+    "tokensOut": 1840,
+    "ms": 16900
+  },
   "createdAt": "2026-10-11T18:00:00.000Z",
   "updatedAt": "2026-10-11T18:00:16.900Z",
   "appliedAt": null

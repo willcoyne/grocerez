@@ -26,6 +26,24 @@ export const PlanMeal = z.object({
   /** Generic grocery names to buy ("Lemons"), no quantities. */
   missing: z.array(text().trim().min(1).max(120)).max(15),
   steps: z.array(text().trim().min(1).max(500)).min(1).max(6),
+  /**
+   * The web recipe this meal comes from (Tavily search → the page's schema.org Recipe JSON-LD). null = no recipe
+   * found, the model wrote it (the app labels it "AI-created"). We show ingredients + our short steps and link out
+   * for the full method; we don't copy the site's instructions.
+   */
+  source: z
+    .object({
+      url: text().max(2000).regex(/^https:\/\//, "must be an https URL"),
+      /** Publisher shown in the citation, e.g. "Serious Eats". */
+      site: text().trim().min(1).max(80),
+      /** The recipe's title on that site. */
+      title: text().trim().min(1).max(200),
+      imageUrl: text().max(2000).regex(/^https:\/\//, "must be an https URL").nullable(),
+    })
+    .nullable()
+    .default(null),
+  /** The source's ingredient lines with quantities ("2 cups cooked rice"), for display. Empty when there's no source. */
+  ingredientLines: z.array(text().trim().min(1).max(200)).max(40).default([]),
 });
 export type PlanMeal = z.infer<typeof PlanMeal>;
 

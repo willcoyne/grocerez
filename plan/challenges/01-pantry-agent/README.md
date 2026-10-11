@@ -475,3 +475,27 @@ confirm the recorded-run replay works in the demo build.
 - [ ] The model call goes to Akamai inference (or the split in §9 is in effect and stated); the API, agent, and DB run on Akamai Cloud compute; the agent port is not public
 - [ ] The recorded-run fallback replays the last run in the demo build
 - [ ] `server`: `npm test && npm run build` · `app`: `npm test && npm run lint` · `agent`: `pytest -q`, all green
+
+
+## 11. Cited web recipes (decided 2026-10-11)
+
+The agent finds real recipes on the web and cites them. It replaces the old one-call "What can we cook?" flow (`/recipes`).
+
+**Flow:**
+1. The model picks meal ideas from the cabinet, as before.
+2. For each idea it calls **`find_recipe(idea, must_use[], avoid[])`**:
+   - **Tavily search** (`TAVILY_API_KEY`, REST via httpx, `include_domains` = an allowlist of recipe sites).
+   - Fetch the top few result pages (https only, allowlisted hosts, 5 s timeout, ≤ 2 MB, no redirects off the allowlist).
+   - Parse the page's **schema.org `Recipe` JSON-LD** (handle `@graph`, arrays, and `HowToStep`/`HowToSection`) to get the title, image, total time, yield, `recipeIngredient` and `recipeInstructions`.
+   - Clean each ingredient line into a generic name ("2 cups shredded mozzarella, divided" → "Mozzarella"). This is deterministic code first, with model help only if needed.
+   - **Safety-check the real ingredients through the server.** The first recipe that passes wins. If none passes, try the next result. If nothing works, the meal has `source: null` and is labeled "AI-created".
+3. Plan contract (frozen):
+   - `PlanMeal.source {url, site, title, imageUrl|null} | null`
+   - `PlanMeal.ingredientLines[]`, the source's lines with quantities, for display
+   - `ingredients[]` stays generic names, used for the safety check and the list.
+
+**What we show:** title, image, time, servings, ingredient lines, our own short steps (≤ 6, model-written), and **"Recipe from <site> ↗"** linking to the original. We do not copy the site's instructions.
+
+**Safety:** the server keyword-scans `ingredientLines` as well, as a belt-and-braces check. This scan never marks anything `unknown`. The generic `ingredients` get the full check, including the allergy-household rule that unverifiable ingredients fail.
+
+**Fallback:** no Tavily key, a search error, or no safe recipe → the model-written meal, clearly labeled.
