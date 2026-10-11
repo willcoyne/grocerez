@@ -14,6 +14,29 @@ const optional = z
   .transform((s) => (s && s.trim() ? s.trim() : undefined));
 
 /**
+ * Recipe titles that aren't a dinner (challenge 01 §12 search). Postgres ARE regex (`\m` / `\M` = word start/end),
+ * matched case-insensitively with `title !~* …`. A title is excluded only when it ENDS with one of these nouns
+ * (optionally followed by "Recipe" and/or a parenthetical) and no connector ("with", "in", "and", …) comes before it:
+ * "Homemade Pizza Sauce" is excluded, "Pasta with Tomato Sauce" and "Spaghetti and Meat Sauce" are kept.
+ * Look-behinds keep real dinners: chicken pot pie, crab cakes, egg rolls, French dip.
+ */
+const NON_DINNER_NOUNS = [
+  "sauces?", "dressings?", "(?<!french )dips?", "marinades?", "seasonings?", "spice (?:blends?|rubs?|mix(?:es)?)", "rubs?",
+  "vinaigrettes?", "grav(?:y|ies)", "stocks?", "broths?",
+  "cookies?",
+  "(?<!crab |fish |salmon |tuna |potato |rice |corn |zucchini |shrimp |chicken |turkey |veggie |vegetable |bean |quinoa )cakes?",
+  "cupcakes?", "brownies?", "blondies?",
+  "muffins?", "(?<!pot |shepherd's |shepherds |cottage |meat |hand |chicken |turkey |tamale )pies?",
+  "frostings?", "icings?", "jams?", "jell(?:y|ies)", "smoothies?", "cocktails?", "drinks?", "lemonades?",
+  "breads?", "(?:dinner|cinnamon|crescent|sweet|yeast|hawaiian|bread) rolls?", "biscuits?", "granola", "pancakes?", "waffles?", "oatmeal",
+  "condiments?", "ketchup", "mayo(?:nnaise)?", "aioli", "relish(?:es)?", "chutneys?", "salsas?", "pesto", "hummus",
+  "bars?", "fudge", "puddings?", "syrups?", "glazes?", "butters?", "doughs?", "crusts?",
+];
+const NON_DINNER_CONNECTORS = "(?:with|in|on|over|and|plus|topped|served)";
+const NON_DINNER_TITLE =
+  `^(?:(?!\\m${NON_DINNER_CONNECTORS}\\M|&).)*\\m(?:${NON_DINNER_NOUNS.join("|")})\\M(?:\\W+recipe)?\\W*(?:\\([^)]*\\)\\W*)?$`;
+
+/**
  * Environment schema. Core variables are always required. The external-service credentials
  * (Anthropic, AWS) are required in production only; in development/test the features that need them
  * answer 503 NOT_CONFIGURED instead, so the M2 loop runs before those accounts exist.
@@ -45,6 +68,8 @@ const schema = z.object({
   AKAMAI_EMBEDDING_MODEL: z.string().trim().min(1).default("hackathon-embedding"),
   /** Writes the short item descriptions that embeddings are built from. */
   AKAMAI_CHAT_MODEL: z.string().trim().min(1).default("hackathon-chat"),
+  /** Pantry Agent recipe search: titles matching this (Postgres regex, case-insensitive) are not dinners. */
+  RECIPE_NON_DINNER_TITLE: z.string().min(1).default(NON_DINNER_TITLE),
   /** Cosine distance cutoff for "related" items (0 = identical, 2 = opposite). */
   SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.35),
   /** For a matched item: other-type items must be at least this close (same product type always qualifies). */

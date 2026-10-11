@@ -4,8 +4,8 @@ import type { AgentRunRequest, IndexedRecipe } from "../src/contracts/agent.js";
 import { prisma } from "../src/db.js";
 import { agentClient } from "../src/lib/agentClient.js";
 import { http } from "../src/lib/http.js";
-import { recipeIndex } from "../src/modules/agent/recipes.js";
-import { api, makeGroup, makeUser, type TestUser } from "./helpers.js";
+import { rankByKitchenFit, recipeIndex } from "../src/modules/agent/recipes.js";
+import { api, itemId, makeGroup, makeUser, type TestUser } from "./helpers.js";
 
 // Recipe index (challenge 01 §12). Akamai is faked at the http.fetch boundary, like 12-embeddings.test.ts.
 
@@ -22,7 +22,7 @@ const fakeVector = (text: string) => {
   const v = new Array(1024).fill(0);
   v[3] = 0.05; // never a zero vector
   if (/chicken/.test(t)) v[0] = 1;
-  if (/pasta|noodle/.test(t)) v[1] = 1;
+  if (/pasta|noodle|pizza/.test(t)) v[1] = 1;
   if (/cookie|oreo|pie/.test(t)) v[2] = 1;
   return v;
 };
@@ -161,7 +161,8 @@ describe("12 recipe index: search", () => {
     const res = await search(owner, g.id, { query: "chicken dinner", limit: 10 });
     const titles: string[] = res.body.recipes.map((r: { title: string }) => r.title);
     expect(titles.some((t) => /chicken/i.test(t))).toBe(false);
-    expect(titles).toEqual(expect.arrayContaining(["Veggie Pasta", "Cookie Crust Pie"]));
+    expect(titles).toContain("Veggie Pasta");
+    expect(titles).not.toContain("Cookie Crust Pie"); // a dessert: excluded as a non-dinner
   });
 
   it("available=false without Akamai, or when nothing is embedded for the current model", async () => {
@@ -173,6 +174,70 @@ describe("12 recipe index: search", () => {
     expect((await search(owner, g.id, { query: "chicken" })).body).toEqual({ recipes: [], available: false });
   });
 
+  it("non-dinner titles are excluded in SQL: sauces, desserts, breads (only when the title ends with that noun)", async () => {
+    const titles = [
+      "Homemade Pizza Sauce", "Pizza Sauce Recipe", "Pasta with Tomato Sauce", "Spaghetti and Meat Sauce", "Chicken Stir-Fry",
+      "Chicken Pot Pie", "Apple Pie", "Crab Cakes", "Carrot Cake", "Egg Rolls", "Cinnamon Rolls", "French Dip", "Garlic Bread",
+      "Chicken Broth", "Mussels in White Wine Broth", "Butter Chicken", "Lemon Bars", "Best Ever Brownies (Fudgy!)",
+    ];
+    const rows = await prisma.$queryRaw<{ t: string; x: boolean }[]>`
+      SELECT t, t ~* ${config.RECIPE_NON_DINNER_TITLE} AS x FROM unnest(${titles}::text[]) AS t`;
+    const excluded = rows.filter((r) => r.x).map((r) => r.t);
+    expect(excluded).toEqual([
+      "Homemade Pizza Sauce", "Pizza Sauce Recipe", "Apple Pie", "Carrot Cake", "Cinnamon Rolls", "Garlic Bread", "Chicken Broth",
+      "Lemon Bars", "Best Ever Brownies (Fudgy!)",
+    ]);
+
+    // End to end: the sauce is as close to "pasta" as the dinner, but never comes back.
+    await ingest({
+      recipes: [
+        recipe("pizza-sauce", "Homemade Pizza Sauce", ["1 can crushed tomatoes", "2 cloves garlic"], ["Canned Tomatoes", "Garlic"]),
+        recipe("pasta-tomato", "Pasta with Tomato Sauce", ["8 oz pasta", "1 can crushed tomatoes"], ["Pasta", "Canned Tomatoes"]),
+      ],
+    }).expect(200);
+    const { owner, g } = await household();
+    const res = await search(owner, g.id, { query: "tomato pasta", limit: 10 });
+    const found: string[] = res.body.recipes.map((r: { title: string }) => r.title);
+    expect(found).toContain("Pasta with Tomato Sauce");
+    expect(found).not.toContain("Homemade Pizza Sauce");
+    expect((await search(owner, g.id, { query: "chicken", limit: 10 })).body.recipes.map((r: { title: string }) => r.title))
+      .toContain("Lemon Chicken");
+  });
+
+  it("kitchen fit: of two equally similar recipes, the one using more cabinet items ranks first", async () => {
+    await ingest({
+      recipes: [
+        recipe("pasta-fancy", "Pasta Night Fancy", ["8 oz pasta", "1 pinch saffron", "1 truffle", "2 tbsp capers", "1 leek", "1 fennel"],
+          ["Pasta", "Saffron", "Truffle", "Capers", "Leeks", "Fennel"]),
+        recipe("pasta-pantry", "Pasta Night Pantry", ["8 oz pasta", "3 cloves garlic", "1 can tomatoes", "2 tbsp olive oil", "salt"],
+          ["Pasta", "Garlic", "Canned Tomatoes", "Olive Oil", "Salt"]),
+      ],
+    }).expect(200);
+    const { owner, g } = await household();
+    for (const n of ["Pasta", "Garlic", "Canned Tomatoes", "Olive Oil"]) {
+      await api().post(`/api/groups/${g.id}/cabinet`).set(owner.auth).send({ itemId: await itemId(n) }).expect(201);
+    }
+    const res = await search(owner, g.id, { query: "pasta night", limit: 10 });
+    const titles: string[] = res.body.recipes.map((r: { title: string }) => r.title);
+    expect(res.body.recipes.find((r: { title: string }) => r.title === "Pasta Night Fancy").distance)
+      .toBeCloseTo(res.body.recipes.find((r: { title: string }) => r.title === "Pasta Night Pantry").distance, 6);
+    expect(titles.indexOf("Pasta Night Pantry")).toBeLessThan(titles.indexOf("Pasta Night Fancy"));
+
+    // The pure scoring: coverage counts names in either direction and ignores salt; >4 missing costs a little.
+    const [best, worst] = rankByKitchenFit(
+      [
+        { distance: 0.3, ingredients: ["Pasta", "Saffron", "Truffle", "Capers", "Leeks", "Fennel"] },
+        { distance: 0.32, ingredients: ["Pasta", "Fresh Garlic", "Canned Tomatoes", "Olive Oil", "Salt"] },
+      ],
+      [],
+      ["Pasta", "Garlic", "Canned Tomatoes", "Olive Oil"],
+    );
+    expect(best).toMatchObject({ coverage: 1, missing: 0 });
+    expect(best.score).toBeCloseTo(0.32 - 0.1, 6);
+    expect(worst).toMatchObject({ missing: 5 });
+    expect(worst.score).toBeCloseTo(0.3 - 0.1 / 6 + 0.01, 6);
+  });
+
   it("the agent's run token can call it; outsiders get 404", async () => {
     const { owner, g } = await household();
     const startRun = vi.spyOn(agentClient, "startRun").mockResolvedValue(undefined);
@@ -182,7 +247,7 @@ describe("12 recipe index: search", () => {
     const res = await api().post(`/api/groups/${g.id}/agent/recipes/search`)
       .set({ Authorization: `Bearer ${token}` }).send({ query: "pasta" });
     expect(res.status).toBe(200);
-    expect(res.body.recipes[0].title).toBe("Veggie Pasta");
+    expect(res.body.recipes.map((r: { title: string }) => r.title)).toContain("Veggie Pasta");
 
     const outsider = await makeUser();
     expect((await search(outsider, g.id, { query: "pasta" })).status).toBe(404);
