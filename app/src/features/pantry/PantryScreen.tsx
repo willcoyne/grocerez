@@ -305,7 +305,8 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
         else if (phase === "shelves") closePantry();
         return;
       }
-      if (isNoteKind(id) && phase === "list" && noteTarget === id) return setPending(null); // already on that paper
+      // already on (or flying to) that paper; one being put back is queued so it flies out again once it's pinned
+      if (isNoteKind(id) && phase === "list" && noteTarget === id && listDir.current > 0) return setPending(null);
       if (phase !== "closed") {
         // Out of the shelves / off the paper first; opening / zooming finish into the shelves, then close.
         setPending(id);
