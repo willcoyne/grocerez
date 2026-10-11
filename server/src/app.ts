@@ -14,6 +14,7 @@ import { cabinetRouter } from "./modules/cabinet/router.js";
 import { dietaryRouter } from "./modules/dietary/router.js";
 import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
 import { itemsRouter } from "./modules/items/router.js";
+import { mealPlanRouter } from "./modules/meal-plan/router.js";
 import { preferencesRouter } from "./modules/preferences/router.js";
 import { productsRouter } from "./modules/products/router.js";
 import { healthRouter } from "./modules/health/router.js";
@@ -69,6 +70,7 @@ export function createApp() {
   group.use(cabinetRouter);
   group.use(aiRouter);
   group.use(agentRouter);
+  group.use(mealPlanRouter);
   group.use(shoppingListRouter);
   group.use(alertsRouter);
   api.use("/groups/:groupId", requireGroupMember, group);

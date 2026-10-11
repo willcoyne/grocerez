@@ -52,6 +52,7 @@ model User {
   listChecked   ShoppingListItem[] @relation("ListCheckedBy")
   listAdded     ShoppingListItem[] @relation("ListAddedBy")
   agentRuns     AgentRun[]
+  plannedMeals  PlannedMeal[]      @relation("PlannedMealCreatedBy")
 
   @@map("users")
 }
@@ -111,6 +112,7 @@ model Group {
   listItems     ShoppingListItem[]
   recallMatches RecallMatch[]
   agentRuns     AgentRun[]
+  plannedMeals  PlannedMeal[]
 
   @@map("groups")
 }
@@ -364,13 +366,45 @@ model AgentRun {
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   appliedAt   DateTime?      @map("applied_at") @db.Timestamptz(6)
+  /// Swap run (spec §13): the planned meal this run replaces (its date is the only date planned).
+  replacePlannedMealId String? @map("replace_planned_meal_id") @db.Uuid
 
-  group     Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  listItems ShoppingListItem[]
+  group        Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listItems    ShoppingListItem[]
+  replaces     PlannedMeal?       @relation("AgentRunReplaces", fields: [replacePlannedMealId], references: [id], onDelete: SetNull)
+  plannedMeals PlannedMeal[]      @relation("PlannedMealAgentRun")
 
   @@index([groupId, createdAt(sort: Desc)])
   @@map("agent_runs")
+}
+
+enum MealSlot {
+  dinner
+
+  @@map("meal_slot")
+}
+
+/// Week calendar (spec §13): one dinner per date per group. `meal` = PlanMeal (contracts/agent.ts) with `date` set.
+model PlannedMeal {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId    String   @map("group_id") @db.Uuid
+  date       DateTime @db.Date
+  slot       MealSlot @default(dinner)
+  meal       Json
+  agentRunId String?  @map("agent_run_id") @db.Uuid
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group      Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  agentRun   AgentRun?  @relation("PlannedMealAgentRun", fields: [agentRunId], references: [id], onDelete: SetNull)
+  creator    User?      @relation("PlannedMealCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  replacedBy AgentRun[] @relation("AgentRunReplaces")
+
+  @@unique([groupId, date, slot])
+  @@index([groupId, date])
+  @@map("planned_meals")
 }
 
 // ─── 08 Product data cache (SmartLabel / barcode) ──────────────────────────────

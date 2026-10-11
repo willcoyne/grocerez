@@ -34,7 +34,13 @@ export const shoppingListRepo = {
    * An existing row (the caller already skipped unchecked ones) keeps its reason/checked state and only gets the note.
    * Regeneration never touches note / agent_run_id, and manual rows survive it.
    */
-  upsertFromAgent: async (db: Db, groupId: string, userId: string, agentRunId: string, rows: { itemId: string; note: string }[]) => {
+  upsertFromAgent: async (
+    db: Db,
+    groupId: string,
+    userId: string,
+    agentRunId: string | null,
+    rows: { itemId: string; note: string }[],
+  ) => {
     const out: string[] = [];
     for (const { itemId, note } of rows) {
       const r = await db.shoppingListItem.upsert({

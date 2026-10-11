@@ -11,27 +11,24 @@ import {
   type SafetyCheckResponse,
   type StartAgentRunBody,
 } from "../../contracts/agent.js";
-import type { Item } from "../../contracts/items.js";
 import { prisma } from "../../db.js";
 import { agentClient } from "../../lib/agentClient.js";
 import { AppError, conflict, notConfigured, notFound } from "../../lib/errors.js";
 import { groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
 import { signAgentRunToken } from "../../lib/jwt.js";
 import { logger } from "../../lib/logger.js";
-import { normalize } from "../../lib/normalize.js";
 import { emitGroup } from "../../lib/realtime.js";
-import { itemsService } from "../items/service.js";
+import { mealPlanService } from "../meal-plan/service.js";
 import { withRegeneration } from "../shopping-list/engine.js";
-import { shoppingListRepo } from "../shopping-list/repo.js";
 import { shoppingListService } from "../shopping-list/service.js";
+import { assertMealsSafe, resolveWanted, writeWanted } from "./listWriter.js";
 import { agentRepo } from "./repo.js";
-import { safety, type SafetyMeal } from "./safety.js";
+import { safety } from "./safety.js";
 
 /** Mutable so tests can shorten them. */
 export const agentTimers = { runTimeoutMs: 120_000, staleAfterMs: 120_000, emitThrottleMs: 250 };
 
 const TOO_LONG = "Took too long";
-const NOTE_MAX = 120;
 
 type RunRow = NonNullable<Awaited<ReturnType<typeof agentRepo.find>>>;
 type SummaryRow = Awaited<ReturnType<typeof agentRepo.list>>[number];
@@ -117,42 +114,22 @@ export async function sweepStaleRuns(olderThanMs = agentTimers.staleAfterMs): Pr
 
 // ─── Apply helpers ───────────────────────────────────────────────────────────
 
-/** missingItems[].name → catalog item: exact/suggested match, else created through the POST /items path. */
-async function resolveItem(userId: string, name: string): Promise<Item | null> {
-  if (!normalize(name)) return null;
-  const res = await itemsService.search(name);
-  if (res.match !== "none" && res.results[0]) return res.results[0];
-  return (await itemsService.create(userId, { name: name.trim().slice(0, 200) })).item;
-}
-
-function unsafe(failing: { title: string; problems: SafetyCheckResponse["meals"][number]["problems"] }[]) {
-  const first = failing[0].problems[0];
-  return new AppError(
-    422,
-    "PLAN_UNSAFE",
-    `This plan isn't safe for everyone: ${first.ingredient} (${first.reason}: ${first.members.join(", ")})`,
-    { meals: failing.map((m) => ({ title: m.title, problems: m.problems })) },
-  );
-}
-
-function noteFor(forMeals: string[]): string {
-  return Array.from(`✨ for ${forMeals.join(", ")}`).slice(0, NOTE_MAX).join("");
-}
-
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export const agentService = {
   /** POST /agent/runs: create the run, hand it to the agent service (5 s), arm the 120 s timeout. */
   async start(groupId: string, userId: string, body: StartAgentRunBody): Promise<{ runId: string }> {
     if (!config.AGENT_URL || !config.AGENT_SHARED_SECRET) throw notConfigured("Pantry Agent");
+    // Week calendar (spec §13): which dates to plan (swap → the replaced meal's date), and what's planned nearby.
+    const { dates, alreadyPlanned, replacePlannedMealId } = await mealPlanService.runDates(groupId, body);
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { zipCode: true } });
     const budgetCents = body.budgetCents ?? null;
-    const { id: runId } = await agentRepo.create(groupId, userId, body.prompt, budgetCents);
+    const { id: runId } = await agentRepo.create(groupId, userId, body.prompt, budgetCents, replacePlannedMealId);
     try {
       await agentClient.startRun({
         runId, groupId, prompt: body.prompt, budgetCents, zipCode: user?.zipCode ?? null,
         apiBaseUrl: config.AGENT_PUBLIC_API_URL, runToken: signAgentRunToken(userId, runId, groupId),
-        dates: body.dates ?? [], alreadyPlanned: [],
+        dates, alreadyPlanned,
       });
     } catch (err) {
       logger.warn({ err, runId }, "agent service unreachable");
@@ -199,61 +176,23 @@ export const agentService = {
     }
     const plan = parsed.data;
 
-    // Check everything the plan tells people to buy or cook, not only meals[].ingredients: missing/uses names, the
-    // title and steps (safety.check), and missingItems — the rows apply actually writes (as a final "To buy" entry).
-    const toCheck: SafetyMeal[] = plan.meals.map((m) => ({
-      title: m.title,
-      ingredients: [...new Set([...m.ingredients, ...m.missing, ...m.uses])],
-      steps: m.steps,
-      ingredientLines: m.ingredientLines,
-    }));
-    if (plan.missingItems.length) toCheck.push({ title: "To buy", ingredients: plan.missingItems.map((i) => i.name) });
-    const failing = (await safety.check(groupId, toCheck)).meals.filter((m) => !m.passes);
-    if (failing.length) throw unsafe(failing);
+    // Same path as the week calendar's "Add missing to List" (listWriter): safety → resolve → skip → upsert.
+    await assertMealsSafe(groupId, plan.meals, plan.missingItems);
+    const wanted = await resolveWanted(groupId, userId, plan.missingItems);
 
-    // Resolve names (outside the transaction: may create catalog items). Merge names that land on the same item.
-    const wanted = new Map<string, { name: string; forMeals: string[]; item: Item }>();
-    for (const m of plan.missingItems) {
-      const item = await resolveItem(userId, m.name).catch((err) => {
-        logger.warn({ err, name: m.name }, "could not resolve agent item");
-        return null;
-      });
-      if (!item) continue;
-      const w = wanted.get(item.id) ?? { name: m.name, forMeals: [], item };
-      for (const t of m.forMeals) if (!w.forMeals.includes(t)) w.forMeals.push(t);
-      wanted.set(item.id, w);
-    }
-    // The resolved catalog item may differ from the name (fuzzy match): check its own allergens/category too.
-    const itemProblems = await safety.checkItems(groupId, [...wanted.values()].map((w) => w.item));
-    if (itemProblems.length) throw unsafe([{ title: "To buy", problems: itemProblems }]);
-    const itemIds = [...wanted.keys()];
-
+    // ONE transaction: claim the run, write the list rows AND the planned meals (spec §13), regenerate.
     const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], async (tx) => {
       if (!(await agentRepo.claimApply(tx, groupId, runId))) throw notProposed();
-      const inCabinet = new Set(
-        (await tx.cabinetItem.findMany({ where: { groupId, status: "in_stock", itemId: { in: itemIds } }, select: { itemId: true } }))
-          .map((c) => c.itemId),
-      );
-      // Any row already on the list counts, including checked ones (already in the cart).
-      const onList = new Set(
-        (await tx.shoppingListItem.findMany({ where: { groupId, itemId: { in: itemIds } }, select: { itemId: true } }))
-          .map((r) => r.itemId),
-      );
-      const skipped: ApplyAgentRunResponse["skipped"] = [];
-      const rows: { itemId: string; note: string }[] = [];
-      for (const [itemId, w] of wanted) {
-        if (inCabinet.has(itemId)) skipped.push({ name: w.name, reason: "in_cabinet" });
-        else if (onList.has(itemId)) skipped.push({ name: w.name, reason: "on_list" });
-        else rows.push({ itemId, note: noteFor(w.forMeals) });
-      }
-      const ids = await shoppingListRepo.upsertFromAgent(tx, groupId, userId, runId, rows);
-      return { ids, skipped };
+      const list = await writeWanted(tx, groupId, userId, wanted, runId);
+      const planned = await mealPlanService.writeForRun(tx, groupId, userId, runId, plan.meals, run.replacePlannedMealId);
+      return { ...list, planned };
     });
     emitGroup(groupId, "agent:changed", userId, { runId });
+    if (result.planned > 0) emitGroup(groupId, "meal-plan:changed", userId);
 
     const added = new Set(result.ids);
     const items = (await shoppingListService.list(groupId)).filter((r) => added.has(r.id));
-    return { added: result.ids.length, skipped: result.skipped, items };
+    return { added: result.ids.length, skipped: result.skipped, items, planned: result.planned };
   },
 
   /**

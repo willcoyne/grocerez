@@ -1,6 +1,12 @@
 import type { Server } from "socket.io";
 
-export type GroupEvent = "shopping-list:changed" | "cabinet:changed" | "preferences:changed" | "group:changed" | "agent:changed";
+export type GroupEvent =
+  | "shopping-list:changed"
+  | "cabinet:changed"
+  | "preferences:changed"
+  | "group:changed"
+  | "agent:changed"
+  | "meal-plan:changed";
 export type UserEvent = "invites:changed" | "group:changed";
 
 let io: Server | null = null;

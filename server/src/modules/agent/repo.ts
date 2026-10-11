@@ -4,7 +4,7 @@ import type { Allergen, Diet } from "../../contracts/dietary.js";
 import { prisma, type Db } from "../../db.js";
 
 type RunOwner = { id: string; groupId: string; userId: string };
-type StepInput = Pick<AgentStep, "id" | "label" | "status" | "detail">;
+type StepInput = Pick<AgentStep, "id" | "label" | "status" | "detail" | "preview">;
 
 const summarySelect = {
   id: true, groupId: true, userId: true, prompt: true, budgetCents: true, status: true, plan: true, error: true, meta: true,
@@ -35,8 +35,8 @@ export const agentRepo = {
     }));
   },
 
-  create: (groupId: string, userId: string, prompt: string, budgetCents: number | null) =>
-    prisma.agentRun.create({ data: { groupId, userId, prompt, budgetCents }, select: { id: true } }),
+  create: (groupId: string, userId: string, prompt: string, budgetCents: number | null, replacePlannedMealId: string | null = null) =>
+    prisma.agentRun.create({ data: { groupId, userId, prompt, budgetCents, replacePlannedMealId }, select: { id: true } }),
 
   find: (groupId: string, id: string, db: Db = prisma) => db.agentRun.findFirst({ where: { id, groupId } }),
 
@@ -54,7 +54,9 @@ export const agentRepo = {
    */
   upsertStep: async (runId: string, seq: number, step: StepInput, at: string): Promise<RunOwner | null> => {
     const incoming = JSON.stringify({
-      seq, _ev: seq, id: step.id, label: step.label, status: step.status, ...(step.detail !== undefined ? { detail: step.detail } : {}), at,
+      seq, _ev: seq, id: step.id, label: step.label, status: step.status, ...(step.detail !== undefined ? { detail: step.detail } : {}),
+      // Early meal peek (spec §13) so the Week sheet can fill a day before `proposed`.
+      ...(step.preview !== undefined ? { preview: step.preview } : {}), at,
     });
     const rows = await prisma.$queryRaw<RunOwner[]>`
       UPDATE agent_runs r
@@ -66,7 +68,10 @@ export const agentRepo = {
               SELECT CASE
                        WHEN old.e IS NULL THEN ${incoming}::jsonb
                        WHEN COALESCE((old.e->>'_ev')::int, (old.e->>'seq')::int) > ${seq} THEN old.e
-                       ELSE ${incoming}::jsonb || jsonb_build_object('seq', LEAST((old.e->>'seq')::int, ${seq}))
+                       -- a later event keeps an earlier preview unless it sends its own
+                       ELSE CASE WHEN old.e ? 'preview' THEN jsonb_build_object('preview', old.e->'preview') ELSE '{}'::jsonb END
+                            || ${incoming}::jsonb
+                            || jsonb_build_object('seq', LEAST((old.e->>'seq')::int, ${seq}))
                      END
               FROM (SELECT (SELECT e FROM jsonb_array_elements(r.steps) e WHERE e->>'id' = ${step.id} LIMIT 1) AS e) old
             ) x
