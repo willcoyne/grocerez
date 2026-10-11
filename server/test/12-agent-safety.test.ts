@@ -145,6 +145,26 @@ describe("12 agent safety check (per member)", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("ingredientLines are keyword-scanned: '1 cup grated parmesan' flags milk even when the generic name is 'Cheese Blend'", async () => {
+    const { owner, g } = await household();
+    const lines = ["2 cups cooked rice", "1 cup grated parmesan"];
+    const [m] = (await safety.check(g.id, [{ title: "Risotto", ingredients: ["Rice", "Cheese Blend"], ingredientLines: lines }])).meals;
+    expect(m.passes).toBe(false);
+    expect(m.problems).toContainEqual({ ingredient: "1 cup grated parmesan", reason: "contains milk", members: ["Maya"] });
+
+    // Through the endpoint too (the agent checks exactly what apply checks).
+    const res = await api().post(`/api/groups/${g.id}/agent/safety-check`).set(owner.auth)
+      .send({ meals: [{ title: "Risotto", ingredients: ["Rice", "Cheese Blend"], ingredientLines: lines }] });
+    expect(res.status).toBe(200);
+    expect(res.body.meals[0].problems).toContainEqual({ ingredient: "1 cup grated parmesan", reason: "contains milk", members: ["Maya"] });
+  });
+
+  it("an ingredient line with an unknown name ('1 tsp sumac') does NOT fail an allergy household and is never `unknown`", async () => {
+    const { g } = await household(); // Carson (peanuts), Maya (milk), Sam (soy)
+    const [m] = (await safety.check(g.id, [{ title: "Salad", ingredients: ["Spinach"], ingredientLines: ["1 tsp sumac", "2 cups spinach"] }])).meals;
+    expect(m).toEqual({ title: "Salad", passes: true, problems: [], unknown: [] });
+  });
+
   it("POST /agent/safety-check returns the same result; non-member → 404; bad body → 400", async () => {
     const { owner, g } = await household();
     const body = { meals: [meal("PB toast", "Peanut butter"), meal("Greens", "Spinach")] };

@@ -341,6 +341,16 @@ describe("12 agent: apply", () => {
     expect(await prisma.item.findFirst({ where: { name: odd } })).toBeTruthy();
   });
 
+  it("apply keyword-scans the cited recipe's ingredientLines: a peanut line → 422 PLAN_UNSAFE", async () => {
+    const { owner, g } = await household();
+    const p = plan();
+    p.meals[0].ingredientLines = ["2 cups cooked rice", "2 tbsp peanut sauce"];
+    const runId = await proposedRun(owner, g.id, p);
+    const res = await api().post(`/api/groups/${g.id}/agent/runs/${runId}/apply`).set(owner.auth).send({});
+    expect([res.status, res.body.error.code]).toEqual([422, "PLAN_UNSAFE"]);
+    expect(JSON.stringify(res.body.error.details)).toContain("2 tbsp peanut sauce");
+  });
+
   it("apply on a running run → 409", async () => {
     const { owner, g } = await household();
     const runId = await startRunFor(owner, g.id);

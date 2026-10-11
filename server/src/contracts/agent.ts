@@ -159,6 +159,8 @@ export const SafetyCheckBody = z.object({
         ingredients: z.array(text().trim().min(1).max(120)).min(1).max(25),
         /** Checked too (the same as apply does), so a plan that passes here can't 422 on apply because of a step. */
         steps: z.array(text().trim().min(1).max(500)).max(6).optional(),
+        /** The cited recipe's lines (same bounds as PlanMeal.ingredientLines): keyword-scanned only, never `unknown`. */
+        ingredientLines: z.array(text().trim().min(1).max(200)).max(40).optional(),
       }),
     )
     .min(1)

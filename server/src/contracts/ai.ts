@@ -1,49 +1,6 @@
 import { z } from "zod";
 
-// ─── Recipes ─────────────────────────────────────────────────────────────────
-
-export const SuggestRecipesBody = z.object({
-  maxRecipes: z.number().int().min(1).max(5).default(3),
-  mustUseExpiring: z.boolean().default(true),
-});
-export type SuggestRecipesBody = z.infer<typeof SuggestRecipesBody>;
-
-/** What Claude must return (structured output). Validated again with zod. */
-export const ClaudeRecipes = z.object({
-  recipes: z
-    .array(
-      z.object({
-        title: z.string().min(1).max(200),
-        summary: z.string().max(1000),
-        minutes: z.number().int().min(1).max(1440),
-        servings: z.number().int().min(1).max(50),
-        ingredients: z.array(z.string().min(1).max(200)).min(1).max(40),
-        usesCabinetItems: z.array(z.string().max(200)).max(40),
-        missingItems: z.array(z.string().min(1).max(200)).max(30),
-        steps: z.array(z.string().min(1).max(1000)).min(1).max(30),
-        allergenWarnings: z.array(z.string().max(300)).max(20),
-      }),
-    )
-    .max(10),
-});
-
-export const Recipe = z.object({
-  title: z.string(),
-  summary: z.string(),
-  minutes: z.number().int(),
-  servings: z.number().int(),
-  ingredients: z.array(z.string()),
-  usesCabinetItems: z.array(z.string()),
-  /** Cabinet items expiring within 3 days that this recipe uses (computed by the server). */
-  usesExpiring: z.array(z.string()),
-  /** Mapped to the catalog via /items/search logic; itemId null = no catalog match (the app can POST /items first). */
-  missingItems: z.array(
-    z.object({ name: z.string(), itemId: z.uuid().nullable(), itemName: z.string().nullable(), match: z.enum(["exact", "suggested", "none"]) }),
-  ),
-  steps: z.array(z.string()),
-  allergenWarnings: z.array(z.string()),
-});
-export type Recipe = z.infer<typeof Recipe>;
+// Recipe suggestions (POST /recipes/suggest) were retired by the Pantry Agent's cited web recipes (challenge 01 §11).
 
 // ─── Prices ──────────────────────────────────────────────────────────────────
 
