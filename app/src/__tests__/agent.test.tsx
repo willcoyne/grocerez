@@ -1,5 +1,6 @@
 import type { AgentRun, AgentRunSummary, ApplyAgentRunResponse } from "@contracts/agent";
 import type { ShoppingListItem } from "@contracts/shoppingList";
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import demoRunJson from "../../../server/test/fixtures/agent/demo-run.json";
@@ -33,6 +34,12 @@ beforeEach(() => {
   mockParams = {};
   Object.values(mockRouter).forEach((f) => f.mockReset());
 });
+afterEach(() => jest.useRealTimers());
+
+/** Wait for trailing refetches (apply's onSettled, retries) so no update lands after the test ends. */
+async function settle(qc: QueryClient) {
+  await waitFor(() => expect(qc.isFetching() + qc.isMutating()).toBe(0));
+}
 
 describe("Pantry Agent sheet", () => {
   it("fixture belongs to the test household", () => {
@@ -87,6 +94,7 @@ describe("Pantry Agent sheet", () => {
     // This phone's list and the run are refetched (other phones get it via shopping-list:changed).
     const invalidated = invalidate.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidated).toEqual(expect.arrayContaining([keys.shoppingList(g), keys.agentRun(g, demoRun.id)]));
+    await settle(queryClient);
   });
 
   it("503 NOT_CONFIGURED on start goes straight to quick recipes", async () => {
@@ -124,7 +132,7 @@ describe("Pantry Agent sheet", () => {
         [`GET ${runPath}`]: () => failed,
       }),
     );
-    await renderWithProviders(<AgentScreen />);
+    const { queryClient } = await renderWithProviders(<AgentScreen />);
     await fireEvent.press(screen.getByLabelText("Run the planning agent"));
     expect(await screen.findByText("Took too long")).toBeTruthy();
 
@@ -133,6 +141,7 @@ describe("Pantry Agent sheet", () => {
 
     await fireEvent.press(await screen.findByText("Use quick recipes instead"));
     expect(mockRouter.replace).toHaveBeenCalledWith("/recipes");
+    await settle(queryClient);
   });
 
   it("apply rejected by the server's safety re-check shows an error toast and stays put", async () => {
@@ -145,11 +154,12 @@ describe("Pantry Agent sheet", () => {
         },
       }),
     );
-    await renderWithProviders(<AgentScreen />);
+    const { queryClient } = await renderWithProviders(<AgentScreen />);
     await fireEvent.press(screen.getByLabelText("Run the planning agent"));
     await fireEvent.press(await screen.findByText("Add 6 items to the list"));
     expect(await screen.findByText("The server's safety check rejected this plan. Try planning again.")).toBeTruthy();
     expect(mockRouter.dismissTo).not.toHaveBeenCalled();
+    await settle(queryClient);
   });
 });
 
@@ -159,30 +169,43 @@ describe("Recorded-run replay", () => {
     expect(replayDelays(steps, "2026-10-11T18:00:00.000Z")).toEqual([400, 3000, 900]);
   });
 
-  it("replays the last applied run's steps, then shows the plan with Add disabled as 'Already added'", async () => {
+  it("replays the last applied run's steps with the recorded gaps (capped at 3 s), then shows the plan with Add disabled", async () => {
+    // Fake timers: the replay is driven by setTimeout, so the test controls the clock instead of racing it.
+    jest.useFakeTimers();
     mockParams = { replay: "1" };
-    const t0 = Date.parse(demoRun.createdAt);
-    const applied: AgentRun = {
-      ...clone(),
-      status: "applied",
-      appliedAt: demoRun.updatedAt,
-      // Short gaps so the test runs in real time.
-      steps: clone().steps.map((s, i) => ({ ...s, at: new Date(t0 + (i + 1) * 5).toISOString() })),
-    };
+    // The fixture's real timestamps: gaps 400, 700, 500, 400, 7800→3000, 900, 4500→3000, 1700 = 10.6 s replayed (16.9 s recorded).
+    const applied: AgentRun = { ...clone(), status: "applied", appliedAt: demoRun.updatedAt };
     const { steps: _steps, ...summary } = applied;
     const older: AgentRunSummary = { ...summary, id: "99999999-9999-4999-8999-999999999999", status: "failed" };
     apiMock.mockImplementation(
       apiRoutes({
-        [`GET /groups/${g}/agent/runs`]: () => [older, summary].reverse(),
+        [`GET /groups/${g}/agent/runs`]: () => [summary, older],
         [`GET ${runPath}`]: () => applied,
       }),
     );
     await renderWithProviders(<AgentScreen />);
+    const advance = (ms: number) => act(async () => void jest.advanceTimersByTime(ms));
+
+    // Running state first: the first step spins until its recorded time (400 ms). findBy advances at most ~50 ms here.
     expect(await screen.findByText("Planning your week…")).toBeTruthy();
-    const button = await screen.findByLabelText("Already added");
-    expect(button).toBeDisabled();
-    expect(screen.getByText("✨ AI agent · recorded run")).toBeTruthy();
+    expect(screen.getByLabelText("Checking allergies: Carson (peanuts), Maya (milk), 4 people, in progress")).toBeTruthy();
+    expect(screen.queryByLabelText("Already added")).toBeNull();
+
+    await advance(450);
+    expect(screen.getByLabelText("Checking allergies: Carson (peanuts), Maya (milk), 4 people, done")).toBeTruthy();
+    expect(screen.getByLabelText("14 items · using up: spinach (2 days), chicken (3 days), in progress")).toBeTruthy();
+
+    // Just before the capped total (10.6 s) the last step is still spinning…
+    await advance(10_400 - 450);
+    expect(screen.getByLabelText("Plan ready, in progress")).toBeTruthy();
+    expect(screen.queryByLabelText("Already added")).toBeNull();
+
+    // …and just after it the plan shows (uncapped it would take 16.9 s).
+    await advance(300);
+    expect(screen.getByLabelText("Already added")).toBeDisabled();
     expect(screen.getByLabelText("Plan ready, done")).toBeTruthy();
+    expect(screen.getByText("✨ AI agent · recorded run")).toBeTruthy();
+    expect(screen.getByText("Lemon garlic chicken with spinach rice")).toBeTruthy();
     expect(apiMock).toHaveBeenCalledWith(`/groups/${g}/agent/runs`, { query: { limit: 5 } });
   });
 
