@@ -104,6 +104,7 @@ Deployed (`deploy/`), all of this runs on one Akamai Linode under Docker Compose
 | 4 meals, first version | 99 s | 6 | 10.4k / 0.76k | 0 (bug: nothing to buy) |
 | 3 meals, trimmed | 78 s | 7 | 5.8k / 0.52k | 4 |
 | after the stricter safety check | 105 s | 8 | 8.8k / 0.95k | 2 (+1 already on the list) |
+| review fixes + "unverifiable fails in allergy households" (2 runs) | 31–35 s | 6 | 6.3k / 0.45k | 2 each |
 
 Model generation is about 85% of a run's time. The shared endpoint varies between about 7 and 20 tokens per second.
 After the review fixes, the agent lane measured **28–43 s** with 6 tool calls (fake server, real Akamai). Those fixes
