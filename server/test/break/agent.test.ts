@@ -52,7 +52,7 @@ function planOf(meals: MealIn[], missingItems: { name: string; forMeals: string[
   return {
     meals: meals.map((m) => ({
       title: m.title, day: null, minutes: 20, servings: 2, ingredients: m.ingredients, uses: [],
-      missing: m.missing ?? [], steps: m.steps ?? ["Cook it."], source: null, ingredientLines: [],
+      missing: m.missing ?? [], steps: m.steps ?? ["Cook it."], source: null, ingredientLines: [], date: null,
     })),
     missingItems,
     estimate: null,

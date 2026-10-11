@@ -44,6 +44,8 @@ export const PlanMeal = z.object({
     .default(null),
   /** The source's ingredient lines with quantities ("2 cups cooked rice"), for display. Empty when there's no source. */
   ingredientLines: z.array(text().trim().min(1).max(200)).max(40).default([]),
+  /** Calendar date this dinner is planned for (spec §13). null for plans made before the week calendar. */
+  date: CalendarDate.nullable().default(null),
 });
 export type PlanMeal = z.infer<typeof PlanMeal>;
 
@@ -86,6 +88,10 @@ export const AgentStep = z.object({
   label: text().min(1).max(200),
   status: AgentStepStatus,
   detail: text().max(500).optional(),
+  /** Early peek at a meal as soon as it's found (spec §13), so the Week sheet can fill a day before the plan is proposed. */
+  preview: z
+    .object({ date: CalendarDate.nullable(), title: text().trim().min(1).max(120), site: text().trim().min(1).max(80).nullable() })
+    .optional(),
   /** ISO timestamp set by the server when the event arrives (used by the recorded-run replay). */
   at: z.string(),
 });
@@ -124,6 +130,10 @@ export type AgentRunSummary = z.infer<typeof AgentRunSummary>;
 export const StartAgentRunBody = z.object({
   prompt: text().trim().min(1).max(500),
   budgetCents: z.number().int().min(0).max(100_000).nullable().optional(),
+  /** Dates to plan dinners for (spec §13). Omitted = the next 3 days starting today in the household's time zone. */
+  dates: z.array(CalendarDate).min(1).max(7).optional(),
+  /** Swap: replace this planned meal (its date is the only date planned). */
+  replacePlannedMealId: z.uuid().optional(),
 });
 export type StartAgentRunBody = z.infer<typeof StartAgentRunBody>;
 
@@ -136,6 +146,8 @@ export const ApplyAgentRunResponse = z.object({
   added: z.number().int(),
   skipped: z.array(z.object({ name: z.string(), reason: z.enum(["in_cabinet", "on_list"]) })),
   items: z.array(ShoppingListItem),
+  /** Planned meals written to the week calendar (spec §13). */
+  planned: z.number().int().optional(),
 });
 export type ApplyAgentRunResponse = z.infer<typeof ApplyAgentRunResponse>;
 
@@ -202,6 +214,10 @@ export const AgentRunRequest = z.object({
   apiBaseUrl: z.string(),
   /** 15-minute app JWT for the run's user: Authorization: Bearer <runToken>. */
   runToken: z.string(),
+  /** Dates to plan, one dinner each (spec §13). The agent sets PlanMeal.date to these. */
+  dates: z.array(CalendarDate).max(7).default([]),
+  /** Meals already planned on nearby dates, so the agent avoids repeats. */
+  alreadyPlanned: z.array(z.object({ date: CalendarDate, title: z.string() })).max(31).default([]),
 });
 export type AgentRunRequest = z.infer<typeof AgentRunRequest>;
 

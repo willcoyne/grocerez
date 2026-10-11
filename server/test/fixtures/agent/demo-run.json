@@ -109,7 +109,8 @@
           "3 cloves garlic, minced",
           "1 lemon, juiced",
           "2 tbsp olive oil"
-        ]
+        ],
+        "date": "2026-10-12"
       },
       {
         "title": "Spinach and black bean quesadillas",
@@ -153,7 +154,8 @@
           "1 bell pepper, diced",
           "1/2 cup salsa",
           "1 avocado"
-        ]
+        ],
+        "date": "2026-10-13"
       },
       {
         "title": "Chicken and pepper stir fry",
@@ -185,7 +187,8 @@
           "Serve over rice."
         ],
         "source": null,
-        "ingredientLines": []
+        "ingredientLines": [],
+        "date": "2026-10-14"
       },
       {
         "title": "Tomato pasta with spinach",
@@ -219,7 +222,8 @@
           "Toss with the pasta."
         ],
         "source": null,
-        "ingredientLines": []
+        "ingredientLines": [],
+        "date": "2026-10-15"
       }
     ],
     "missingItems": [

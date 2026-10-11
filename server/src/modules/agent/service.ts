@@ -152,6 +152,7 @@ export const agentService = {
       await agentClient.startRun({
         runId, groupId, prompt: body.prompt, budgetCents, zipCode: user?.zipCode ?? null,
         apiBaseUrl: config.AGENT_PUBLIC_API_URL, runToken: signAgentRunToken(userId, runId, groupId),
+        dates: body.dates ?? [], alreadyPlanned: [],
       });
     } catch (err) {
       logger.warn({ err, runId }, "agent service unreachable");
