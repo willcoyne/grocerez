@@ -536,6 +536,8 @@ model Recipe {
   servings        Int?
   ingredientLines String[]   @default([]) @map("ingredient_lines")
   ingredients     String[]   @default([])
+  /// schema.org recipeCategory, lower-cased ("main course", "side dish"); [] when the site doesn't say (spec §12.1).
+  course          String[]   @default([])
   /// Computed at ingest: keyword table over the lines ∪ catalog defaultAllergens of the ingredients.
   allergens       Allergen[] @default([])
   /// Akamai embedding of "title: ingredients". Read/written with raw SQL only.

@@ -70,6 +70,21 @@ const schema = z.object({
   AKAMAI_CHAT_MODEL: z.string().trim().min(1).default("hackathon-chat"),
   /** Pantry Agent recipe search: titles matching this (Postgres regex, case-insensitive) are not dinners. */
   RECIPE_NON_DINNER_TITLE: z.string().min(1).default(NON_DINNER_TITLE),
+  /**
+   * Recipe course rule (spec §12.1), Postgres regexes over the lower-cased recipeCategory list: a course matching MAIN
+   * keeps the recipe (even if it also says "side dish"); otherwise one matching EXCLUDED drops it; otherwise (empty or
+   * unknown course) the title non-dinner filter decides.
+   */
+  RECIPE_MAIN_COURSE: z
+    .string()
+    .min(1)
+    .default("\\m(main( course| dish)?|mains|dinners?|entr[eé]es?|lunch(es)?|soups?|salads?|stews?|curr(y|ies)|pastas?)\\M"),
+  RECIPE_EXCLUDED_COURSE: z
+    .string()
+    .min(1)
+    .default(
+      "\\m(sides?( dish(es)?)?|appetizers?|starters?|desserts?|breakfasts?|brunch(es)?|snacks?|drinks?|beverages?|sauces?|condiments?|dips?|breads?|baking)\\M",
+    ),
   /** Cosine distance cutoff for "related" items (0 = identical, 2 = opposite). */
   SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.35),
   /** For a matched item: other-type items must be at least this close (same product type always qualifies). */
