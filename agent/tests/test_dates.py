@@ -50,9 +50,9 @@ def test_assign_dates_fixes_missing_duplicate_and_unrequested_labels():
 
 
 def test_assign_dates_puts_the_soonest_expiring_meal_on_the_earliest_free_date():
-    urgency = {"Spinach": 2, "Rice": 90}
+    deadlines = {"Spinach": "2026-10-13", "Rice": "2026-12-01"}
     meals = [meal("Plain", uses=["Rice"]), meal("Spinach pasta", uses=["Spinach"])]
-    out, _ = assign_dates(meals, list(DATES[:2]), lambda m: min(urgency[u] for u in m["uses"]))
+    out, _ = assign_dates(meals, list(DATES[:2]), lambda m: min(deadlines[u] for u in m["uses"]))
     assert [m["title"] for m in out] == ["Spinach pasta", "Plain"]
 
 
