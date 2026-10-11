@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { config } from "../../config.js";
 import { prisma } from "../../db.js";
-import { type Citation, type LookupBody, ProductFacts, type ProductLookup } from "../../contracts/products.js";
+import { Allergen } from "../../contracts/dietary.js";
+import { type Citation, type LookupBody, ProductFacts, type ProductLookup, ShelfLifeEntry } from "../../contracts/products.js";
 import { akamaiPost, embeddingsConfigured } from "../../lib/embeddings.js";
 import { AppError, badRequest, notConfigured } from "../../lib/errors.js";
 import { groupTimeZone, localDate, toCalendarDate } from "../../lib/expiration.js";
+import { allergensInText } from "../../lib/allergens.js";
 import { logger } from "../../lib/logger.js";
+import { emitGroup } from "../../lib/realtime.js";
 import { normalize } from "../../lib/normalize.js";
 import { normalizeGtin } from "../../lib/openfoodfacts.js";
 import {
@@ -13,6 +16,7 @@ import {
 } from "../../lib/productData.js";
 import { aiRepo } from "../ai/repo.js";
 import { itemsService } from "../items/service.js";
+import { lockGroup, regenerate } from "../shopping-list/engine.js";
 import { linkItem } from "./service.js";
 
 /**
@@ -197,12 +201,40 @@ export async function research(subject: { name?: string; gtin?: string }, region
   } catch {
     parsed = null;
   }
-  const facts = ProductFacts.safeParse(parsed);
-  if (!facts.success) {
-    logger.warn({ issues: facts.error.issues.slice(0, 5) }, "product lookup answer failed validation");
-    throw new AppError(502, "AI_BAD_OUTPUT", "The AI assistant returned an unusable answer, try again");
+  const facts = parseModelFacts(parsed);
+  if (!facts) throw new AppError(502, "AI_BAD_OUTPUT", "The AI assistant returned an unusable answer, try again");
+  return { facts, sources };
+}
+
+/**
+ * Lenient, per-section parse of the model's JSON: a bad shelf-life entry, price or allergen value is dropped instead
+ * of failing the whole lookup (e.g. maxDays: null for a "Package use-by date" entry). Only an unusable `product`
+ * fails. verifyFacts() then applies the citation and range checks.
+ */
+export function parseModelFacts(parsed: unknown): ProductFacts | null {
+  const raw = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const product = ProductFacts.shape.product.safeParse(raw.product);
+  if (!product.success) {
+    logger.warn({ issues: product.error.issues.slice(0, 5) }, "product lookup answer has no usable product");
+    return null;
   }
-  return { facts: facts.data, sources };
+  const sl = obj(raw.shelfLife);
+  const shelfLife = sl
+    ? ProductFacts.shape.shelfLife.safeParse({
+        ...sl,
+        maxDays: typeof sl.maxDays === "number" ? Math.round(sl.maxDays) : 0,
+        notes: typeof sl.notes === "string" ? sl.notes : null,
+        entries: (Array.isArray(sl.entries) ? sl.entries : []).filter((e) => ShelfLifeEntry.safeParse(e).success),
+      }).data ?? null
+    : null;
+  const price = ProductFacts.shape.price.safeParse(raw.price).data ?? null;
+  const al = obj(raw.allergens) ?? {};
+  const valid = (v: unknown) => (Array.isArray(v) ? v.filter((a) => Allergen.safeParse(a).success) : []);
+  const allergens = ProductFacts.shape.allergens.safeParse({
+    ...al, contains: valid(al.contains), mayContain: valid(al.mayContain), basis: typeof al.basis === "string" ? al.basis : "",
+  }).data ?? { contains: [], mayContain: [], basis: "", sources: [] };
+  return { product: product.data, shelfLife, price, allergens };
 }
 
 /**
@@ -226,9 +258,15 @@ export function verifyFacts(f: ProductFacts, sources: Map<string, string>): Prod
       .filter((e): e is typeof e & { maxDays: number } => e.maxDays != null)
       .map((e) => ({ ...e, minDays: e.minDays != null && e.minDays <= e.maxDays ? e.minDays : null }));
     // The headline maximum is the usual place's unopened entry when there is one (the model's number otherwise).
-    const usual = entries.find((e) => e.storage === f.shelfLife!.usualStorage && !e.opened);
-    const maxDays = usual?.maxDays ?? days(f.shelfLife.maxDays);
-    if (s.length && maxDays) shelfLife = { ...f.shelfLife, maxDays, entries, notes: f.shelfLife.notes?.slice(0, 300) ?? null, sources: s };
+    // If the usual place has no number (milk: fridge = "Package use-by date"), the headline moves to a place that
+    // has one, so the card never says "3 months in the fridge" for a freezer time.
+    const usual = entries.find((e) => e.storage === f.shelfLife!.usualStorage && !e.opened)
+      ?? entries.find((e) => !e.opened && e.storage !== "freezer") ?? entries.find((e) => !e.opened);
+    const maxDays = usual?.maxDays ?? (entries.length ? null : days(f.shelfLife.maxDays));
+    const usualStorage = usual?.storage ?? f.shelfLife.usualStorage;
+    if (s.length && maxDays) {
+      shelfLife = { ...f.shelfLife, maxDays, usualStorage, entries, notes: f.shelfLife.notes?.slice(0, 300) ?? null, sources: s };
+    }
   }
 
   let price: ProductFacts["price"] = null;
@@ -243,6 +281,14 @@ export function verifyFacts(f: ProductFacts, sources: Map<string, string>): Prod
   const allergens = aSources.length
     ? { ...f.allergens, contains: [...new Set(f.allergens.contains)], mayContain: [...new Set(f.allergens.mayContain)], sources: aSources }
     : { contains: [], mayContain: [], basis: "No ingredient or allergen source was found for this product. Check the package label.", sources: [] };
+
+  // The product's own name is evidence too ("Chocolate Milk" contains milk), even when no ingredient list was found.
+  const named = allergensInText(`${f.product.name} ${f.product.genericName}`).filter((a) => !allergens.contains.includes(a));
+  if (named.length) {
+    allergens.contains = [...allergens.contains, ...named].sort();
+    allergens.mayContain = allergens.mayContain.filter((a) => !named.includes(a));
+    allergens.basis = `${allergens.basis} ${named.map((a) => a.replace(/_/g, " ")).join(", ")} named in the product name.`.trim();
+  }
 
   return {
     product: {
@@ -278,8 +324,7 @@ export const lookupService = {
       const itemId = exact?.match === "exact"
         ? exact.results[0].id
         : await linkItem(result.product.genericName || result.product.name, result.product.category ?? "other", userId);
-      const data = { itemId, result: result as object, model: MODEL_LABEL(), fetchedAt: new Date() };
-      row = await prisma.productLookup.upsert({ where: { lookupKey }, create: { lookupKey, ...data }, update: data });
+      row = await saveLookup(lookupKey, itemId, result);
       await applyToItem(itemId, result, zipCode);
     }
     const result = row!.result as ProductFacts;
@@ -292,11 +337,24 @@ export const lookupService = {
   },
 };
 
-/** Fills the catalog item's missing shelf life and caches the price for the shopping-list estimate (ai/prices). */
+const saveLookup = (lookupKey: string, itemId: string | null, result: ProductFacts) => {
+  const data = { itemId, result: result as object, model: MODEL_LABEL(), fetchedAt: new Date() };
+  return prisma.productLookup.upsert({ where: { lookupKey }, create: { lookupKey, ...data }, update: data });
+};
+
+/**
+ * Fills the catalog item's missing shelf life, adds the found "contains" allergens to its default allergens (adding
+ * only, never removing: a missed allergen is worse than an extra one), caches the price for the shopping-list
+ * estimate (ai/prices), and, when the allergens changed, refreshes every group that uses the item.
+ */
 async function applyToItem(itemId: string, r: ProductFacts, zipCode: string | null) {
   if (r.shelfLife) {
-    await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: r.shelfLife.maxDays } });
+    // items.shelf_life_days means "after buying, stored normally": a freezer-only time doesn't qualify.
+    if (r.shelfLife.usualStorage !== "freezer" || r.product.category === "frozen") {
+      await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: r.shelfLife.maxDays } });
+    }
   }
+  if (r.allergens.contains.length) await addItemAllergens(itemId, r.allergens.contains);
   if (r.price && zipCode) {
     const c = r.price.typicalCents;
     await aiRepo.upsertPrice(itemId, zipCode, {
@@ -320,4 +378,57 @@ async function applyToCabinet(userId: string, groupId: string, cabinetItemId: st
   const expiresAt = localDate(row.purchasedAt ?? row.createdAt, await groupTimeZone(prisma, groupId), days);
   await prisma.cabinetItem.update({ where: { id: row.id }, data: { expiresAt, expirationSource: "estimated" } });
   return toCalendarDate(expiresAt);
+}
+
+/**
+ * Adds allergens to items.default_allergens. If that changed anything, regenerates the shopping list of every group
+ * that has the item on its list, preferences or cabinet (allergen_flags are stored on list rows), then tells those
+ * groups' apps to refetch over Socket.IO.
+ */
+export async function addItemAllergens(itemId: string, allergens: string[]): Promise<boolean> {
+  const changed = await prisma.$executeRaw`
+    UPDATE items SET default_allergens = ARRAY(
+      SELECT DISTINCT a FROM unnest(default_allergens || ${allergens}::allergen[]) AS a ORDER BY a)
+    WHERE id = ${itemId}::uuid AND NOT (default_allergens @> ${allergens}::allergen[])`;
+  if (changed === 0) return false;
+  const groups = await prisma.$queryRaw<{ group_id: string }[]>`
+    SELECT group_id FROM shopping_list_items WHERE item_id = ${itemId}::uuid
+    UNION SELECT group_id FROM preferences WHERE item_id = ${itemId}::uuid
+    UNION SELECT group_id FROM cabinet_items WHERE item_id = ${itemId}::uuid`;
+  for (const { group_id: groupId } of groups) {
+    await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
+      await regenerate(tx, groupId);
+    });
+    for (const e of ["shopping-list:changed", "preferences:changed", "cabinet:changed"] as const) emitGroup(groupId, e, null);
+  }
+  return true;
+}
+
+/** Background enrichments in flight (tests await them with `waitForItemEnrichment`). */
+const pendingEnrichment = new Set<Promise<void>>();
+export const waitForItemEnrichment = () => Promise.all([...pendingEnrichment]);
+
+/**
+ * A brand-new catalog item ("chocolate milk") gets allergens right away from its name, then the lookup agent runs in
+ * the background and adds cited allergens + shelf life. Each step that changes the item pushes a refresh to the groups
+ * using it, so the "Contains milk" flag appears without a reload. Failures are logged, never surfaced.
+ */
+export function enrichNewItemInBackground(item: { id: string; name: string }, createdBy: string | null) {
+  const p: Promise<void> = (async () => {
+    try {
+      const named = allergensInText(item.name);
+      if (named.length) await addItemAllergens(item.id, named);
+      if (!embeddingsConfigured()) return;
+      const zip = createdBy ? (await prisma.user.findUnique({ where: { id: createdBy }, select: { zipCode: true } }))?.zipCode : null;
+      const region = zip ? zipRegion(zip) : null;
+      const { facts, sources } = await research({ name: item.name }, region);
+      const result = verifyFacts(facts, sources);
+      await saveLookup(`name:${normalize(item.name)}|${region ?? "US"}`, item.id, result);
+      await applyToItem(item.id, result, zip ?? null);
+    } catch (err) {
+      logger.warn({ err: String(err), itemId: item.id }, "new item enrichment failed");
+    }
+  })().finally(() => pendingEnrichment.delete(p));
+  pendingEnrichment.add(p);
 }

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { config } from "../src/config.js";
 import { prisma } from "../src/db.js";
 import { http } from "../src/lib/http.js";
-import { agent } from "../src/modules/products/lookup.js";
+import { agent, parseModelFacts, waitForItemEnrichment } from "../src/modules/products/lookup.js";
 import { api, itemId, makeGroupDirect, makeUser } from "./helpers.js";
 
 const FK = "https://www.foodsafety.gov/keep-food-safe/foodkeeper-app";
@@ -119,5 +119,35 @@ describe("AI product lookup (backend/13)", () => {
     const res = await api().post("/api/products/lookup").set(u.auth).send({ name: "milk" });
     config.AKAMAI_API_KEY = "test-akamai-key";
     expect(res.status).toBe(503);
+  });
+
+  it("a new item gets allergens from its name and from the agent, and the group's list flags update", async () => {
+    const u = await makeUser({ allergens: ["milk", "soy"] });
+    const g = await makeGroupDirect(u);
+    // Name gives milk; the fake agent (Jif data) adds cited peanuts + soy.
+    const created = await api().post("/api/items").set(u.auth).send({ name: "Chocolate Milk Lookup Test", category: "dairy" });
+    expect(created.status).toBe(201);
+    await api().post(`/api/groups/${g.id}/preferences`).set(u.auth).send({ itemId: created.body.id });
+    await waitForItemEnrichment();
+
+    const item = await prisma.item.findUniqueOrThrow({ where: { id: created.body.id } });
+    expect(item.defaultAllergens).toEqual(expect.arrayContaining(["milk", "peanuts", "soy"]));
+    const list = await api().get(`/api/groups/${g.id}/shopping-list`).set(u.auth);
+    const row = list.body.find((r: { itemId: string }) => r.itemId === created.body.id);
+    expect(row.allergenFlags.map((f: { allergen: string }) => f.allergen).sort()).toEqual(["milk", "soy"]);
+  });
+
+  it("drops a bad shelf-life entry or allergen value instead of failing the whole answer", () => {
+    const f = parseModelFacts({
+      product: { name: "Chocolate milk", brand: null, genericName: "Chocolate Milk", category: "dairy" },
+      shelfLife: { maxDays: null, usualStorage: "fridge", notes: null, sources: [],
+        entries: [{ storage: "fridge", opened: false, minDays: null, maxDays: null }, { storage: "freezer", opened: false, minDays: 90, maxDays: 90 }] },
+      price: { typicalCents: "about four dollars" },
+      allergens: { contains: ["milk", "chocolate"], mayContain: [], basis: "label", sources: [] },
+    })!;
+    expect(f.shelfLife!.entries).toEqual([{ storage: "freezer", opened: false, minDays: 90, maxDays: 90 }]);
+    expect(f.price).toBeNull();
+    expect(f.allergens.contains).toEqual(["milk"]);
+    expect(parseModelFacts({ shelfLife: {} })).toBeNull();
   });
 });
