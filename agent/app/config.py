@@ -42,7 +42,17 @@ class Settings(BaseSettings):
         "jocooks.com", "cafedelites.com", "spendwithpennies.com", "wellplated.com", "ambitiouskitchen.com",
     ]
     # Treated as on hand in cited recipes (never added to the shopping list), plus any cooking oil if the cabinet has one.
-    pantry_basics: list[str] = ["salt", "black pepper", "water", "ice", "cooking spray"]
+    # Assumed on hand (a suffix match, so "Kosher Salt" and "Brown Sugar" count): never added to the list or priced.
+    pantry_basics: list[str] = [
+        "salt", "black pepper", "pepper", "water", "ice", "cooking spray",
+        # dried spices and seasonings most kitchens have
+        "cumin", "chili powder", "paprika", "smoked paprika", "oregano", "turmeric", "garlic powder", "onion powder",
+        "cinnamon", "red pepper flakes", "crushed red pepper", "bay leaves", "bay leaf", "italian seasoning",
+        "cayenne pepper", "cayenne", "ground coriander", "dried thyme", "dried basil", "dried oregano",
+        # baking and cooking staples
+        "flour", "sugar", "cornstarch", "baking soda", "baking powder", "vinegar", "soy sauce", "vanilla extract",
+    ]
+    max_missing_per_recipe: int = 6  # a cited recipe needing more than this to be bought is only used if nothing smaller is safe
     cooking_oils: list[str] = ["olive oil", "canola oil", "vegetable oil", "cooking oil", "oil", "avocado oil",
                                "sunflower oil", "corn oil"]
 

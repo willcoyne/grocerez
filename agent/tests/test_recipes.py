@@ -835,7 +835,7 @@ async def test_index_hit_is_used_without_touching_tavily(ctx, client, sink, stat
     out = json.loads(await t["find_recipe"]("lemon chicken", must_use=["Chicken Breast", "Spinach"]))
     req = search.calls.last.request
     assert req.headers["authorization"] == f"Bearer {TOKEN}"
-    assert json.loads(req.content) == {"query": "lemon chicken", "mustUse": ["Chicken Breast", "Spinach"], "limit": 6}
+    assert json.loads(req.content) == {"query": "lemon chicken dinner main dish", "mustUse": ["Chicken Breast", "Spinach"], "limit": 6}
     assert not tavily.called
     assert set(out) == {"found", "title", "site", "uses", "missing"} and out["missing"] == ["Lemons"]
     first = json.loads(safety.calls[0].request.content)["meals"][0]
@@ -968,6 +968,158 @@ async def test_runner_offers_find_recipe_when_only_the_index_exists(ctx, setting
     respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": False, "recipes": []}))
     await runner_mod.run(ctx, settings, model=object(), retry_delay_s=0)
     assert "find_recipe" not in seen["tools"] and "find_recipe" not in seen["prompt"]
+
+
+# ─── ingredient cleanup & fewer missing items (live-run feedback) ───────────
+
+
+@pytest.mark.parametrize("line,expected", [
+    # leading plus / and / or
+    ("plus 1/2 tsp. cornstarch", "Cornstarch"),
+    ("Plus ½ Tsp. Cornstarch", "Cornstarch"),
+    ("and 2 tbsp butter", "Butter"),
+    ("or 1 cup milk", "Milk"),
+    # inch marks, stray quotes, "x-inch piece (of)"
+    ('1" piece ginger', "Ginger"),
+    ('1 2"-piece ginger, peeled, finely chopped', "Ginger"),
+    ("1 (2-inch) piece of fresh ginger", "Ginger"),
+    ("2 inch piece ginger", "Ginger"),
+    ("1-inch knob of ginger", "Ginger"),
+    ("“fresh” basil", "Basil"),
+    ("a 3″ piece of cinnamon stick", "Cinnamon Stick"),
+    # juice / zest of
+    ("Juice From 1 Lemon", "Lemon"),
+    ("juice of 2 limes", "Limes"),
+    ("zest of 1 lemon", "Lemon"),
+    ("the zest and juice of 1 orange", "Orange"),
+    ("juice from 1/2 lime", "Lime"),
+    # ground <spice> -> spice, ground meats keep the word
+    ("1 tsp ground cumin", "Cumin"),
+    ("½ teaspoon ground turmeric", "Turmeric"),
+    ("1/4 tsp ground cinnamon", "Cinnamon"),
+    ("1 lb ground beef", "Ground Beef"),
+    ("1 pound ground turkey", "Ground Turkey"),
+    ("12 oz ground pork", "Ground Pork"),
+    ("1 lb ground chicken", "Ground Chicken"),
+    ("freshly ground black pepper", "Black Pepper"),
+    # mixed / assorted
+    ("8 oz mixed mushrooms", "Mushrooms"),
+    ("1 cup assorted vegetables", "Vegetables"),
+    # chili peppers
+    ("1 jalapeño pepper, seeded", "Jalapeño"),
+    ("2 serrano chiles", "Serrano"),
+    ("1 poblano pepper", "Poblano"),
+    ("1 red bell pepper", "Red Bell Pepper"),  # bell peppers keep their name
+    ("2 oranges", "Oranges"),  # "or"/"x" prefixes only strip as whole words
+    ("1 tsp xanthan gum", "Xanthan Gum"),
+    ("orange zest", "Orange Zest"),
+    # unicode fractions anywhere, units with periods
+    ("1½ cups rice", "Rice"),
+    ("rice, ½ cup", "Rice"),
+    ("2 tbsp. olive oil", "Olive Oil"),
+    ("1 tsp. kosher salt", "Kosher Salt"),
+    ("3 Tbsp. soy sauce", "Soy Sauce"),
+    ("12 oz. penne", "Penne"),
+    # more real-world noise
+    ("one 15-ounce can corn, drained", "Corn"),
+    ("2 x 156g packs of tortillas", "Tortillas"),
+    ("400g/ 14oz canned tomato (, crushed or diced)", "Tomato"),
+    ("a few squeezes of lime juice", "Lime Juice"),
+    ("1 egg plus 1 egg yolk, at room temperature", "Egg"),
+    ("1/4 cup cornstarch whisked with 1/2 cup cold water", "Cornstarch"),
+    ("Kosher salt and freshly ground black pepper", "Kosher Salt"),
+    ("Salt & Pepper (to taste)", "Salt"),
+    ("300g full fat soft cheese at room temperature", "Full Fat Soft Cheese"),
+    ("1 unsweetened plant-based milk of choice", "Plant-based Milk"),
+    ("1/4 cup Burman's Hot Sauce", "Burman's Hot Sauce"),
+    ("2 rosemary sprigs leaves picked and finely chopped", "Rosemary Sprigs Leaves"),
+    ("1 (16-ounce) 100% whole grain bread", "Whole Grain Bread"),
+])
+def test_cleaner_table_round_three(line, expected):
+    assert clean_ingredient(line) == expected
+
+
+@respx.mock
+async def test_common_spices_and_staples_are_assumed_on_hand_not_missing(
+    ctx, client, sink, state, tavily_settings, make_pricer
+):
+    mock_search("https://www.seriouseats.com/a")
+    mock_page("https://www.seriouseats.com/a", recipe_ld("Curry", [
+        "1 lb chicken breast", "1 tsp ground cumin", "1/2 tsp ground turmeric", "2 tsp chili powder", "1 tsp paprika",
+        "1 tsp garlic powder", "1/2 tsp cinnamon", "1 bay leaf", "1 tbsp cornstarch", "2 tbsp all-purpose flour",
+        "1 tbsp brown sugar", "1 tbsp white vinegar", "1 tbsp soy sauce", "1 tsp baking soda", "1 jalapeño pepper"]))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    t = find_tools(ctx, client, sink, state, tavily_settings, make_pricer, mk_service(tavily_settings))
+    out = json.loads(await t["find_recipe"]("chicken curry"))
+    assert out["missing"] == ["Jalapeño"]  # chicken is in the cabinet; every spice/staple is assumed on hand
+    # a fresh herb is not a pantry basic
+    state.draft_meals.clear()
+    state.used_urls.clear()
+    mock_page("https://www.seriouseats.com/a", recipe_ld("Curry 2", [
+        "1 lb chicken breast", "1 tsp ground cumin", "1 bunch fresh cilantro", "1 cup basmati rice"]))
+    assert json.loads(await t["find_recipe"]("chicken curry"))["missing"] == ["Cilantro"]  # basmati rice ~ the cabinet's rice
+
+
+def idx(title, ingredients, **kw):
+    return {"id": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", "url": f"https://www.seriouseats.com/{title.lower().replace(' ', '-')}",
+            "site": "Serious Eats", "title": title, "imageUrl": None, "minutes": 30, "servings": 4,
+            "ingredientLines": [f"1 {i.lower()}" for i in ingredients], "ingredients": ingredients, "distance": 0.1,
+            "uses": [], **kw}
+
+
+@respx.mock
+async def test_pick_prefers_fewer_missing_items_among_safe_candidates(ctx, client, sink, state, tavily_settings, make_pricer):
+    many = idx("Big Shopping Dinner", ["Chicken Breast", "Capers", "Anchovies", "Fennel", "Saffron", "Leeks", "Quinoa", "Tahini"])
+    few = idx("Simple Chicken Rice", ["Chicken Breast", "Rice", "Garlic", "Lime"])
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [many, few]}))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    out = json.loads(await t["find_recipe"]("chicken dinner"))
+    assert out["title"] == "Simple Chicken Rice" and out["missing"] == ["Lime"]  # first in search order lost on shopping
+
+
+@respx.mock
+async def test_pick_skips_over_cap_candidates_and_never_picks_an_unsafe_one(
+    ctx, client, sink, state, tavily_settings, make_pricer
+):
+    unsafe_light = idx("Peanut Chicken", ["Chicken Breast", "Rice", "Garlic"])  # cheapest, but unsafe
+    heavy = idx("Seven Item Dinner", ["Chicken Breast", "Capers", "Anchovies", "Fennel", "Saffron", "Leeks", "Quinoa", "Tahini"])
+    ok = idx("Five Item Dinner", ["Chicken Breast", "Capers", "Fennel", "Leeks", "Quinoa", "Tahini"])
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [unsafe_light, heavy, ok]}))
+
+    def safety(request):
+        meals = json.loads(request.content)["meals"]
+        return httpx.Response(200, json={"meals": [
+            {"title": m["title"], "unknown": [], "passes": "Peanut" not in m["title"],
+             "problems": [{"ingredient": "Peanuts", "reason": "contains peanuts", "members": ["C"]}]
+             if "Peanut" in m["title"] else []} for m in meals]})
+
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety)
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    assert json.loads(await t["find_recipe"]("chicken dinner"))["title"] == "Five Item Dinner"  # 5 <= 6 beats 7 > 6
+
+
+@respx.mock
+async def test_when_every_safe_candidate_is_over_the_cap_the_fewest_missing_wins(
+    ctx, client, sink, state, tavily_settings, make_pricer
+):
+    names = ["Capers", "Anchovies", "Fennel", "Saffron", "Leeks", "Quinoa", "Tahini", "Sumac", "Harissa", "Labneh"]
+    ten = idx("Ten Item Dinner", ["Chicken Breast", *names])
+    eight = idx("Eight Item Dinner", ["Chicken Breast", *names[:8]])
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [ten, eight]}))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    assert json.loads(await t["find_recipe"]("chicken dinner"))["title"] == "Eight Item Dinner"
+
+
+@respx.mock
+async def test_searches_are_dinner_oriented(ctx, client, sink, state, tavily_settings, make_pricer):
+    idx_route = respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": []}))
+    tavily = respx.post(TAVILY).mock(return_value=httpx.Response(200, json={"results": []}))
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    await t["find_recipe"]("spinach pasta")
+    assert json.loads(idx_route.calls[0].request.content)["query"].endswith("dinner main dish")
+    assert "dinner main dish" in json.loads(tavily.calls[0].request.content)["query"]
 
 
 def test_plan_source_contract_requires_https():

@@ -98,20 +98,30 @@ _NUM = rf"[\d{_FR}][\d\s/.{_FR}\-–]*"
 _QTY_RE = re.compile(rf"^\s*(?:(?:about|approx\.?|approximately|around|roughly)\s+)?{_NUM}(?:\s*(?:to|or)\s*{_NUM})?")
 _UNITS = (r"cups?|c|tablespoons?|tbsps?|tbs|tbl|teaspoons?|tsps?|ounces?|oz|pounds?|lbs?|grams?|g|kilograms?|kg|"
           r"milliliters?|ml|liters?|litres?|l|quarts?|qt|pints?|pt|gallons?|gal|pinch(?:es)?|dash(?:es)?|cloves?|"
-          r"cans?|tins?|packages?|pkgs?|packets?|sticks?|slices?|bunch(?:es)?|heads?|sprigs?|pieces?|stalks?|ribs?|"
+          r"cans?|tins?|packages?|packs?|pkgs?|packets?|sticks?|slices?|bunch(?:es)?|heads?|sprigs?|pieces?|stalks?|ribs?|"
           r"jars?|bottles?|bags?|boxes?|handfuls?|knobs?|sheets?|fillets?|cubes?|drops?")
 _UNIT_RE = re.compile(rf"^\s*(?:(?:heaping|heaped|scant|level|generous|rounded)\s+)?(?:{_UNITS})\b\.?(?:\s+of\b)?\s*", re.I)
 _TAILS = re.compile(
     r"\b(?:to taste|for (?:serving|garnish|garnishing|drizzling|brushing|dusting|frying|greasing|topping)|as needed|"
-    r"plus (?:more|extra)\b.*|such as\b.*|cut into\b.*|or more|divided|optional)\b", re.I)
+    r"plus (?:more|extra)\b.*|such as\b.*|cut into\b.*|picked\b.*|stems? removed\b.*|(?:whisked|mixed|combined|stirred|"
+    r"blended|dissolved)\s+(?:with|in|into)\b.*|of choice\b.*|to serve\b|at room temperature|for the \w+(?: \w+)?|"
+    r"in (?:their|its) \w+|or more|divided|optional)\b", re.I)
 _WORDS = (
     "chopped|minced|diced|sliced|shredded|grated|crushed|fresh|freshly|finely|roughly|coarsely|thinly|thickly|lightly|"
     "large|small|medium|extra-large|jumbo|ripe|boneless|skinless|peeled|seeded|cored|trimmed|cooked|uncooked|raw|"
-    "packed|softened|melted|chilled|cold|warm|hot|room temperature|unsalted|salted|low-sodium|reduced-sodium|"
+    "packed|softened|melted|chilled|cold|warm|room temperature|unsalted|salted|low-sodium|reduced-sodium|"
     "organic|thawed|drained|rinsed|toasted|canned|frozen|lean|extra[- ]virgin|juiced|zested|halved|quartered|"
-    "cubed|torn|beaten|sifted|heaping|scant|prepared|store-bought|premade|ready-to-eat|oil[- ]packed|nonstick"
+    "cubed|torn|beaten|sifted|heaping|scant|prepared|store-bought|premade|ready-to-eat|oil[- ]packed|nonstick|"
+    "unsweetened|leftover"
 )
+_WORDS += "|mixed|assorted"
 _WORD_RE = re.compile(rf"\b(?:{_WORDS})\b", re.I)
+_INCH = re.compile(r"\b\d+(?:[./]\d+)?\s*-?\s*inch(?:es)?\b[-\s]*(?:(?:piece|pieces|chunk|chunks|knob|long|thick)\b)?"
+                   r"(?:\s+of\b)?", re.I)
+# "ground cumin" -> "cumin", but ground meats keep the word
+_GROUND_SPICE = re.compile(r"^ground\s+(?!beef\b|turkey\b|pork\b|chicken\b|lamb\b|sausage\b|veal\b|bison\b|meat\b)",
+                           re.I)
+_CHILI_PEPPER = re.compile(r"(jalape[nñ]o|serrano|poblano|habanero|anaheim|fresno|thai)\s+(?:chil[ie]s?|peppers?)", re.I)
 _PAREN = re.compile(r"\([^)]*\)|\[[^\]]*\]")
 _SMALL = {"and", "or", "of", "with", "in", "for", "the", "a"}
 
@@ -132,26 +142,43 @@ def clean_ingredient(line: str) -> str | None:
         return None
     s = _PAREN.sub(" ", s)
     s = re.sub(r"[()\[\]]", " ", s)  # unbalanced leftovers
-    s = re.sub(r"^(?:juice|zest)\s+of\s+", "", s, flags=re.I)
+    s = re.sub(r"(\d)\s*[\"“”″]", r"\1 inch ", s)  # 1" piece -> 1 inch piece
+    s = re.sub(r"[\"“”″]", " ", s)
+    s = _INCH.sub(" ", s)  # "2-inch piece (of)" is a size, not an ingredient
+    s = re.sub(r"\b\d+\s*%\s*", " ", s)  # "100% whole grain bread"
+    s = re.sub(r"^\s*(?:(?:plus|and|or)\s+|\+\s*)", "", s, flags=re.I)  # "plus 1/2 tsp. cornstarch"
+    s = re.sub(r"^(?:the\s+)?(?:juice|zest)(?:\s+and\s+(?:juice|zest))?\s+(?:from|of)\s+", "", s, flags=re.I)
     s = _WORD_RE.sub(" ", s)  # "1 large bunch green onions": drop adjectives first so quantity + unit are adjacent
-    for _ in range(2):  # "1 (14 oz) can tomatoes" -> quantity, then unit, then maybe another quantity
+    s = re.sub(r"^\s*(?:one|two|three|four|five|six)\s+(?=\d)", "", s, flags=re.I)  # "one 15-ounce can corn"
+    for _ in range(2):  # "a few squeezes of lime juice", "a splash of ...": vague amounts
+        s = re.sub(r"^\s*(?:a\s+)?(?:few|couple|splash|drizzle|squeezes?|handful|dash|bit|little)\b\s*(?:of\s+)?", "",
+                   s, flags=re.I)
+    for _ in range(3):  # "1 (14 oz) can tomatoes", "400g/ 14oz tomatoes", "2 x 156g packs": quantity, unit, more
+        s = re.sub(r"^\s*(?:[/\-–×]|(?:plus|or|x)\b)\s*", "", s, flags=re.I)  # word tokens need a boundary: "orange"
         s = _QTY_RE.sub("", s, count=1)
         s = _UNIT_RE.sub("", s, count=1)
+    s = re.sub(f"[{_FR}]", " ", s)  # unicode fractions left mid-string
     s = _TAILS.sub(" ", s)
     s = _WORD_RE.sub(" ", s)
     s = re.sub(r"[;*•]+", " ", s)
     s = re.sub(r"\s+", " ", s)
     s = re.sub(r"^[\s,.\-–:]+", "", s)
-    s = re.sub(r"^of\s+", "", s, flags=re.I)
+    s = re.sub(r"^(?:of\s+)?(?:(?:a|an|the)\s+)?", "", s, flags=re.I)  # "1/2 of a green pepper"
     s = re.sub(r"^(?:or|and)\s+", "", s, flags=re.I)  # left over from "fresh or canned pineapple"
     s = s.split(",")[0]
-    s = re.split(r"\s+\+\s+|\s*/\s*", s, maxsplit=1)[0]  # "2 eggs + 1 tbsp water", "green onion/scallions"
+    s = re.split(r"\s+\+\s+|\s*/\s*|\s+plus\s+|\s+[-–—]\s+", s, maxsplit=1, flags=re.I)[0]  # "2 eggs + 1 tbsp", "a/b", "x - note"
+    s = re.sub(r"^((?:kosher |sea |flaky )?salt)\s+(?:and|&)\s+.*$", r"\1", s, flags=re.I)  # "salt & pepper" -> Salt
     s = re.split(r"\s+or\s+", s, maxsplit=1, flags=re.I)[0]  # "butter or margarine" -> first choice
     s = re.sub(r"^(?:or|and)\s+", "", s, flags=re.I)
     s = s.strip(" .-–:")
+    s = re.sub(r"\s+(?:at|to|for|in|of|with|and)$", "", s, flags=re.I)  # dangling after a removed tail
     s = re.sub(r"\b(garlic)\s+cloves?\b", r"\1", s, flags=re.I)  # "garlic cloves" -> Garlic
+    s = _GROUND_SPICE.sub("", s)  # "ground cumin" -> Cumin (but Ground Beef stays)
     if re.fullmatch(r"(?:ground\s+)?(?:black\s+)?pepper(?:corns)?", s, re.I):
         s = "black pepper"  # "freshly ground black pepper", "ground pepper" -> Black Pepper
+    m = _CHILI_PEPPER.fullmatch(s)
+    if m:
+        s = m.group(1)  # "jalapeño pepper" -> Jalapeño
     if not re.search(r"[A-Za-z]", s) or len(s) > 120:
         return None
     return _title_case(s)

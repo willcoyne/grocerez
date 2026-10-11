@@ -600,7 +600,8 @@ def build_tools(
             terms = exclusion_terms(state.household)  # "dairy-free", "vegetarian": fewer candidates fail safety
             core = must_use[0] if must_use else idea.split()[-1]
             queries = [
-                " ".join([f"{idea} recipe" + (f" with {', '.join(must_use[:3])}" if must_use else ""), *terms]),
+                " ".join([f"{idea} dinner main dish recipe" + (f" with {', '.join(must_use[:3])}" if must_use else ""),
+                          *terms]),
                 " ".join([f"{core} easy dinner recipe", *terms]),  # ONE simpler retry when nothing passes
             ]
             for attempt, query in enumerate(queries):
@@ -643,7 +644,7 @@ def build_tools(
     async def _index_candidates(idea: str, must_use: list[str], avoid: list[str]) -> list[ParsedRecipe] | None:
         """Top matches from the server's recipe index, or None when it is unavailable / errors (-> Tavily fallback)."""
         try:
-            body = RecipeSearchBody(query=idea[:200], mustUse=must_use[:10], limit=6)
+            body = RecipeSearchBody(query=f"{idea[:160]} dinner main dish", mustUse=must_use[:10], limit=6)
         except ValidationError:
             return None
         res = await client.post("recipe search", f"/groups/{gid}/agent/recipes/search", body.model_dump())
@@ -686,14 +687,26 @@ def build_tools(
         recs = [c for _, c in ranked]
         # One batched check, exactly what apply checks: title, steps, ingredients, and the source's raw lines.
         results = await _batch(safety_payload(meals, to_buy=False)) if meals else None
-        winner = None
+        passing: list[int] = []
         for i, res in enumerate(results or []):
             if res.passes:
-                winner = winner or (meals[i], recs[i], res)
+                passing.append(i)
             else:
                 why = "; ".join(f"{p.reason} ({p.ingredient})" for p in res.problems[:3]) or "failed"
                 log.info("recipe candidate rejected: %s: unsafe: %s", recs[i].url, why)
-        return winner
+        if not passing:
+            return None
+        # Among the SAFE candidates prefer fewer things to buy and more cabinet use. A candidate needing more than
+        # `max_missing_per_recipe` items is only taken when nothing smaller is safe (then: the fewest).
+        cap = settings.max_missing_per_recipe
+        under = [i for i in passing if len(meals[i]["missing"]) <= cap]
+        if under:
+            best = min(under, key=lambda i: (-(_score(recs[i], must_use) - 2 * len(meals[i]["missing"])), i))
+        else:
+            best = min(passing, key=lambda i: (len(meals[i]["missing"]), i))
+            log.info("find_recipe: every safe candidate needs more than %d items; taking the one with fewest (%d)",
+                     cap, len(meals[best]["missing"]))
+        return meals[best], recs[best], results[best]
 
     @tool
     async def find_recipe(
