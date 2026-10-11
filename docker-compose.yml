@@ -4,6 +4,11 @@
 # Sign in from the "Demo users" list (Google sign-in needs real client IDs).
 # The API runs with NODE_ENV=development so it starts without Anthropic/AWS keys and allows demo login;
 # recipes, prices, photo uploads and semantic search stay off until their keys are in server/.env.
+# Akamai AI (semantic search + the product lookup agent) runs inside the `api` container and calls Akamai's hosted
+# inference endpoint; it only needs AKAMAI_API_KEY / AKAMAI_BASE_URL in server/.env.
+# Portable: these are plain OCI images (api: server/Dockerfile, web: app/Dockerfile, db: pgvector/pgvector:pg16-trixie),
+# so the same stack runs on any container host, e.g. an Akamai Cloud (Linode) instance with Docker or LKE (Kubernetes).
+# See plan/backend/12-deployment/README.md.
 name: grocerez-stack
 
 services:

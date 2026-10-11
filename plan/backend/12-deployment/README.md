@@ -8,7 +8,20 @@
 
 1. **Dockerfile** (`server/Dockerfile`): build stage (`npm ci && npx prisma generate && npm run build`) → runtime stage `node:22-slim`
    running `npx prisma migrate deploy && node dist/index.js`.
-2. **Host (recommended): Railway**
+2. **Target host: Akamai Cloud (Linode); not deployed.** The hackathon gives Akamai Cloud credits, but our Linode
+   account was held for review and the review didn't clear in time. So the demo runs on the Docker stack locally
+   (root `docker-compose.yml`). Moving it to Linode needs no code changes:
+   - Everything is containers: `api` (`server/Dockerfile`, includes the Akamai AI agent and semantic search), `web`
+     (`app/Dockerfile`), and `db` (`pgvector/pgvector:pg16-trixie`).
+   - **Linode instance:** install Docker, copy the repo, set the secrets in `server/.env`, run `docker compose up -d --build`,
+     and put a TLS proxy (Caddy or nginx) in front of ports 8080/3100. Rebuild `web` with
+     `EXPO_PUBLIC_API_URL=https://<host>/api`.
+   - **LKE (Linode Kubernetes):** push the two images to a registry and run them as Deployments. Use Linode Managed
+     Postgres or a StatefulSet with pgvector for the database. Use Linode Object Storage for photos (S3-compatible, so it
+     only needs an endpoint setting).
+   - Inference stays on Akamai's hosted endpoint (`AKAMAI_BASE_URL`, OpenAI-compatible). Bringing our own inference
+     means pointing that URL at a model server on a Linode GPU.
+3. **Alternative host: Railway**
    1. New project → add the PostgreSQL plugin (copy its `DATABASE_URL`, add `?sslmode=require`).
    2. Deploy `server/` from GitHub (`main` branch, root `/server`).
    3. Set the env variables from `.env.example`. Generate `JWT_SECRET` with `openssl rand -hex 32`.
