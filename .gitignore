@@ -1,3 +1,10 @@
 # Agent worktrees (local only)
 .claude/worktrees/
 .DS_Store
+
+# Linode deployment secrets (written by deploy/linode/deploy.sh)
+deploy/linode/.env
+server/.env.prod
+deploy/linode/.env.storage
+deploy/linode/.env.tmp
+deploy/linode/.env.test
