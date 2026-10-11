@@ -67,9 +67,11 @@ function GroupSwitcher({ children }: { children: ReactNode }) {
 /** Two taps that land in the same JS frame (before React re-renders the button as disabled). */
 async function doubleTap(label: string) {
   const btn = screen.getByLabelText(label);
+  // Press the button's own handler twice inside ONE act: fireEvent opens an act of its own, and two of those
+  // in flight at once is React's "overlapping act() calls" (flaky), so the taps go through the host's responder prop.
   await act(async () => {
-    void fireEvent.press(btn);
-    void fireEvent.press(btn);
+    btn.props.onClick({ nativeEvent: {}, persist: jest.fn() });
+    btn.props.onClick({ nativeEvent: {}, persist: jest.fn() });
   });
 }
 

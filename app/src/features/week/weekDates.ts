@@ -43,7 +43,7 @@ export function byDate(meals: readonly PlannedMeal[] | undefined): Map<string, P
  * Lines for the pinned Week note on the pantry door: the next `days` days, "Mon  Lemon chicken" or "Wed  —".
  * Empty when the plan hasn't loaded (the 3D note then shows its own fallback).
  */
-export function weekPreviewLines(plan: { from: string; meals: readonly PlannedMeal[] } | undefined, days = 4): string[] {
+export function weekPreviewLines(plan: { from: string; meals: readonly PlannedMeal[] } | undefined, days = 3): string[] {
   if (!plan) return [];
   const planned = byDate(plan.meals);
   return weekDates(plan.from)

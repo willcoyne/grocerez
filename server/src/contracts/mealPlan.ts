@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CalendarDate } from "./common.js";
-import { PlanMeal } from "./agent.js";
+import { PlanMeal, SafetyProblem } from "./agent.js";
 
 // Week calendar (plan/challenges/01-pantry-agent §13). One dinner per date per group.
 
@@ -17,6 +17,14 @@ export const ExpiryWarning = z.object({
 });
 export type ExpiryWarning = z.infer<typeof ExpiryWarning>;
 
+/** The household safety check of a saved meal, as it was when the meal was written. */
+export const PlannedMealSafety = z.object({
+  passes: z.boolean(),
+  problems: z.array(SafetyProblem),
+  unknown: z.array(z.string()),
+});
+export type PlannedMealSafety = z.infer<typeof PlannedMealSafety>;
+
 export const PlannedMeal = z.object({
   id: z.uuid(),
   groupId: z.uuid(),
@@ -24,6 +32,8 @@ export const PlannedMeal = z.object({
   date: CalendarDate,
   slot: MealSlot,
   meal: PlanMeal,
+  /** Safety result stored when the meal was written; null for rows saved before it was recorded. */
+  safety: PlannedMealSafety.nullable().default(null),
   /** The agent run that planned it; null when added by hand. */
   agentRunId: z.uuid().nullable(),
   /** Computed on read: cabinet items this meal uses that expire before `date`. Empty = fine. */

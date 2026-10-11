@@ -177,14 +177,14 @@ export const agentService = {
     const plan = parsed.data;
 
     // Same path as the week calendar's "Add missing to List" (listWriter): safety → resolve → skip → upsert.
-    await assertMealsSafe(groupId, plan.meals, plan.missingItems);
+    const mealSafety = await assertMealsSafe(groupId, plan.meals, plan.missingItems);
     const wanted = await resolveWanted(groupId, userId, plan.missingItems);
 
     // ONE transaction: claim the run, write the list rows AND the planned meals (spec §13), regenerate.
     const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], async (tx) => {
       if (!(await agentRepo.claimApply(tx, groupId, runId))) throw notProposed();
       const list = await writeWanted(tx, groupId, userId, wanted, runId);
-      const planned = await mealPlanService.writeForRun(tx, groupId, userId, runId, plan.meals, run.replacePlannedMealId);
+      const planned = await mealPlanService.writeForRun(tx, groupId, userId, runId, plan.meals, run.replacePlannedMealId, mealSafety);
       return { ...list, planned };
     });
     emitGroup(groupId, "agent:changed", userId, { runId });

@@ -1,4 +1,5 @@
 import type { ApplyAgentRunResponse, PlanMeal, SafetyCheckResponse } from "../../contracts/agent.js";
+import type { PlannedMeal } from "../../contracts/mealPlan.js";
 import type { Item } from "../../contracts/items.js";
 import type { Tx } from "../../db.js";
 import { AppError } from "../../lib/errors.js";
@@ -16,6 +17,8 @@ import { catalogMatch, safety, type SafetyMeal } from "./safety.js";
 
 const NOTE_MAX = 120;
 
+/** One meal's stored safety result (same shape as PlannedMeal.safety). */
+export type MealSafetyResult = NonNullable<PlannedMeal["safety"]>;
 export type MissingItem = { name: string; forMeals: string[] };
 type Problems = SafetyCheckResponse["meals"][number]["problems"];
 export type Wanted = Map<string, { name: string; forMeals: string[]; item: Item }>;
@@ -38,7 +41,7 @@ export const noteFor = (forMeals: string[]) => Array.from(`✨ for ${forMeals.jo
  * title, steps and the source's ingredient lines (safety.check), plus the items that will be written ("To buy").
  * Throws 422 PLAN_UNSAFE.
  */
-export async function assertMealsSafe(groupId: string, meals: PlanMeal[], missingItems: MissingItem[]): Promise<void> {
+export async function assertMealsSafe(groupId: string, meals: PlanMeal[], missingItems: MissingItem[]): Promise<MealSafetyResult[]> {
   const toCheck: SafetyMeal[] = meals.map((m) => ({
     title: m.title,
     ingredients: [...new Set([...m.ingredients, ...m.missing, ...m.uses])],
@@ -46,8 +49,10 @@ export async function assertMealsSafe(groupId: string, meals: PlanMeal[], missin
     ingredientLines: m.ingredientLines,
   }));
   if (missingItems.length) toCheck.push({ title: "To buy", ingredients: missingItems.map((i) => i.name) });
-  const failing = (await safety.check(groupId, toCheck)).meals.filter((m) => !m.passes);
+  const results = (await safety.check(groupId, toCheck)).meals;
+  const failing = results.filter((m) => !m.passes);
   if (failing.length) throw unsafe(failing);
+  return results.slice(0, meals.length).map(({ passes, problems, unknown }) => ({ passes, problems, unknown }));
 }
 
 /** A name → its catalog item (verified or fuzzy match), else a new catalog item through the POST /items path. */

@@ -1,5 +1,5 @@
 import { PlanMeal } from "../../contracts/agent.js";
-import type { MealPlanResponse, PlannedMeal } from "../../contracts/mealPlan.js";
+import type { MealPlanResponse, PlannedMeal, PlannedMealSafety } from "../../contracts/mealPlan.js";
 import { prisma, type Tx } from "../../db.js";
 import { AppError, badRequest, conflict, notFound } from "../../lib/errors.js";
 import { fromCalendarDate, groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
@@ -32,6 +32,7 @@ function toPlanned(r: PlannedMealRow, cabinet: Expirable[]): PlannedMeal {
     date,
     slot: r.slot,
     meal: { ...(r.meal as unknown as PlanMeal), date },
+    safety: (r.safety as PlannedMealSafety | null) ?? null,
     agentRunId: r.agentRunId,
     createdBy: r.createdBy,
     createdAt: r.createdAt.toISOString(),
@@ -103,11 +104,11 @@ export const mealPlanService = {
   /** POST /meal-plan: add a dinner by hand. Safety-checked like apply (422 PLAN_UNSAFE); 409 DATE_TAKEN. */
   async add(groupId: string, userId: string, body: { date: string; meal: PlanMeal }): Promise<PlannedMeal> {
     const meal = { ...body.meal, date: body.date };
-    await assertMealsSafe(groupId, [meal], []);
+    const [safety] = await assertMealsSafe(groupId, [meal], []);
     const row = await prisma.$transaction(async (tx) => {
       await mealPlanRepo.lock(tx, groupId);
       if (await mealPlanRepo.findByDate(tx, groupId, body.date)) throw conflict("A dinner is already planned that day", "DATE_TAKEN");
-      return mealPlanRepo.create(tx, groupId, body.date, meal, userId, null);
+      return mealPlanRepo.create(tx, groupId, body.date, meal, userId, null, safety);
     });
     changed(groupId, userId);
     return toPlanned(row, toExpirables(await mealPlanRepo.expirable(prisma, groupId)));
@@ -196,7 +197,12 @@ export const mealPlanService = {
     runId: string,
     meals: PlanMeal[],
     replacePlannedMealId: string | null,
+    safetyByIndex: (PlannedMealSafety | undefined)[] = [],
   ): Promise<number> {
+    // meetDeadlines may re-date a meal (new object), so safety follows the meal by title.
+    const safetyOf = new Map<string, PlannedMealSafety>();
+    meals.forEach((m, i) => safetyByIndex[i] && !safetyOf.has(m.title) && safetyOf.set(m.title, safetyByIndex[i]!));
+    const safeFor = (m: PlanMeal) => safetyOf.get(m.title) ?? null;
     const today = toCalendarDate(householdToday(await groupTimeZone(tx, groupId)))!;
     const last = addDays(today, PLAN_HORIZON_DAYS);
     const byDate = new Map<string, PlanMeal>();
@@ -209,11 +215,11 @@ export const mealPlanService = {
       if (row) {
         const date = rowDate(row);
         const meal = byDate.get(date) ?? meals[0];
-        await mealPlanRepo.replaceMeal(tx, groupId, row.id, date, meal, runId);
+        await mealPlanRepo.replaceMeal(tx, groupId, row.id, date, meal, runId, safeFor(meal));
         return 1;
       }
     }
-    for (const [date, meal] of byDate) await mealPlanRepo.upsertOnDate(tx, groupId, date, meal, userId, runId);
+    for (const [date, meal] of byDate) await mealPlanRepo.upsertOnDate(tx, groupId, date, meal, userId, runId, safeFor(meal));
     return byDate.size;
   },
 };

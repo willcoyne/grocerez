@@ -8,6 +8,7 @@ import demoRunJson from "../../../server/test/fixtures/agent/demo-run.json";
 import { api } from "@/api/client";
 import { keys } from "@/api/keys";
 import { weekNoteLines, WEEK_FALLBACK } from "@/features/pantry/scene/exterior/list";
+import { safetyStatus } from "@/components/AgentMealCard";
 import { datesToPlan, weekPreviewLines } from "@/features/week/weekDates";
 import { WeekSheet } from "@/features/week/WeekSheet";
 import { confirm } from "@/lib/confirm";
@@ -36,6 +37,7 @@ function planned(id: string, date: string, meal: PlanMeal): PlannedMeal {
     groupId: g,
     date,
     slot: "dinner",
+    safety: null,
     meal: { ...meal, date },
     agentRunId: null,
     warnings: [],
@@ -63,11 +65,22 @@ function render() {
   return renderWithProviders(<WeekSheet visible groupId={g} onClose={jest.fn()} />);
 }
 
+describe("saved-meal safety chip", () => {
+  it("shows the stored problems and unknowns, not an assumed pass", () => {
+    const bad = safetyStatus({ title: "x", passes: false, unknown: [], problems: [{ ingredient: "Peanuts", reason: "contains peanuts" }] });
+    expect(bad).toMatchObject({ label: "Didn't pass the safety check", problems: ["Peanuts: contains peanuts"] });
+    expect(safetyStatus({ title: "x", passes: true, unknown: ["Mystery sauce"] })).toMatchObject({
+      label: "Safe for everyone",
+      unknown: ["Mystery sauce"],
+    });
+  });
+});
+
 describe("Week note on the pantry door (preview)", () => {
-  it("previews the next 4 days with a dash for empty ones; the 3D note falls back while loading", () => {
+  it("previews the next 3 days with a dash for empty ones; the 3D note falls back while loading", () => {
     const lines = weekPreviewLines(week([MON, WED]));
-    expect(lines).toEqual(["Mon  Lemon garlic chicken with spinach rice", "Tue  —", "Wed  Chicken and pepper stir fry", "Thu  —"]);
-    expect(weekNoteLines(lines)).toEqual(["Mon Lemon garlic chicken with spinach rice", "Tue —", "Wed Chicken and pepper stir fry", "Thu —"]);
+    expect(lines).toEqual(["Mon  Lemon garlic chicken with spinach rice", "Tue  —", "Wed  Chicken and pepper stir fry"]);
+    expect(weekNoteLines(lines)).toEqual(["Mon Lemon ga..", "Tue —", "Wed Chicken.."]);
     expect(weekPreviewLines(undefined)).toEqual([]);
     expect(weekNoteLines([])).toEqual(WEEK_FALLBACK);
   });

@@ -123,8 +123,12 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, busy, onClos
           </Pressable>
         </View>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-          {/* Saved dinners passed the server's household safety check when they were saved (apply / add re-check). */}
-          <AgentMealCard meal={meal} safety={{ title: meal.title, passes: true, unknown: [] }} style={styles.meal} />
+          {/* The household safety result stored when the dinner was saved; legacy rows (null) passed that check too. */}
+          <AgentMealCard
+            meal={meal}
+            safety={{ title: meal.title, ...(planned.safety ?? { passes: true, unknown: [] }) }}
+            style={styles.meal}
+          />
           {planned.warnings.map((w) => (
             <View key={w.item} style={styles.chip} accessible accessibilityLabel={`Warning: ${warningText(w)}`} testID="week-card-warning">
               <CircleAlert size={16} color={pantry.redInk} />

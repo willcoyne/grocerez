@@ -392,6 +392,7 @@ model PlannedMeal {
   date       DateTime @db.Date
   slot       MealSlot @default(dinner)
   meal       Json
+  safety     Json?
   agentRunId String?  @map("agent_run_id") @db.Uuid
   createdBy  String?  @map("created_by") @db.Uuid
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

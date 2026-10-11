@@ -26,7 +26,7 @@ describe("TabBar", () => {
   it("navigates to an inactive tab on press", async () => {
     const { props, navigation } = setup(0);
     await render(<TabBar {...props} />);
-    fireEvent.press(screen.getByLabelText("Pantry"));
+    await fireEvent.press(screen.getByLabelText("Pantry"));
     expect(navigation.navigate).toHaveBeenCalledWith("cabinet", undefined);
   });
 });

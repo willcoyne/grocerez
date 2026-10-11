@@ -8,17 +8,22 @@ import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "rea
 import { AiLabel, AppText, Button, Card, StatusChip, type ChipTone } from "@/components/ui";
 import { color, pressedOpacity, size, space } from "@/theme";
 
-type MealSafety = AgentPlan["safety"]["perMeal"][number];
+type MealSafety = AgentPlan["safety"]["perMeal"][number] & { problems?: { ingredient: string; reason: string }[] };
 type MealSource = NonNullable<PlanMeal["source"]>;
 
 /** How many source ingredient lines show before "Show all N". */
 export const INGREDIENT_PREVIEW = 5;
 
 /** The safety status, from the server's check (the app never decides safety itself). Text + icon, never color alone. */
-export function safetyStatus(safety: MealSafety | undefined): { label: string; tone: ChipTone; unknown: string[] } {
-  if (!safety) return { label: "Not safety-checked", tone: "neutral", unknown: [] };
-  if (!safety.passes) return { label: "Didn't pass the safety check", tone: "danger", unknown: [] };
-  return { label: "Safe for everyone", tone: "ok", unknown: safety.unknown };
+export function safetyStatus(
+  safety: MealSafety | undefined,
+): { label: string; tone: ChipTone; unknown: string[]; problems: string[] } {
+  if (!safety) return { label: "Not safety-checked", tone: "neutral", unknown: [], problems: [] };
+  if (!safety.passes) {
+    const problems = (safety.problems ?? []).map((p) => `${p.ingredient}: ${p.reason}`);
+    return { label: "Didn't pass the safety check", tone: "danger", unknown: [], problems };
+  }
+  return { label: "Safe for everyone", tone: "ok", unknown: safety.unknown, problems: [] };
 }
 
 const SAFETY_ICON = { ok: ShieldCheck, danger: ShieldAlert, neutral: ShieldQuestion, warn: ShieldQuestion } as const;
@@ -69,6 +74,7 @@ export function AgentMealCard({
             icon={SAFETY_ICON[s.tone]}
             accessibilityLabel={`Household safety check: ${s.label}`}
           />
+          {s.problems.length ? <AppText variant="caption" color="muted">{s.problems.join("; ")}</AppText> : null}
           {s.unknown.length ? (
             <AppText variant="caption" color="muted">{`Couldn't verify: ${s.unknown.join(", ")}`}</AppText>
           ) : null}

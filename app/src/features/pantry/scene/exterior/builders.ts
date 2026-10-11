@@ -506,24 +506,24 @@ export function buildListText(lines: string[]): BufferGeometry {
   return merge(parts);
 }
 
-/** The Week note's text: "Week" with the same squiggle, then up to 4 smaller day lines ("Mon  Lemon chicken"). */
+/** The Week note's text, laid out like the List note: "Week" with the squiggle, then up to 3 day lines ("Mon Chicken.."). */
 export function buildWeekText(lines: string[]): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const z = 0.0055;
-  const title = textGeometry("Week", { size: 0.05, depth: 0.0015, curveSegments: 3 });
+  const title = textGeometry("Week", { size: 0.052, depth: 0.0015, curveSegments: 3 });
   title.computeBoundingBox();
   const tb = title.boundingBox!;
-  title.translate(-(tb.min.x + tb.max.x) / 2, 0.088, z);
+  title.translate(-(tb.min.x + tb.max.x) / 2, 0.072, z);
   parts.push(title);
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [-0.024, 0.078, z], [0, 0, 0.06]));
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [0.026, 0.078, z], [0, 0, -0.06]));
-  lines.slice(0, 4).forEach((line, i) => {
-    const size = 0.03;
+  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [-0.024, 0.062, z], [0, 0, 0.06]));
+  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [0.026, 0.062, z], [0, 0, -0.06]));
+  lines.slice(0, 3).forEach((line, i) => {
+    const size = 0.038;
     const fitted = fitLine(line, size);
     if (!fitted.text.trim()) return;
     const g = textGeometry(fitted.text, { size, depth: 0.0015, curveSegments: 3 });
     g.scale(fitted.scale, fitted.scale, 1);
-    g.translate(-0.092, 0.024 - i * 0.05, z);
+    g.translate(-0.092, 0.002 - i * 0.064, z);
     parts.push(g);
   });
   for (const p of parts) p.deleteAttribute("uv");
