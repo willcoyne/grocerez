@@ -261,6 +261,26 @@ describe("door motion through updateExterior", () => {
     } as unknown as ExteriorHandles;
   };
 
+  it("the user's fast setting (still): doors snap to the clock, no wobble or peek, the sign sits still", () => {
+    const h = handles();
+    const s = createAnimState();
+    const frame = (phase: PantryPhase, q: number, t: number) =>
+      updateExterior(h, s, { phase, openProgress: 0, openClock: q, still: true }, t, 1 / 60);
+    frame("opening", 1, 1);
+    expect(h.rightDoor.rotation.y).toBe(D.doorOpenAngle);
+    const sign = h.sign.rotation.z;
+    for (let t = 1; t < 4; t += 0.25) {
+      frame("shelves", 1, t);
+      expect(h.rightDoor.rotation.y).toBe(D.doorOpenAngle); // no wobble after the swing
+      expect(h.sign.rotation.z).toBe(sign); // no pendulum, no idle sway
+    }
+    frame("closed", 0, 10);
+    for (let t = 10; t < 30; t += 0.25) {
+      frame("closed", 0, t);
+      expect(h.rightDoor.rotation.y).toBe(0); // no "tap me" peek
+    }
+  });
+
   it("the eased, re-render-quantised openProgress path (no live clock) still closes monotonically to 0", () => {
     const h = handles();
     const s = createAnimState();

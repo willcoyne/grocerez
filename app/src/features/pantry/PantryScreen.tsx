@@ -515,7 +515,7 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
             <group key={themeId}>
             <Lights />
             <RoomMount phase={phase} clock={clock} interactive={roomInteractive}>
-              <RoomLayer data={roomData} onStation={goToStation} disabled={!roomInteractive} />
+              <RoomLayer data={roomData} onStation={goToStation} disabled={!roomInteractive} still={motion === "fast"} />
             </RoomMount>
             <ExteriorMount
               phase={phase}
@@ -528,6 +528,7 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
               onMePress={openMe}
               weekPreview={weekPreview}
               onWeekPress={openWeek}
+              still={motion === "fast"}
             />
             <ShelvesMount phase={phase} clock={clock}>
               <ShelfColumn
@@ -793,6 +794,7 @@ function ExteriorMount({
   onMePress,
   weekPreview,
   onWeekPress,
+  still,
 }: {
   phase: PantryPhase;
   clock: MutableRefObject<PhaseClock>;
@@ -804,6 +806,7 @@ function ExteriorMount({
   onMePress: () => void;
   weekPreview: string[];
   onWeekPress: () => void;
+  still: boolean;
 }) {
   const [openProgress, setOpenProgress] = useState(0);
   const [listProgress, setListProgress] = useState(0);
@@ -850,6 +853,7 @@ function ExteriorMount({
         onMePress={mePress}
         weekPreview={weekPreview}
         onWeekPress={weekPress}
+        still={still}
         clock={clock}
       />
     </group>

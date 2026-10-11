@@ -36,6 +36,8 @@ export type PantryExteriorProps = {
   weekPreview?: string[];
   /** tap on the pinned Week note (its own hit target, `closed` only) */
   onWeekPress?: () => void;
+  /** the user's "fast" setting: no animation (see ExteriorInput.still) */
+  still?: boolean;
   /**
    * Live phase clock (motion.ts PhaseClock; `open` is the LINEAR door clock). When given, the doors read it every
    * frame instead of `openProgress`, so they move in step with the camera, without React-render lag or the
@@ -109,11 +111,12 @@ export function PantryExterior({
   weekPreview,
   onWeekPress,
   clock,
+  still = false,
 }: PantryExteriorProps) {
   const theme = useSceneTheme();
   const exterior = useMemo(() => createExterior(theme), [theme]);
   const anim = useRef(createAnimState());
-  const input = useRef<ExteriorInput>({ phase, openProgress, listProgress, liftedNote });
+  const input = useRef<ExteriorInput>({ phase, openProgress, listProgress, liftedNote, still });
   const pressRef = useRef(onPress);
   const listPressRef = useRef(onListPress);
   const mePressRef = useRef(onMePress);
@@ -121,13 +124,13 @@ export function PantryExterior({
   const clockRef = useRef(clock);
 
   useEffect(() => {
-    input.current = { phase, openProgress, listProgress, liftedNote };
+    input.current = { phase, openProgress, listProgress, liftedNote, still };
     pressRef.current = onPress;
     listPressRef.current = onListPress;
     mePressRef.current = onMePress;
     weekPressRef.current = onWeekPress;
     clockRef.current = clock;
-  }, [phase, openProgress, listProgress, liftedNote, onPress, onListPress, onMePress, onWeekPress, clock]);
+  }, [phase, openProgress, listProgress, liftedNote, still, onPress, onListPress, onMePress, onWeekPress, clock]);
 
   useEffect(() => () => exterior.dispose(), [exterior]);
 

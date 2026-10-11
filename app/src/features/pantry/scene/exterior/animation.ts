@@ -302,6 +302,11 @@ export type ExteriorInput = {
   openClock?: number;
   /** which pinned paper the `list` phase lifts toward the camera (default the List) */
   liftedNote?: NoteKind;
+  /**
+   * The user's "fast" setting: no animation at all. Doors sit exactly at the clock's angle (no overshoot, wobble or
+   * peek), letters and sign are already settled, papers don't flutter or hover, the knob doesn't breathe.
+   */
+  still?: boolean;
 };
 
 /** Apply poses to the scene graph. `now` is a monotonically increasing clock in seconds. */
@@ -325,7 +330,8 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
 
   // --- doors (linear clock: live when given, else recovered from the eased openProgress)
   const q = input.openClock !== undefined ? clamp01(input.openClock) : uneaseInOutCubic(p);
-  const angle = stepDoor(s.door, phase, q, now, dt);
+  const still = !!input.still;
+  const angle = still ? q * D.doorOpenAngle : stepDoor(s.door, phase, q, now, dt);
   h.leftDoor.rotation.y = -angle;
   h.rightDoor.rotation.y = angle;
 
@@ -333,7 +339,11 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   const since = now - s.openedAt;
   for (let i = 0; i < h.letters.length; i++) {
     const L = h.letters[i];
-    const pose: LetterPose = s.opened ? letterPose(i, since, s.shakeFromCrooked) : { dx: 0, dy: 0, ry: 0, rz: 0 };
+    const pose: LetterPose = !s.opened
+      ? { dx: 0, dy: 0, ry: 0, rz: 0 }
+      : still
+        ? letterPose(i, Infinity, true) // settled crooked, no jolt
+        : letterPose(i, since, s.shakeFromCrooked);
     // lift so a tilted letter pivots on its corner instead of sinking into the crown
     const lift = Math.abs(Math.sin(pose.rz)) * L.halfW * 0.85;
     L.mesh.position.set(L.x + pose.dx, D.crownTop + pose.dy + lift, h.lettersZ);
@@ -341,7 +351,7 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   }
 
   // --- sign
-  h.sign.rotation.z = signAngle(now, since, s.opened, s.shakeFromCrooked);
+  h.sign.rotation.z = still ? (s.opened ? SIGN_CROOKED : 0) : signAngle(now, since, s.opened, s.shakeFromCrooked);
 
   // --- pinned papers (List, Me, Week): "tap me" flutter (out of step) / hover lift / lift-off toward the camera
   const closed = phase === "closed";
@@ -357,14 +367,20 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
     { paper: h.weekPaper, kind: "week", hover: s.weekLift, phase: 2.6, rotZ: D.weekNote.rotZ },
   ] as const;
   for (const n of papers) {
-    const pose = notePose(now + n.phase, n.hover, n.kind === lifted ? lift : 0, closed, n.rotZ);
+    const pose = still
+      ? notePose(0, 0, n.kind === lifted ? lift : 0, false, n.rotZ) // pinned flat: no flutter, no hover lift
+      : notePose(now + n.phase, n.hover, n.kind === lifted ? lift : 0, closed, n.rotZ);
     n.paper.position.set(pose.x, pose.y, pose.z);
     n.paper.rotation.set(pose.rx, 0, pose.rz);
   }
 
   // --- knob breathing glow (closed only) to invite a tap
   const target =
-    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.meHover && !s.weekHover ? 0.35 : 0) : 0;
-  s.glow += (target - s.glow) * Math.min(1, dt * 6);
+    phase !== "closed"
+      ? 0
+      : still
+        ? 0.31
+        : 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.meHover && !s.weekHover ? 0.35 : 0);
+  s.glow = still ? target : s.glow + (target - s.glow) * Math.min(1, dt * 6);
   getMaterials().knob.emissiveIntensity = s.glow;
 }

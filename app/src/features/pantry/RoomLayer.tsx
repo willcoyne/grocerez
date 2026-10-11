@@ -15,11 +15,13 @@ export type RoomLayerProps = {
   onStation: (id: RoomStationId) => void;
   /** no taps / hover / "tap me" hints (shelves, zooms, a sheet open) */
   disabled: boolean;
+  /** the user's "fast" setting: props stay still (no "tap me" hints) */
+  still?: boolean;
 };
 
-export function RoomLayer({ data, onStation, disabled }: RoomLayerProps) {
+export function RoomLayer({ data, onStation, disabled, still = false }: RoomLayerProps) {
   const press = useMemo(() => ({ household: () => onStation("household"), scan: () => onStation("scan") }), [onStation]);
-  const hint = !disabled;
+  const hint = !disabled && !still;
   return (
     <group name="RoomLayer">
       <RoomShell />
