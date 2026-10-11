@@ -1,0 +1,145 @@
+# GrocerEZ on one Akamai Cloud (Linode) instance. Run from deploy/:  docker compose up -d --build
+# All secrets come from deploy/.env (gitignored). Only caddy publishes ports (80/443).
+name: grocerez-prod
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: grocerez # owner role: runs migrations and seed
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: grocerez
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No "ports:" on purpose: reachable only from the compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grocerez -d grocerez"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: apply migrations as the owner BEFORE the app role is (re)granted, so grants cover every table.
+  migrate:
+    build: ../server
+    image: grocerez-api
+    restart: "no"
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://grocerez:${POSTGRES_PASSWORD}@postgres:5432/grocerez
+      MIGRATE_DATABASE_URL: postgresql://grocerez:${POSTGRES_PASSWORD}@postgres:5432/grocerez
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-shot: create/refresh the least-privilege grocerez_app role (idempotent; runs on every `up`).
+  app-role:
+    image: postgres:16
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - psql -h postgres -U grocerez -d grocerez -v ON_ERROR_STOP=1 -v app_password="$$GROCEREZ_APP_PASSWORD" -f /app-role.sql
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      GROCEREZ_APP_PASSWORD: ${GROCEREZ_APP_PASSWORD:?set GROCEREZ_APP_PASSWORD in deploy/.env}
+    volumes:
+      - ../server/prisma/sql/app-role.sql:/app-role.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  server:
+    build: ../server
+    image: grocerez-api
+    restart: unless-stopped
+    # Dockerfile CMD runs `prisma migrate deploy` (owner URL, a no-op after `migrate`) then node.
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://grocerez_app:${GROCEREZ_APP_PASSWORD}@postgres:5432/grocerez
+      MIGRATE_DATABASE_URL: postgresql://grocerez:${POSTGRES_PASSWORD}@postgres:5432/grocerez
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:?set GOOGLE_CLIENT_IDS in deploy/.env}
+      APP_LINK_BASE: ${APP_LINK_BASE:-grocerez://}
+      CORS_ORIGINS: https://${DOMAIN:?set DOMAIN in deploy/.env}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-team@grocerez.app}
+      ENABLE_JOBS: "true"
+      DEMO_KEY: ${DEMO_KEY:-}
+      # Production config requires these (src/config.ts PROD_REQUIRED). Claude is also the recipe/price fallback.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in deploy/.env}
+      OPENFDA_API_KEY: ${OPENFDA_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      # Akamai Object Storage (S3-compatible)
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET in deploy/.env}
+      AWS_REGION: ${AWS_REGION:-us-ord}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID in deploy/.env}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY in deploy/.env}
+      # Pantry agent link (internal network only)
+      AGENT_URL: http://agent:8000
+      AGENT_PUBLIC_API_URL: http://server:3000/api
+      AGENT_SHARED_SECRET: ${AGENT_SHARED_SECRET:?set AGENT_SHARED_SECRET in deploy/.env}
+    depends_on:
+      app-role:
+        condition: service_completed_successfully
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Build context ../agent is owned by lane B (python:3.12-slim, uvicorn on :8000). NO published port.
+  agent:
+    build: ../agent
+    restart: unless-stopped
+    environment:
+      PORT: "8000"
+      AGENT_SHARED_SECRET: ${AGENT_SHARED_SECRET:?set AGENT_SHARED_SECRET in deploy/.env}
+      AGENT_PROVIDER: ${AGENT_PROVIDER:-akamai}
+      PRICE_PROVIDER: ${PRICE_PROVIDER:-akamai}
+      AKAMAI_INFERENCE_URL: ${AKAMAI_INFERENCE_URL:-https://ws.akamai-workshops.com/v1}
+      AKAMAI_INFERENCE_KEY: ${AKAMAI_INFERENCE_KEY:?set AKAMAI_INFERENCE_KEY in deploy/.env}
+      AKAMAI_ENABLE_THINKING: ${AKAMAI_ENABLE_THINKING:-false}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      AKAMAI_MODEL: ${AKAMAI_MODEL:-hackathon-chat}
+      AKAMAI_IMAGE_MODEL: ${AKAMAI_IMAGE_MODEL:-hackathon-image}
+      AKAMAI_EMBEDDING_MODEL: ${AKAMAI_EMBEDDING_MODEL:-hackathon-embedding}
+      # Fallback provider only (AGENT_PROVIDER=anthropic); may be empty for an Akamai-only agent.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-25}
+      AGENT_RUN_TIMEOUT_S: ${AGENT_RUN_TIMEOUT_S:-105}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web-dist:/srv/web:ro
+      - caddy_data:/data # certificates: keep, or you hit Let's Encrypt rate limits
+      - caddy_config:/config
+    depends_on:
+      - server
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

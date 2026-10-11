@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+.env
+.venv/
+.index-state.json
+.index-state.tmp

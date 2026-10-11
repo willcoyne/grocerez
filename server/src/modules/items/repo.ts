@@ -78,6 +78,18 @@ export const itemsRepo = {
       WHERE embedding IS NULL OR embedding_model IS DISTINCT FROM ${model}
       ORDER BY created_at, id LIMIT ${limit}::int`,
 
+  /** The single nearest item (same model and dimension) with its cosine distance, or null. */
+  nearest: async (db: Db, vector: string, dims: number, model: string) =>
+    (
+      await db.$queryRaw<(Omit<SearchRow, "match" | "similarity"> & { distance: number })[]>`
+        SELECT id AS item_id, name, normalized_name, category, default_allergens::text[] AS default_allergens,
+               shelf_life_days, (embedding <=> ${vector}::vector)::float8 AS distance
+        FROM items
+        WHERE embedding_model = ${model} AND vector_dims(embedding) = ${dims}::int
+        ORDER BY embedding <=> ${vector}::vector
+        LIMIT 1`
+    )[0] ?? null,
+
   /**
    * Nearest items by cosine distance to a query embedding. Only rows from the same model and dimension are
    * compared; exact scan (fine for a few thousand items).

@@ -1,5 +1,5 @@
 import type { ShoppingListItem } from "@contracts/shoppingList";
-import { ScanBarcode, X } from "lucide-react-native";
+import { ScanBarcode, Sparkles, X } from "lucide-react-native";
 import { StyleSheet, View } from "react-native";
 
 import { AppText, Card, Checkbox, IconButton, StatusChip, type ChipTone } from "@/components/ui";
@@ -65,6 +65,7 @@ export function ListRow({ row, meId, names, runningLow, syncing, priceText, onTo
           {row.quantityText ? `${row.quantityText} · ` : ""}
           {metaFor(row, meId, names)}
         </AppText>
+        {row.note ? <AgentNote note={row.note} /> : null}
         {chips.length > 0 ? (
           <View style={styles.chips}>
             {chips.map((c) => (
@@ -87,7 +88,21 @@ export function ListRow({ row, meId, names, runningLow, syncing, priceText, onTo
   );
 }
 
+/** The Pantry Agent's note ("✨ for Lemon chicken (Tue)"), marked as AI with a Sparkles icon instead of the emoji. */
+function AgentNote({ note }: { note: string }) {
+  const text = note.replace(/^✨\s*/, "");
+  return (
+    <View style={styles.note} accessible accessibilityLabel={`AI note: ${text}`}>
+      <Sparkles size={12} color={color.ink2} strokeWidth={2.5} />
+      <AppText variant="caption" weight="semi" color="ink2" style={styles.name}>
+        {text.charAt(0).toUpperCase() + text.slice(1)}
+      </AppText>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  note: { flexDirection: "row", alignItems: "center", gap: space.xs },
   card: {
     flexDirection: "row",
     alignItems: "flex-start",

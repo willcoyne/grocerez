@@ -67,6 +67,7 @@ describe("01 server setup", () => {
     } as NodeJS.ProcessEnv;
     expect(loadConfig(env).ANTHROPIC_API_KEY).toBeUndefined();
     expect(() => loadConfig({ ...env, JWT_SECRET: "short" })).toThrow(/JWT_SECRET/);
+    expect(() => loadConfig({ ...env, AGENT_URL: "http://agent:8000", AGENT_SHARED_SECRET: "short" })).toThrow(/AGENT_SHARED_SECRET/);
     const ok = loadConfig({ ...env, NODE_ENV: "development" });
     expect(ok.GOOGLE_CLIENT_IDS).toEqual(["a"]);
     expect(ok.PORT).toBe(3000);

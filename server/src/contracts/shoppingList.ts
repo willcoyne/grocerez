@@ -23,6 +23,8 @@ export const ShoppingListItem = z.object({
   checkedAt: z.string().nullable(),
   scannedProductId: z.uuid().nullable(),
   addedBy: z.uuid().nullable(),
+  /** Short label set by the Pantry Agent ("✨ for Lemon chicken"); show as an AI chip. null for normal rows. */
+  note: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -9,3 +9,8 @@ deploy/linode/.env.storage
 deploy/linode/.env.tmp
 deploy/linode/.env.test
 deploy/linode/.token
+# Agent service secrets
+agent/.env
+agent/.venv/
+outputs/
+.playwright-mcp/

@@ -107,8 +107,9 @@ export function RootNavigator({ fontsReady = true }: { fontsReady?: boolean }) {
         <Stack.Screen name="scanner" options={{ presentation: "fullScreenModal", title: "Scan" }} />
         <Stack.Screen name="item-detail/[id]" options={{ presentation: "modal", title: "Item" }} />
         <Stack.Screen name="expiration-check" options={{ presentation: "modal", title: "Expiration dates" }} />
-        <Stack.Screen name="recipes" options={{ presentation: "modal", title: "What can we cook?" }} />
         <Stack.Screen name="prices" options={{ presentation: "modal", title: "Price estimate" }} />
+        <Stack.Screen name="agent" options={{ presentation: "modal", title: "Plan our week" }} />
+        <Stack.Screen name="agent-flow" options={{ title: "How the Pantry Agent works" }} />
       </Stack.Protected>
 
       {/* Available whenever signed in (used from onboarding / no-group too). */}

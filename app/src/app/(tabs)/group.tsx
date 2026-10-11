@@ -4,6 +4,7 @@ import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useDeleteGroup, useGroupDetail, useGroupInvites, useLeaveGroup, useRenameGroup } from "@/api/hooks/groups";
+import { AgentEntryCard } from "@/components/AgentControls";
 import { AlertsSection } from "@/components/AlertsSection";
 import { EveryonesWants } from "@/components/EveryonesWants";
 import { GroupMembers } from "@/components/GroupMembers";
@@ -15,7 +16,10 @@ import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
 import { space } from "@/theme";
 
-/** Household tab (DESIGN.md §4.8) plus carson extras: alerts, recipes, and "Manage household". */
+/** Recorded-run replay (Pantry Agent §7.7): long-press "Plan our week" in dev builds or the demo build. */
+const DEMO_REPLAY = __DEV__ || process.env.EXPO_PUBLIC_DEMO_REPLAY === "1";
+
+/** Household tab (DESIGN.md §4.8) plus carson extras: "Plan our week" (Pantry Agent), alerts, and "Manage household". */
 export default function GroupScreen() {
   const { activeGroupId } = useActiveGroup();
   const { user } = useAuth();
@@ -40,6 +44,7 @@ export default function GroupScreen() {
           refreshControl={<RefreshControl refreshing={detail.isRefetching} onRefresh={() => void detail.refetch()} />}
         >
           <InviteBanner />
+          <AgentEntryCard replay={DEMO_REPLAY} />
           <AlertsSection groupId={detail.data.id} />
 
           <SectionLabel>Members</SectionLabel>
@@ -56,7 +61,6 @@ export default function GroupScreen() {
             All preferences combined. Anything here that isn&apos;t in the cabinet goes on the list.
           </AppText>
           <EveryonesWants groupId={detail.data.id} meId={user?.id} />
-          <Button label="What can we cook?" variant="secondary" fullWidth onPress={() => router.push("/recipes")} />
 
           <SectionLabel style={styles.gapTop}>Manage household</SectionLabel>
           <GroupSettings groupId={detail.data.id} name={detail.data.name} isOwner={detail.data.role === "owner"} />

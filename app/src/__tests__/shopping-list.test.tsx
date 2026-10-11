@@ -34,6 +34,7 @@ function row(over: Partial<ShoppingListItem> & { id: string; name: string; categ
     checkedAt: null,
     scannedProductId: null,
     addedBy: null,
+    note: null,
     createdAt: "",
     updatedAt: "",
     ...rest,

@@ -295,6 +295,7 @@ describe("usePantry", () => {
     checkedAt: null,
     scannedProductId: null,
     addedBy: null,
+    note: null,
     createdAt: "",
     updatedAt: "",
   });

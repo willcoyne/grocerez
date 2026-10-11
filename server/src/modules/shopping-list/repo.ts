@@ -29,6 +29,31 @@ export const shoppingListRepo = {
       include: listInclude,
     }),
 
+  /**
+   * Pantry Agent apply (challenge 01): add rows as 'manual' with the agent's note and run id, in the caller's transaction.
+   * An existing row (the caller already skipped unchecked ones) keeps its reason/checked state and only gets the note.
+   * Regeneration never touches note / agent_run_id, and manual rows survive it.
+   */
+  upsertFromAgent: async (
+    db: Db,
+    groupId: string,
+    userId: string,
+    agentRunId: string | null,
+    rows: { itemId: string; note: string }[],
+  ) => {
+    const out: string[] = [];
+    for (const { itemId, note } of rows) {
+      const r = await db.shoppingListItem.upsert({
+        where: { groupId_itemId: { groupId, itemId } },
+        create: { groupId, itemId, reason: "manual", addedBy: userId, note, agentRunId },
+        update: { note, agentRunId },
+        select: { id: true },
+      });
+      out.push(r.id);
+    }
+    return out;
+  },
+
   setChecked: (db: Db, groupId: string, id: string, data: { checked: boolean; checkedBy: string | null; scannedProductId?: string | null }) =>
     db.shoppingListItem.update({ where: { id, groupId }, data, include: listInclude }),
 

@@ -12,7 +12,8 @@ const groupNotFound = () => new AppError(404, "NOT_FOUND", "Group not found");
  * Sets req.membership = { groupId, role }.
  */
 export const requireGroupMember: RequestHandler = async (req, _res, next) => {
-  const groupId = String(req.params.groupId ?? "");
+  // Canonical (lower-case) id: rate-limit keys and Socket.IO rooms must not depend on how the path was cased.
+  const groupId = String(req.params.groupId ?? "").toLowerCase();
   if (!z.uuid().safeParse(groupId).success || !req.userId) throw groupNotFound();
   const m = await groupsRepo.findMembership(prisma, groupId, req.userId);
   if (!m) throw groupNotFound();

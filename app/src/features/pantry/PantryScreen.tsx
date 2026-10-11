@@ -38,11 +38,14 @@ import * as THREE from "three";
 
 import { errorMessage } from "@/api/client";
 import { useCabinet } from "@/api/hooks/cabinet";
+import { useMealPlan } from "@/api/hooks/mealPlan";
 import { AppText, Button, ErrorState } from "@/components/ui";
 import { useCabinetActions } from "@/components/useCabinetActions";
 import { MapOutPicker } from "@/features/cabinet/CabinetScreen";
 import { RanOutPrompt } from "@/features/cabinet/RanOutPrompt";
 import { useRanOutPrompt } from "@/features/cabinet/ranOutStore";
+import { WeekSheet } from "@/features/week/WeekSheet";
+import { weekPreviewLines } from "@/features/week/weekDates";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 
 import { usePantry } from "./data";
@@ -89,8 +92,17 @@ const OPENING_CLIP = [
 const LAYER_INTERACTIVE = 1 << 0;
 const LAYER_PASSIVE = 1 << 1;
 
-/** `onShowList` switches the Pantry tab to the cabinet list view (CabinetScreen), which has every cabinet action. */
-export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
+export type PantryScreenProps = {
+  /**
+   * Opens the Week sheet (spec §13) when it changes to a new non-empty value: other tabs navigate here with a fresh
+   * `?week=<nonce>` ("Plan our week" on Household, "Plan meals" in alerts).
+   */
+  weekSignal?: string;
+  /** Switches the Pantry tab to the cabinet list view (CabinetScreen), which has every cabinet action. */
+  onShowList?: () => void;
+};
+
+export function PantryScreen({ weekSignal, onShowList }: PantryScreenProps = {}) {
   const groupId = useRequiredGroupId();
   const cabinet = useCabinet(groupId);
   const actions = useCabinetActions(groupId);
@@ -114,6 +126,15 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** ShoppingListNote overlay is open (after the fly-to + lift in the `list` phase). */
   const [listOpen, setListOpen] = useState(false);
+  /** The Week sheet (spec §13) is open; it sits over the closed pantry, under the pinned Week note. */
+  const [weekOpen, setWeekOpen] = useState(false);
+  const [seenWeekSignal, setSeenWeekSignal] = useState<string | undefined>(undefined);
+  if (weekSignal && weekSignal !== seenWeekSignal) {
+    setSeenWeekSignal(weekSignal);
+    setWeekOpen(true);
+  }
+  const mealPlan = useMealPlan(groupId);
+  const weekPreview = useMemo(() => weekPreviewLines(mealPlan.data), [mealPlan.data]);
 
   const clock = useRef<PhaseClock>({ open: 0, zoom: 0, list: 0 });
   /** `list` phase direction: +1 flying to the note, -1 putting it back. */
@@ -197,6 +218,11 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
 
   const onListArrived = useCallback(() => setListOpen(true), []);
 
+  // The Week note opens its sheet straight over the closed pantry (no camera flight).
+  const openWeek = useCallback(() => {
+    if (phase === "closed") setWeekOpen(true);
+  }, [phase]);
+
   const closePantry = useCallback(() => {
     if (phase !== "shelves" || leaving) return;
     setSearchOpen(false);
@@ -217,6 +243,7 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (weekOpen) return setWeekOpen(false), true;
         if (phase === "list") return closeList(), true;
         if (searchOpen) return setSearchOpen(false), true;
         if (filterOpen) return setFilterOpen(false), true;
@@ -225,7 +252,7 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
         return false;
       });
       return () => sub.remove();
-    }, [searchOpen, filterOpen, phase, selectedId, closePantry, closeList, clearFocus]),
+    }, [searchOpen, filterOpen, phase, selectedId, closePantry, closeList, clearFocus, weekOpen]),
   );
 
   const advance = useCallback((from: PantryPhase) => {
@@ -316,6 +343,8 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
               listPreview={listPreview}
               onPress={openPantry}
               onListPress={openList}
+              weekPreview={weekPreview}
+              onWeekPress={openWeek}
             />
             <ShelvesMount phase={phase}>
               <ShelfColumn
@@ -356,6 +385,20 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
           >
             <AppText variant="caption" weight="bold" style={styles.pillText}>
               List
+            </AppText>
+          </Pressable>
+          <Pressable
+            testID="pantry-week-button"
+            accessibilityRole="button"
+            accessibilityLabel="Week plan"
+            accessibilityHint={
+              weekPreview.length ? `Opens the week's dinners. ${weekPreview.join(". ")}` : "Opens the week's dinners pinned on the pantry"
+            }
+            onPress={openWeek}
+            style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+          >
+            <AppText variant="caption" weight="bold" style={styles.pillText}>
+              Week
             </AppText>
           </Pressable>
         </View>
@@ -435,6 +478,8 @@ export function PantryScreen({ onShowList }: { onShowList?: () => void } = {}) {
           </Pressable>
         </View>
       ) : null}
+
+      <WeekSheet key={groupId} visible={weekOpen && phase === "closed"} groupId={groupId} onClose={() => setWeekOpen(false)} />
 
       <ShoppingListNote
         visible={phase === "list" && listOpen}
@@ -563,12 +608,16 @@ function ExteriorMount({
   listPreview,
   onPress,
   onListPress,
+  weekPreview,
+  onWeekPress,
 }: {
   phase: PantryPhase;
   clock: MutableRefObject<PhaseClock>;
   listPreview: string[];
   onPress: () => void;
   onListPress: () => void;
+  weekPreview: string[];
+  onWeekPress: () => void;
 }) {
   const [openProgress, setOpenProgress] = useState(0);
   const [listProgress, setListProgress] = useState(0);
@@ -594,6 +643,9 @@ function ExteriorMount({
   const listPress = useCallback(() => {
     if (phase === "closed") onListPress();
   }, [phase, onListPress]);
+  const weekPress = useCallback(() => {
+    if (phase === "closed") onWeekPress();
+  }, [phase, onWeekPress]);
   return (
     <group ref={group}>
       <PantryExterior
@@ -603,6 +655,8 @@ function ExteriorMount({
         onPress={press}
         onListPress={listPress}
         listProgress={listProgress}
+        weekPreview={weekPreview}
+        onWeekPress={weekPress}
       />
     </group>
   );

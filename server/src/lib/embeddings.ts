@@ -131,7 +131,7 @@ export async function describeItems(names: string[]): Promise<Map<string, ItemSe
  * Qwen3-style embedding models want an instruction on the query side (items are embedded as-is).
  * Without it, "oreo" lands near Bagels and Pita; with it, near other snacks.
  */
-const QUERY_INSTRUCTION =
+export const QUERY_INSTRUCTION =
   "Instruct: Given a grocery item someone typed, retrieve grocery products that are the same kind of thing or a close substitute\nQuery: ";
 
 /** Search queries repeat while typing; keep recent query embeddings in memory (insertion-ordered LRU). */

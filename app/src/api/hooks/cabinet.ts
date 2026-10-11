@@ -17,6 +17,7 @@ function invalidateCabinet(qc: ReturnType<typeof useQueryClient>, groupId: strin
   void qc.invalidateQueries({ queryKey: keys.cabinet(groupId) });
   void qc.invalidateQueries({ queryKey: keys.shoppingList(groupId) });
   void qc.invalidateQueries({ queryKey: keys.alerts(groupId) });
+  void qc.invalidateQueries({ queryKey: keys.mealPlans(groupId) });
 }
 
 export function useAddCabinetItem(groupId: string) {

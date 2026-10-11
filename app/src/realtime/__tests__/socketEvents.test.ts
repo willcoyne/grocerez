@@ -34,4 +34,26 @@ describe("socket events → query invalidation", () => {
     handleSocketEvent(qc, "invites:changed", { groupId: "g1" });
     expect(invalidated()).toEqual(expect.arrayContaining([keys.myInvites, keys.groupInvites("g1")]));
   });
+
+  it("agent:changed refreshes that run and the recent-runs list, in that group only", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "agent:changed", { groupId: "g1", by: "u1", runId: "r1" });
+    expect(invalidated()).toEqual(expect.arrayContaining([keys.agentRun("g1", "r1"), keys.agentRuns("g1")]));
+    expect(invalidated()).not.toContainEqual(keys.agentRuns("g2"));
+    expect(invalidated()).not.toContainEqual(keys.agentRun("g2", "r1"));
+  });
+
+  it("agent:changed without a runId still refreshes the recent-runs list", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "agent:changed", { groupId: "g1" });
+    expect(invalidated()).toEqual([keys.agentRuns("g1")]);
+  });
+
+  it("meal-plan:changed refreshes every cached range of that group's week plan, and nothing else", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "meal-plan:changed", { groupId: "g1", by: "u1" });
+    expect(invalidated()).toEqual([keys.mealPlans("g1")]);
+    // The prefix covers keys.mealPlan(g1, from, to) for any range.
+    expect(keys.mealPlan("g1", "2026-10-12", "2026-10-18").slice(0, 3)).toEqual([...keys.mealPlans("g1")]);
+  });
 });

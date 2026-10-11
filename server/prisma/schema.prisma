@@ -51,6 +51,8 @@ model User {
   cabinetItems  CabinetItem[]
   listChecked   ShoppingListItem[] @relation("ListCheckedBy")
   listAdded     ShoppingListItem[] @relation("ListAddedBy")
+  agentRuns     AgentRun[]
+  plannedMeals  PlannedMeal[]      @relation("PlannedMealCreatedBy")
 
   @@map("users")
 }
@@ -109,6 +111,8 @@ model Group {
   cabinetItems  CabinetItem[]
   listItems     ShoppingListItem[]
   recallMatches RecallMatch[]
+  agentRuns     AgentRun[]
+  plannedMeals  PlannedMeal[]
 
   @@map("groups")
 }
@@ -316,6 +320,10 @@ model ShoppingListItem {
   /// SmartLabel / barcode scanned while checking off.
   scannedProductId String?    @map("scanned_product_id") @db.Uuid
   addedBy          String?    @map("added_by") @db.Uuid
+  /// Short label shown on the row, e.g. "✨ for Lemon chicken" (Pantry Agent, challenge 01). ≤ 120 chars.
+  note             String?    @db.VarChar(120)
+  /// The agent run whose plan added this row (challenge 01).
+  agentRunId       String?    @map("agent_run_id") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -324,11 +332,83 @@ model ShoppingListItem {
   checker        User?    @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
   scannedProduct Product? @relation(fields: [scannedProductId], references: [id], onDelete: SetNull)
   adder          User?    @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+  agentRun       AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
 
   @@unique([groupId, itemId])
   @@index([groupId, checked])
   @@index([scannedProductId])
   @@map("shopping_list_items")
+}
+
+// ─── Challenge 01 Pantry Agent runs ────────────────────────────────────────────
+
+enum AgentRunStatus {
+  running
+  proposed
+  applied
+  failed
+
+  @@map("agent_run_status")
+}
+
+/// One "Plan our week" run. `steps` = [{seq, id, label, status, detail?, at}] (appended atomically with jsonb ||);
+/// `plan` = AgentPlan (contracts/agent.ts) once proposed; `meta` = {provider, model, toolCalls, tokensIn, tokensOut, ms}.
+model AgentRun {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String         @map("group_id") @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  prompt      String         @db.VarChar(500)
+  budgetCents Int?           @map("budget_cents")
+  status      AgentRunStatus @default(running)
+  steps       Json           @default("[]")
+  plan        Json?
+  error       String?
+  meta        Json?
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  appliedAt   DateTime?      @map("applied_at") @db.Timestamptz(6)
+  /// Swap run (spec §13): the planned meal this run replaces (its date is the only date planned).
+  replacePlannedMealId String? @map("replace_planned_meal_id") @db.Uuid
+  /// True for swap runs; survives the target meal's deletion (replacePlannedMealId is then null).
+  isSwap               Boolean @default(false) @map("is_swap")
+
+  group        Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listItems    ShoppingListItem[]
+  replaces     PlannedMeal?       @relation("AgentRunReplaces", fields: [replacePlannedMealId], references: [id], onDelete: SetNull)
+  plannedMeals PlannedMeal[]      @relation("PlannedMealAgentRun")
+
+  @@index([groupId, createdAt(sort: Desc)])
+  @@map("agent_runs")
+}
+
+enum MealSlot {
+  dinner
+
+  @@map("meal_slot")
+}
+
+/// Week calendar (spec §13): one dinner per date per group. `meal` = PlanMeal (contracts/agent.ts) with `date` set.
+model PlannedMeal {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId    String   @map("group_id") @db.Uuid
+  date       DateTime @db.Date
+  slot       MealSlot @default(dinner)
+  meal       Json
+  safety     Json?
+  agentRunId String?  @map("agent_run_id") @db.Uuid
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group      Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  agentRun   AgentRun?  @relation("PlannedMealAgentRun", fields: [agentRunId], references: [id], onDelete: SetNull)
+  creator    User?      @relation("PlannedMealCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  replacedBy AgentRun[] @relation("AgentRunReplaces")
+
+  @@unique([groupId, date, slot])
+  @@index([groupId, date])
+  @@map("planned_meals")
 }
 
 // ─── 08 Product data cache (SmartLabel / barcode) ──────────────────────────────
@@ -459,4 +539,37 @@ model ProductLookup {
 
   @@index([itemId])
   @@map("product_lookups")
+}
+
+// ─── Pantry Agent recipe index (challenge 01 §12) ───────────────────────────────
+
+/// Crawled recipe (schema.org Recipe JSON-LD). Upserted by POST /api/internal/recipes; searched by the agent.
+/// Partial indexes live in the migration only (Prisma can't express them): recipes_missing_embedding_idx and the
+/// HNSW index on (embedding::vector(1024)) WHERE vector_dims(embedding) = 1024.
+model Recipe {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  url             String     @unique
+  site            String     @db.VarChar(80)
+  title           String     @db.VarChar(200)
+  imageUrl        String?    @map("image_url")
+  minutes         Int?
+  servings        Int?
+  ingredientLines String[]   @default([]) @map("ingredient_lines")
+  ingredients     String[]   @default([])
+  /// schema.org recipeCategory, lower-cased ("main course", "side dish"); [] when the site doesn't say (spec §12.1).
+  course          String[]   @default([])
+  /// Computed at ingest: keyword table over the lines ∪ catalog defaultAllergens of the ingredients.
+  allergens       Allergen[] @default([])
+  /// Ingredients still unverifiable against the catalog (exact / whole-word / semantic); allergy households skip these recipes.
+  unverified      String[]   @default([])
+  /// When `unverified` was last computed; null = not yet (the verifyRecipes backfill fills it).
+  verifiedAt      DateTime?  @map("verified_at") @db.Timestamptz(6)
+  /// Akamai embedding of "title: ingredients". Read/written with raw SQL only.
+  embedding       Unsupported("vector")?
+  embeddingModel  String?    @map("embedding_model")
+  embeddedAt      DateTime?  @map("embedded_at") @db.Timestamptz(6)
+  crawledAt       DateTime   @default(now()) @map("crawled_at") @db.Timestamptz(6)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("recipes")
 }

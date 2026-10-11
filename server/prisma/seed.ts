@@ -37,7 +37,22 @@ const DEMO_RECALL_EXTERNAL_ID = "DEMO-0001";
 /** Pending invite for the live accept flow. SWAP FOR A TEAMMATE'S REAL GOOGLE EMAIL BEFORE THE DEMO (or set DEMO_INVITE_EMAIL). */
 const DEMO_INVITE_EMAIL = (process.env.DEMO_INVITE_EMAIL ?? "teammate@example.com").trim().toLowerCase();
 
-type Allergen = "milk" | "eggs" | "fish" | "shellfish" | "tree_nuts" | "peanuts" | "wheat" | "soy" | "sesame" | "gluten";
+/** Kansas City (Hack Midwest): the Pantry Agent's price estimates use the caller's ZIP. */
+const DEMO_ZIP = "64105";
+
+/**
+ * Pantry Agent demo kitchen (challenge 01 §5.6): two items about to expire, plus staples, all in stock.
+ * [catalog item name, location, days until expiry (null = no date)]. None of these are anyone's preference,
+ * so the generated demo list (check-demo-list.sql) is unchanged.
+ */
+const AGENT_CABINET: [string, "fridge" | "pantry", number | null][] = [
+  ["Spinach", "fridge", 2], ["Chicken Breast", "fridge", 3],
+  ["Rice", "pantry", null], ["Garlic", "pantry", 20], ["Onions", "pantry", 25], ["Olive Oil", "pantry", null],
+  ["Eggs", "fridge", 18], ["Pasta", "pantry", null], ["Canned Tomatoes", "pantry", null], ["Bell Peppers", "fridge", 6],
+  ["Black Beans", "pantry", null], ["Tortillas", "pantry", 10], ["Cheddar Cheese", "fridge", 21], ["Butter", "fridge", 30],
+];
+
+type Allergen ="milk" | "eggs" | "fish" | "shellfish" | "tree_nuts" | "peanuts" | "wheat" | "soy" | "sesame" | "gluten";
 type DemoUser = {
   id: string;
   googleSub: string;
@@ -78,8 +93,8 @@ async function seedDemo() {
     for (const u of DEMO_USERS) {
       const user = await tx.user.upsert({
         where: { googleSub: u.googleSub },
-        update: { email: u.email, displayName: u.displayName },
-        create: { id: u.id, googleSub: u.googleSub, email: u.email, displayName: u.displayName },
+        update: { email: u.email, displayName: u.displayName, zipCode: DEMO_ZIP },
+        create: { id: u.id, googleSub: u.googleSub, email: u.email, displayName: u.displayName, zipCode: DEMO_ZIP },
       });
       u.id = user.id;
       await tx.userAllergen.deleteMany({ where: { userId: user.id } });
@@ -126,6 +141,14 @@ async function seedDemo() {
       data: { groupId: DEMO_GROUP_ID, itemId: ids.get("Oreos")!, status: "running_low", location: "pantry",
         quantityText: "a few left", purchasedAt: inDays(-20), expiresAt: inDays(2), expirationSource: "manual", addedBy: DEMO_USERS[2].id },
     });
+
+    // Pantry Agent demo kitchen: "using up spinach (2 days), chicken (3 days)".
+    for (const [name, location, days] of AGENT_CABINET) {
+      await tx.cabinetItem.create({
+        data: { groupId: DEMO_GROUP_ID, itemId: await itemId(name), status: "in_stock", location, purchasedAt: inDays(-1),
+          expiresAt: days === null ? null : inDays(days), expirationSource: days === null ? null : "estimated", addedBy: owner.id },
+      });
+    }
 
     // Offline recall that fuzzy-matches the cabinet's Cheerios.
     const recall = await tx.recall.upsert({
