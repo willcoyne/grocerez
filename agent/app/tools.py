@@ -125,6 +125,20 @@ def safety_payload(meals: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+UNVERIFIED = "couldn't verify"  # server reason: "couldn't verify ingredients (allergy household)"
+
+
+def _fix_instruction(failed: list[SafetyMealOut]) -> str:
+    text = ("Failed ingredients/words are NOT allowed in ANY meal, title or step (even negated, e.g. 'dairy-free'). "
+            "Fix with revise_meal(title, remove=[...], add=[...], steps=[...]); do not re-send all meals.")
+    names = sorted({p.ingredient for r in failed for p in r.problems if UNVERIFIED in p.reason.lower()})
+    if names:
+        text += (" UNVERIFIABLE (this household has allergies, so unknown ingredients fail): replace these exact "
+                 "ingredients with a common grocery item (plain names like Basil, Limes, Soy Sauce) or drop them: "
+                 + ", ".join(names) + ". Use revise_meal, not a redraft.")
+    return text
+
+
 def build_tools(
     ctx: RunContext,
     client: ServerClient,
@@ -334,9 +348,7 @@ def build_tools(
         return _j({
             "all_pass": False,
             "failed": [{"title": r.title, "problems": [p.model_dump() for p in r.problems]} for r in failed],
-            "instruction": "Failed ingredients/words are NOT allowed in ANY meal, title or step (even negated, e.g. "
-                           "'dairy-free'). Fix with revise_meal(title, remove=[...], add=[...], steps=[...]); "
-                           "do not re-send all meals.",
+            "instruction": _fix_instruction(failed),
         })
 
     @tool
@@ -402,7 +414,8 @@ def build_tools(
         )
         _maybe_price()
         if bad:
-            return _j({"passes": False, "failed": [{"title": r.title, "problems": [p.model_dump() for p in r.problems]} for r in bad]})
+            return _j({"passes": False, "instruction": _fix_instruction(bad),
+                       "failed": [{"title": r.title, "problems": [p.model_dump() for p in r.problems]} for r in bad]})
         all_ok = all(r.passes for r in state.safety_by_title.values()) and len(state.safety_by_title) == len(drafts)
         return _j({"passes": True, "title": new["title"], "all_meals_pass": all_ok})
 

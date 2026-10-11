@@ -227,6 +227,53 @@ async def test_check_meal_safety_invalid_input_returns_error(ctx, client, sink, 
     assert out.startswith("error:")
 
 
+UNVERIFIED = {"ingredient": "za'atar", "reason": "couldn't verify ingredients (allergy household)", "members": []}
+
+
+@respx.mock
+async def test_unverifiable_ingredient_failure_tells_model_to_replace_via_revise_meal(
+    ctx, client, sink, state, settings, make_pricer
+):
+    bad = {"meals": [
+        {"title": "Rice bowl", "passes": False, "unknown": [], "problems": [UNVERIFIED]},
+        {"title": "Egg rice", "passes": True, "problems": [], "unknown": []},
+        {"title": "To buy", "passes": True, "problems": [], "unknown": []}]}
+    respx.post(f"{G}/agent/safety-check").mock(return_value=httpx.Response(200, json=bad))
+    t = tools_by_name(ctx, client, sink, state, settings, make_pricer())
+    out = json.loads(await t["check_meal_safety"]([MEAL_A, MEAL_B]))
+    assert out["all_pass"] is False
+    ins = out["instruction"]
+    assert "za'atar" in ins and "common grocery item" in ins and "drop them" in ins and "revise_meal" in ins
+    assert "not a redraft" in ins
+
+
+@respx.mock
+async def test_revise_meal_also_returns_unverifiable_instruction(ctx, client, sink, state, settings, make_pricer):
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=[
+        httpx.Response(200, json={"meals": [
+            {"title": "Rice bowl", "passes": True, "problems": [], "unknown": []},
+            {"title": "To buy", "passes": True, "problems": [], "unknown": []}]}),
+        httpx.Response(200, json={"meals": [
+            {"title": "Rice bowl", "passes": False, "unknown": [], "problems": [UNVERIFIED]},
+            {"title": "To buy", "passes": True, "problems": [], "unknown": []}]}),
+    ])
+    t = tools_by_name(ctx, client, sink, state, settings, make_pricer())
+    await t["check_meal_safety"]([MEAL_A])
+    out = json.loads(await t["revise_meal"]("Rice bowl", add=["za'atar"]))
+    assert out["passes"] is False and "za'atar" in out["instruction"] and "common grocery item" in out["instruction"]
+
+
+@respx.mock
+async def test_plain_failure_has_no_unverifiable_hint(ctx, client, sink, state, settings, make_pricer):
+    bad = {"meals": [{"title": "Rice bowl", "passes": False, "unknown": [], "problems": [
+        {"ingredient": "Peanut Butter", "reason": "contains peanuts", "members": ["Carson"]}]},
+        {"title": "To buy", "passes": True, "problems": [], "unknown": []}]}
+    respx.post(f"{G}/agent/safety-check").mock(return_value=httpx.Response(200, json=bad))
+    t = tools_by_name(ctx, client, sink, state, settings, make_pricer())
+    out = json.loads(await t["check_meal_safety"]([MEAL_A]))
+    assert "UNVERIFIABLE" not in out["instruction"]
+
+
 # ─── revise_meal ─────────────────────────────────────────────────────────────
 
 
