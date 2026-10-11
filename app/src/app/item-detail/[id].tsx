@@ -5,9 +5,11 @@ import { ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useCabinet, useUpdateCabinetItem } from "@/api/hooks/cabinet";
+import { useHouseholdAllergens, useProductLookup } from "@/api/hooks/products";
 import { pickAndUploadImage } from "@/api/hooks/uploads";
 import { ExpirationPill, StockChip } from "@/components/Badges";
 import { DateField } from "@/components/DateField";
+import { ProductFactsCard } from "@/components/ProductFactsCard";
 import { AppText, Button, Card, DashedEmpty, ErrorState, LoadingState, SectionLabel, ToggleChip, useToast } from "@/components/ui";
 import { useCabinetActions } from "@/components/useCabinetActions";
 import { LOCATION_LABEL, LOCATIONS } from "@/features/cabinet/CabinetView";
@@ -25,6 +27,8 @@ export default function ItemDetailScreen() {
   const router = useRouter();
   const { show: toast } = useToast();
   const [uploading, setUploading] = useState(false);
+  const lookup = useProductLookup();
+  const household = useHouseholdAllergens(groupId);
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 
   if (cabinet.isPending) return <LoadingState />;
@@ -100,6 +104,36 @@ export default function ItemDetailScreen() {
           onChange={(ymd) => update.mutate({ id: row.id, expiresAt: ymd }, { onSuccess: () => toast("Date saved"), onError })}
         />
       </Card>
+
+      <SectionLabel>Shelf life, price & allergens</SectionLabel>
+      {lookup.data ? (
+        <ProductFactsCard lookup={lookup.data} household={household} />
+      ) : (
+        <Card style={styles.gapSm}>
+          <AppText variant="caption" color="muted">
+            {lookup.isPending
+              ? "Checking USDA FoodKeeper, BLS prices and Open Food Facts… this can take up to a minute."
+              : "An AI agent looks this up in USDA, BLS and Open Food Facts data and cites every source. It also fills in an estimated expiration date."}
+          </AppText>
+          <Button
+            label="Look up details"
+            variant="secondary"
+            size="sm"
+            loading={lookup.isPending}
+            style={styles.start}
+            onPress={() =>
+              lookup.mutate(
+                {
+                  name: row.product ? [row.product.brand, row.product.name].filter(Boolean).join(" ").slice(0, 120) : row.item.name,
+                  groupId,
+                  cabinetItemId: row.id,
+                },
+                { onError },
+              )
+            }
+          />
+        </Card>
+      )}
 
       <SectionLabel>Details</SectionLabel>
       <Card style={styles.gapSm}>

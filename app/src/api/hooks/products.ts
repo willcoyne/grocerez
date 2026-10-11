@@ -1,11 +1,12 @@
 import type { Allergen } from "@contracts/dietary";
 import type { GroupDetail } from "@contracts/groups";
-import type { Product, ScanBody } from "@contracts/products";
-import { useMutation } from "@tanstack/react-query";
+import type { LookupBody, Product, ProductLookup, ScanBody } from "@contracts/products";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { useAuth } from "@/state/AuthContext";
 import { api } from "../client";
+import { keys } from "../keys";
 import { useGroupDetail } from "./groups";
 import { useDietary } from "./me";
 import { useShoppingList } from "./shoppingList";
@@ -15,6 +16,21 @@ export function useScanProduct() {
   return useMutation({
     mutationFn: (body: ScanBody) => api<Product>("/products/scan", { method: "POST", body }),
     retry: false,
+  });
+}
+
+/**
+ * POST /products/lookup: the Akamai agent's shelf life, price and allergens, each with cited sources (30–60 s when not
+ * cached). With groupId + cabinetItemId the server also fills that row's estimated expiration, so the cabinet is refetched.
+ */
+export function useProductLookup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LookupBody) => api<ProductLookup>("/products/lookup", { method: "POST", body }),
+    retry: false,
+    onSuccess: (_res, body) => {
+      if (body.groupId) void qc.invalidateQueries({ queryKey: keys.cabinet(body.groupId) });
+    },
   });
 }
 
