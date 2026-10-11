@@ -60,6 +60,16 @@ async def test_drafting_step_after_wants_and_closed_at_safety_check(sink, state)
 
 
 @respx.mock
+async def test_drafting_closed_by_whatever_tool_starts_next(sink, state):
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    rep = StepReporter(sink, state)
+    await rep.after(after("get_wants"))
+    await rep.before(before("propose_plan", {"meals": [{}, {}]}))
+    drafting = [e["payload"] for e in sent(route) if e["payload"]["id"] == "drafting"]
+    assert [d["status"] for d in drafting] == ["running", "done"]
+
+
+@respx.mock
 async def test_failed_tool_marks_step_failed(sink, state):
     route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
     rep = StepReporter(sink, state)

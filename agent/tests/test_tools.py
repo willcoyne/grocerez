@@ -50,7 +50,8 @@ async def test_get_household_path_auth_and_label(ctx, client, sink, state, setti
     t = tools_by_name(ctx, client, sink, state, settings)
     out = json.loads(await t["get_household"]())
     assert route.calls.last.request.headers["authorization"] == f"Bearer {TOKEN}"
-    assert out["members"][0] == {"name": "Carson", "allergens": ["peanuts"], "diets": []}
+    assert out["members"][0] == {"name": "Carson", "allergens": ["peanuts"]}
+    assert out["members"][1] == {"name": "Maya", "allergens": ["milk"], "diets": ["vegetarian"]}
     assert state.done_labels["get_household"] == "Checking allergies: Carson (peanuts), Maya (milk)"
     assert state.done_details["get_household"] == "2 people"
 
@@ -70,8 +71,8 @@ async def test_get_cabinet_sorted_with_days_and_label(ctx, client, sink, state, 
     t = tools_by_name(ctx, client, sink, state, settings)
     out = json.loads(await t["get_cabinet"]())
     assert route.calls.last.request.headers["authorization"] == f"Bearer {TOKEN}"
-    assert [r["name"] for r in out] == ["Old Milk", "Spinach", "Chicken Breast", "Salt", "Rice"]
-    assert [r["daysUntilExpiry"] for r in out] == [-2, 2, 3, 82, None]
+    assert out["expiring_days"] == ["Old Milk (expired)", "Spinach (2d)", "Chicken Breast (3d)"]
+    assert out["in_stock"] == ["Salt", "Rice"]
     label = state.done_labels["get_cabinet"]
     assert label.startswith("5 items · using up: old milk (expired), spinach (2 days), chicken breast (3 days)")
 
@@ -82,7 +83,8 @@ async def test_get_cabinet_caps_at_40(ctx, client, sink, state, settings):
     respx.get(f"{G}/agent/household").mock(return_value=httpx.Response(200, json=household()))
     respx.get(f"{G}/cabinet").mock(return_value=httpx.Response(200, json=rows))
     t = tools_by_name(ctx, client, sink, state, settings)
-    assert len(json.loads(await t["get_cabinet"]())) == 40
+    out = json.loads(await t["get_cabinet"]())
+    assert len(out["in_stock"]) + len(out["expiring_days"]) == 40
 
 
 def test_days_until_uses_household_today_not_utc():
@@ -111,7 +113,7 @@ async def test_get_wants_uses_userid_all(ctx, client, sink, state, settings):
     t = tools_by_name(ctx, client, sink, state, settings)
     out = json.loads(await t["get_wants"]())
     assert route.calls.last.request.url.params["userId"] == "all"
-    assert out == [{"name": "Milk", "wantedBy": ["Maya", "Sam"]}]
+    assert out == ["Milk (Maya, Sam)"]
 
 
 @respx.mock
@@ -168,8 +170,7 @@ async def test_estimate_prices_skips_without_zip(client, sink, state, settings):
 
 
 async def test_estimate_prices_validates_caches_and_labels(ctx, client, sink, state, settings, cache):
-    agent = FakePriceAgent(['```json\n{"items":[{"name":"Lemons","lowCents":300,"highCents":450},'
-                            '{"name":"Salsa","lowCents":250,"highCents":400}]}\n```'])
+    agent = FakePriceAgent(['```json\n{"prices":[[300,450],[250,400]]}\n```'])
     t = tools_by_name(ctx, client, sink, state, settings, price_agent_factory=lambda: agent, price_cache=cache)
     out = json.loads(await t["estimate_prices"](["Lemons", "Salsa"]))
     assert out["totalLowCents"] == 550 and out["totalHighCents"] == 850 and out["estimate"] is True
@@ -181,7 +182,7 @@ async def test_estimate_prices_validates_caches_and_labels(ctx, client, sink, st
 
 
 async def test_estimate_prices_retries_once_then_unavailable(ctx, client, sink, state, settings, cache):
-    agent = FakePriceAgent(["not json", '{"items":[{"name":"x"}]}'])
+    agent = FakePriceAgent(["not json", '{"prices":[[1,2],[3,4]]}'])  # second reply has the wrong count
     t = tools_by_name(ctx, client, sink, state, settings, price_agent_factory=lambda: agent, price_cache=cache)
     out = json.loads(await t["estimate_prices"](["Lemons"]))
     assert out["estimate"] is None

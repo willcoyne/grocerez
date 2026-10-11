@@ -97,5 +97,6 @@ async def run(
             await client.aclose()
         except Exception:
             log.exception("closing client failed")
-        log.info("run %s finished: toolCalls=%d ms=%d terminal=%s", ctx.run_id, state.tool_calls, state.ms(),
+        log.info("run %s finished: toolCalls=%d ms=%d toolSeconds=%.1f modelSeconds~%.1f terminal=%s", ctx.run_id,
+                 state.tool_calls, state.ms(), state.tool_s, max(0.0, state.ms() / 1000 - state.tool_s),
                  sink.terminal_sent)

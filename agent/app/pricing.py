@@ -17,7 +17,7 @@ from strands import Agent, tool
 
 from .config import Settings
 from .models import build_model
-from .schemas import PriceResult, RunContext, RunState
+from .schemas import PricePairs, RunContext, RunState
 
 log = logging.getLogger("agent.pricing")
 
@@ -94,7 +94,7 @@ def build_price_tool(
     cache = cache if cache is not None else DEFAULT_CACHE
     make_agent = agent_factory or default_agent_factory(settings)
 
-    async def _ask(items: list[str], zip_code: str) -> PriceResult | None:
+    async def _ask(items: list[str], zip_code: str) -> list[tuple[int, int]] | None:
         prompt = json.dumps({"zip": zip_code, "items": items})
         for attempt in range(2):  # retry once on invalid output
             try:
@@ -106,7 +106,10 @@ def build_price_tool(
                     state.extra_tokens_out += int(usage.get("outputTokens", 0))
                 except Exception:  # metrics are best-effort
                     pass
-                return PriceResult.model_validate(extract_json(str(result)))
+                pairs = PricePairs.model_validate(extract_json(str(result))).prices
+                if len(pairs) != len(items):
+                    raise ValueError("price count does not match item count")
+                return [(min(p), max(p)) for p in pairs]
             except (ValueError, ValidationError) as e:
                 log.warning("price agent invalid output (attempt %d): %s", attempt + 1, type(e).__name__)
             except Exception:
@@ -116,7 +119,7 @@ def build_price_tool(
     @tool
     async def estimate_prices(items: list[str]) -> str:
         """Estimate grocery prices (AI estimate) for generic item names, for the household's ZIP.
-        Returns per-item low/high cents and totals. Call once with ALL missing items."""
+        Returns the total low/high cents. Call once with ALL missing items."""
         zip_code = (ctx.zip_code or (state.household or {}).get("zipCode") or "").strip()
         names = [n.strip() for n in items if isinstance(n, str) and n.strip()][:MAX_ITEMS]
         if not zip_code:
@@ -140,17 +143,15 @@ def build_price_tool(
                 state.failed_tools.add("estimate_prices")
                 state.done_labels["estimate_prices"] = "Price estimate unavailable"
                 return json.dumps({"estimate": None, "reason": "estimate unavailable; propose without prices"})
-            for it in res.items if res else []:
-                lo, hi = sorted((it.lowCents, it.highCents))
-                found[normalize(it.name)] = (lo, hi)
-                cache.set(it.name, zip_code, (lo, hi))
+            for name, pair in zip(todo, res or []):
+                found[normalize(name)] = pair
+                cache.set(name, zip_code, pair)
         state.priced.update(found)
         low = sum(v[0] for v in found.values())
         high = sum(v[1] for v in found.values())
         state.done_labels["estimate_prices"] = f"{_dollars(low)}–{_dollars(high)} (AI estimate)"
         return json.dumps(
             {
-                "items": [{"name": k, "lowCents": v[0], "highCents": v[1]} for k, v in found.items()],
                 "totalLowCents": low,
                 "totalHighCents": high,
                 "estimate": True,
