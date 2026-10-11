@@ -204,6 +204,7 @@ export const agentService = {
       title: m.title,
       ingredients: [...new Set([...m.ingredients, ...m.missing, ...m.uses])],
       steps: m.steps,
+      ingredientLines: m.ingredientLines,
     }));
     if (plan.missingItems.length) toCheck.push({ title: "To buy", ingredients: plan.missingItems.map((i) => i.name) });
     const failing = (await safety.check(groupId, toCheck)).meals.filter((m) => !m.passes);

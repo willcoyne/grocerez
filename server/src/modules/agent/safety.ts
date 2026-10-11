@@ -25,7 +25,7 @@ type CatalogFacts = { name: string; defaultAllergens: Allergen[]; category: stri
 type Analysis = { text: string; category: string | null; unknown: boolean };
 
 /** Meal as checked: title + ingredients (+ steps when apply checks a stored plan). */
-export type SafetyMeal = { title: string; ingredients: string[]; steps?: string[] };
+export type SafetyMeal = { title: string; ingredients: string[]; steps?: string[]; ingredientLines?: string[] };
 
 const withCatalog = (text: string, allergens: Allergen[]) => [text, ...allergens.map((a) => ALLERGEN_WORD[a])].join("; ");
 
@@ -112,7 +112,11 @@ async function check(groupId: string, meals: SafetyMeal[]): Promise<SafetyCheckR
       }
       collect(problems, members, ingredient, a.text, a.category);
     }
-    for (const text of [meal.title, ...(meal.steps ?? [])]) collect(problems, members, text, text, null);
+    // Keyword scan only (belt and braces, §11): the title, every step, and the cited recipe's ingredient lines.
+    // These never produce `unknown` and are never subject to the allergy-household unverifiable rule.
+    for (const text of [meal.title, ...(meal.steps ?? []), ...(meal.ingredientLines ?? [])]) {
+      collect(problems, members, text, text, null);
+    }
     out.push({ title: meal.title, passes: problems.size === 0, problems: [...problems.values()], unknown });
   }
   return { meals: out };
