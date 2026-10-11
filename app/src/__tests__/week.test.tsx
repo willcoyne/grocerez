@@ -38,6 +38,7 @@ function planned(id: string, date: string, meal: PlanMeal): PlannedMeal {
     slot: "dinner",
     meal: { ...meal, date },
     agentRunId: null,
+    warnings: [],
     createdBy: testUser.id,
     createdAt: "",
     updatedAt: "",
@@ -45,7 +46,13 @@ function planned(id: string, date: string, meal: PlanMeal): PlannedMeal {
 }
 const MON = planned("aaaaaaaa-0000-4000-8000-000000000001", "2026-10-12", meals()[0]);
 const WED = planned("aaaaaaaa-0000-4000-8000-000000000003", "2026-10-14", meals()[2]);
-const week = (list: PlannedMeal[]): MealPlanResponse => ({ from: "2026-10-12", to: "2026-10-18", today: "2026-10-12", meals: list });
+const week = (list: PlannedMeal[], expiring: MealPlanResponse["expiring"] = []): MealPlanResponse => ({
+  from: "2026-10-12",
+  to: "2026-10-18",
+  today: "2026-10-12",
+  meals: list,
+  expiring,
+});
 
 async function settle(qc: QueryClient) {
   await waitFor(() => expect(qc.isFetching() + qc.isMutating()).toBe(0));
@@ -289,5 +296,93 @@ describe("Agent run on the Week sheet", () => {
     await fireEvent.press(await screen.findByText("Plan our week"));
     expect(await screen.findByText("The meal planner isn't set up on this server.")).toBeTruthy();
     expect(screen.queryByText("Try again")).toBeNull();
+  });
+});
+
+describe("Expiration-aware Week (spec §14)", () => {
+  const item = (n: string, daysLeft: number, plannedOn: string | null, plannedMealId: string | null, i: number) => ({
+    cabinetItemId: `cccccccc-0000-4000-8000-00000000000${i}`,
+    name: n,
+    expiresAt: "2026-10-14",
+    daysLeft,
+    plannedOn,
+    plannedMealId,
+  });
+  const expiring = [item("Spinach", 2, MON.date, MON.id, 1), item("Milk", 1, null, null, 2), item("Yogurt", -1, null, null, 3)];
+
+  it("Use soon lists planned, unplanned and expired rows; hidden when nothing expires", async () => {
+    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/meal-plan`]: () => week([MON], expiring) }));
+    const { queryClient } = await render();
+    expect(await screen.findByText("USE SOON")).toBeTruthy();
+    expect(screen.getByLabelText("Spinach, 2 days, planned Monday, October 12")).toBeTruthy();
+    expect(screen.getByText("Spinach · 2 days")).toBeTruthy();
+    expect(screen.getByText("Mon")).toBeTruthy();
+    expect(screen.getByText("Milk · tomorrow")).toBeTruthy();
+    expect(screen.getByText("not planned")).toBeTruthy();
+    expect(screen.getByLabelText("Yogurt, expired")).toBeTruthy();
+    expect(screen.getByText("expired")).toBeTruthy();
+    await settle(queryClient);
+  });
+
+  it("hides Use soon when nothing is expiring", async () => {
+    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/meal-plan`]: () => week([MON]) }));
+    const { queryClient } = await render();
+    await screen.findByText("Oct 12–18");
+    expect(screen.queryByText("USE SOON")).toBeNull();
+    await settle(queryClient);
+  });
+
+  it("'Plan a dinner with these' starts a run for the earliest free date", async () => {
+    apiMock.mockImplementation(
+      apiRoutes({
+        [`GET /groups/${g}/meal-plan`]: () => week([MON], expiring),
+        [`POST /groups/${g}/agent/runs`]: () => new Promise(() => {}),
+      }),
+    );
+    await render();
+    await fireEvent.press(await screen.findByTestId("week-use-soon-plan"));
+    const start = apiMock.mock.calls.find(([p, o]) => p === `/groups/${g}/agent/runs` && o?.method === "POST");
+    expect(start?.[1].body).toMatchObject({ dates: ["2026-10-13"] });
+  });
+
+  it("no action when everything usable is planned", async () => {
+    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/meal-plan`]: () => week([MON], [expiring[0], expiring[2]]) }));
+    await render();
+    await screen.findByText("USE SOON");
+    expect(screen.queryByTestId("week-use-soon-plan")).toBeNull();
+  });
+
+  const LATE = { ...WED, warnings: [{ kind: "expires_before" as const, item: "Spinach", expiresAt: "2026-10-11" }] };
+
+  it("warning line on the row and chip on the card", async () => {
+    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/meal-plan`]: () => week([MON, LATE]) }));
+    await render();
+    expect(await screen.findByLabelText("Warning: Spinach expires Sun")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("week-open-2026-10-14"));
+    expect(screen.getByTestId("week-card-warning")).toBeTruthy();
+  });
+
+  it("Move day past a used item's expiry confirms first; declining does not move", async () => {
+    const mockConfirm = confirm as jest.Mock;
+    mockConfirm.mockClear();
+    apiMock.mockImplementation(
+      apiRoutes({
+        [`GET /groups/${g}/meal-plan`]: () => week([MON], [item("Spinach", 2, MON.date, MON.id, 1)]),
+        [`PATCH /groups/${g}/meal-plan/${MON.id}`]: () => ({ ...MON, date: "2026-10-16" }),
+      }),
+    );
+    const { queryClient } = await render();
+    await fireEvent.press(await screen.findByTestId("week-open-2026-10-12"));
+    await fireEvent.press(screen.getByTestId("week-card-move"));
+    mockConfirm.mockResolvedValueOnce(false);
+    await fireEvent.press(screen.getByLabelText("Friday, October 16"));
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledWith("Spinach expires Wed 14. Move anyway?", expect.any(String), "Move anyway"));
+    expect(apiMock.mock.calls.some(([, o]) => o?.method === "PATCH")).toBe(false);
+    // Moving before the deadline needs no confirm.
+    mockConfirm.mockClear();
+    await fireEvent.press(screen.getByLabelText("Tuesday, October 13"));
+    await waitFor(() => expect(apiMock.mock.calls.some(([, o]) => o?.method === "PATCH")).toBe(true));
+    expect(mockConfirm).not.toHaveBeenCalled();
+    await settle(queryClient);
   });
 });
