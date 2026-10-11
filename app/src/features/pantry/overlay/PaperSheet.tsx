@@ -49,9 +49,14 @@ export type PaperSheetProps = {
    * or screen readers could never reach the card (a modal view hides its siblings).
    */
   overlayIsModal?: boolean;
+  /**
+   * A plain page instead of a sheet over the 3D room (the simple interface, state/uiPrefs.tsx): fills its screen,
+   * no backdrop, no landing animation, no pin, and no ✕ (the tab bar navigates away).
+   */
+  page?: boolean;
 };
 
-export function PaperSheet({ testID, title, closeLabel, onClose, subheader, children, footer, overlay, overlayIsModal }: PaperSheetProps) {
+export function PaperSheet({ testID, title, closeLabel, onClose, subheader, children, footer, overlay, overlayIsModal, page }: PaperSheetProps) {
   const P = useOverlayPalette();
   const styles = useOverlayStyles(makeStyles);
   const paper = useOverlayStyles(makePaperStyles);
@@ -59,8 +64,31 @@ export function PaperSheet({ testID, title, closeLabel, onClose, subheader, chil
   // Paper "lands" from the lifted 3D note: fade + settle.
   const [appear] = useState(() => new Animated.Value(0));
   useEffect(() => {
+    if (page) return;
     Animated.spring(appear, { toValue: 1, useNativeDriver: Platform.OS !== "web", friction: 8, tension: 70 }).start();
-  }, [appear]);
+  }, [appear, page]);
+
+  if (page) {
+    return (
+      <View style={styles.pageWrap} testID={testID}>
+        <View style={[styles.sheet, styles.page]}>
+          <View style={styles.margin} pointerEvents="none" />
+          <View style={styles.header}>
+            <View style={styles.titleWrap}>
+              <AppText weight="display" style={styles.title} accessibilityRole="header">
+                {title}
+              </AppText>
+              <View style={styles.squiggle} />
+            </View>
+          </View>
+          {subheader}
+          {children}
+          {footer}
+        </View>
+        {overlay}
+      </View>
+    );
+  }
 
   return (
     <View style={StyleSheet.absoluteFill} testID={testID}>
@@ -279,6 +307,8 @@ const makeStyles = (P: OverlayPalette) =>
     marginTop: 2,
     transform: [{ rotate: "-2deg" }],
   },
+  pageWrap: { flex: 1 },
+  page: { position: "relative", flex: 1, left: 0, right: 0, marginHorizontal: 12, marginTop: 8, marginBottom: 8, paddingTop: 16 },
   close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   pin: {
     position: "absolute",

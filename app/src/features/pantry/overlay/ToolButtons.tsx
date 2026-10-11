@@ -28,7 +28,7 @@ export function ToolButtons({
   return (
     <View style={[styles.column, { right: inset.right, top: inset.top }]} pointerEvents="box-none">
       {onListView ? (
-        <RoundButton testID="pantry-listview-button" label="List view" hint="Show the pantry as a list" onPress={onListView} size={SIZE}>
+        <RoundButton testID="pantry-listview-button" label="Simple view" hint="Switch to plain screens without 3D or animation" onPress={onListView} size={SIZE}>
           <LayoutList size={22} color={P.oakDark} strokeWidth={2.5} />
         </RoundButton>
       ) : null}

@@ -1,6 +1,6 @@
 import type { Db } from "../../db.js";
 import type { User as UserRow } from "../../../generated/prisma/client.js";
-import type { User } from "../../contracts/auth.js";
+import { ThemeId, UiMode, type User } from "../../contracts/auth.js";
 import { images } from "../../lib/images.js";
 
 /** avatarUrl = presigned S3 avatar if uploaded (11), else the Google picture. */
@@ -11,6 +11,8 @@ export async function toUser(u: UserRow): Promise<User> {
     displayName: u.displayName,
     avatarUrl: (await images.urlFor(u.avatarS3Key)) ?? u.avatarUrl,
     zipCode: u.zipCode,
+    uiMode: UiMode.catch("room").parse(u.uiMode),
+    theme: ThemeId.catch("cozy").parse(u.theme),
     createdAt: u.createdAt.toISOString(),
   };
 }
@@ -26,7 +28,11 @@ export const usersRepo = {
       update: { email: g.email, avatarUrl: g.picture },
     }),
 
-  update: (db: Db, id: string, data: { displayName?: string; zipCode?: string | null; avatarS3Key?: string | null }) =>
+  update: (
+    db: Db,
+    id: string,
+    data: { displayName?: string; zipCode?: string | null; avatarS3Key?: string | null; uiMode?: UiMode; theme?: ThemeId },
+  ) =>
     db.user.update({ where: { id }, data }),
 
   groupIds: async (db: Db, userId: string) =>

@@ -89,6 +89,19 @@ describe("02 auth", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("PATCH /me saves the interface mode and theme per user (defaults: room, cozy); unknown values are 400", async () => {
+    const u = await makeUser();
+    expect((await api().get("/api/me").set(u.auth)).body).toMatchObject({ uiMode: "room", theme: "cozy" });
+    const res = await api().patch("/api/me").set(u.auth).send({ uiMode: "simple", theme: "neon" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ uiMode: "simple", theme: "neon" });
+    expect((await api().get("/api/me").set(u.auth)).body).toMatchObject({ uiMode: "simple", theme: "neon" });
+    const other = await makeUser();
+    expect((await api().get("/api/me").set(other.auth)).body).toMatchObject({ uiMode: "room", theme: "cozy" });
+    expect((await api().patch("/api/me").set(u.auth).send({ uiMode: "flat" })).status).toBe(400);
+    expect((await api().patch("/api/me").set(u.auth).send({ theme: "vaporwave" })).status).toBe(400);
+  });
+
   it("DELETE /me deletes the user, hands ownership over, and the old token stops working", async () => {
     const owner = await makeUser();
     const member = await makeUser();

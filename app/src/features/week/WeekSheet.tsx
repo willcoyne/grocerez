@@ -33,17 +33,23 @@ import { WeekRecipeCard } from "./WeekRecipeCard";
 import { UseSoonSection } from "./UseSoonSection";
 import { byDate, datesToPlan, dayLabels, rangeLabel, warningText, weekDates } from "./weekDates";
 
-export type WeekSheetProps = { visible: boolean; groupId: string; onClose: () => void };
+export type WeekSheetProps = {
+  visible: boolean;
+  groupId: string;
+  onClose: () => void;
+  /** Render as a plain page (the simple interface's Week tab) instead of a sheet over the 3D room. */
+  page?: boolean;
+};
 
-export function WeekSheet({ visible, groupId, onClose }: WeekSheetProps) {
+export function WeekSheet({ visible, groupId, onClose, page }: WeekSheetProps) {
   const P = useOverlayPalette();
   const styles = useOverlayStyles(makeStyles);
   const paper = useOverlayStyles(makePaperStyles);
   if (!visible) return null;
-  return <Sheet groupId={groupId} onClose={onClose} />;
+  return <Sheet groupId={groupId} onClose={onClose} page={page} />;
 }
 
-function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
+function Sheet({ groupId, onClose, page }: Omit<WeekSheetProps, "visible">) {
   const P = useOverlayPalette();
   const styles = useOverlayStyles(makeStyles);
   const paper = useOverlayStyles(makePaperStyles);
@@ -152,6 +158,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
       title="Week"
       closeLabel="Close week plan"
       onClose={onClose}
+      page={page}
       subheader={
         plan.data ? (
           <>

@@ -1,6 +1,9 @@
 import { Redirect } from "expo-router";
 
-/** Retired tab (one-room nav, pantry SPEC round 3): deep links land in the room at the pinned shopping list. Hidden from the tab bar. */
-export default function ListRedirect() {
-  return <Redirect href="/cabinet?station=list" />;
+import ListScreen from "@/features/simple/ListScreen";
+import { useUiMode } from "@/state/uiPrefs";
+
+/** Simple interface: the list tab. 3D room interface: lands in the room at that station (deep links keep working). */
+export default function Tab() {
+  return useUiMode() === "simple" ? <ListScreen /> : <Redirect href="/cabinet?station=list" />;
 }
