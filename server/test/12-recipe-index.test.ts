@@ -44,8 +44,10 @@ const unconfigure = () => {
   config.AKAMAI_BASE_URL = undefined;
 };
 
-const recipe = (slug: string, title: string, ingredientLines: string[], ingredients: string[]): IndexedRecipe => ({
-  url: `${HOST}${slug}`, site: "Recipes Test", title, imageUrl: null, minutes: 30, servings: 4, ingredientLines, ingredients,
+const recipe = (
+  slug: string, title: string, ingredientLines: string[], ingredients: string[], course: string[] = [], site = "Recipes Test",
+): IndexedRecipe => ({
+  url: `${HOST}${slug}`, site, title, imageUrl: null, minutes: 30, servings: 4, ingredientLines, ingredients, course,
 });
 const CORPUS = [
   recipe("lemon-chicken", "Lemon Chicken", ["2 chicken breasts", "1 lemon", "2 cups spinach"], ["Chicken Breast", "Lemons", "Spinach"]),
@@ -236,6 +238,73 @@ describe("12 recipe index: search", () => {
     expect(best.score).toBeCloseTo(0.32 - 0.1, 6);
     expect(worst).toMatchObject({ missing: 5 });
     expect(worst.score).toBeCloseTo(0.3 - 0.1 / 6 + 0.01, 6);
+  });
+
+  it("main courses only: course decides (main kept even with 'side dish'); side excluded; empty/unknown → title filter", async () => {
+    const lines = ["1 lb chicken"];
+    await ingest({
+      recipes: [
+        recipe("c-main", "Chicken Bake Main", lines, ["Chicken Breast"], ["  Main Course "]),
+        recipe("c-side", "Chicken Bites Side", lines, ["Chicken Breast"], ["Side Dish"]),
+        recipe("c-both", "Chicken Combo", lines, ["Chicken Breast"], ["main course", "side dish"]),
+        recipe("c-empty-sauce", "Chicken Gravy", lines, ["Chicken Breast"]),
+        recipe("c-unknown", "Chicken Platter", lines, ["Chicken Breast"], ["American"]),
+        recipe("c-main-sauce", "Chicken Pan Sauce", lines, ["Chicken Breast"], ["Main Dish"]),
+        recipe("c-dessert", "Chicken Surprise", lines, ["Chicken Breast"], ["Dessert"]),
+      ],
+    }).expect(200);
+    const [stored] = await prisma.$queryRaw<{ course: string[] }[]>`SELECT course FROM recipes WHERE url = ${HOST + "c-main"}`;
+    expect(stored.course).toEqual(["main course"]); // trimmed, lower-cased
+
+    const { owner, g } = await household();
+    const res = await search(owner, g.id, { query: "chicken", limit: 10 });
+    const titles: string[] = res.body.recipes.map((r: { title: string }) => r.title);
+    expect(titles).toEqual(expect.arrayContaining(["Chicken Bake Main", "Chicken Combo", "Chicken Platter", "Chicken Pan Sauce"]));
+    for (const t of ["Chicken Bites Side", "Chicken Gravy", "Chicken Surprise"]) expect(titles).not.toContain(t);
+    expect(res.body.recipes.find((r: { title: string }) => r.title === "Chicken Combo").course).toEqual(["main course", "side dish"]);
+  });
+
+  it("a query's dish word in a title is a boost: 'chicken soup' prefers the soup among equally close recipes", async () => {
+    await ingest({
+      recipes: [
+        recipe("dish-plate", "Chicken Rice Plate", ["1 lb chicken"], ["Chicken Breast"], ["main course"]),
+        recipe("dish-soup", "Chicken Soup Night", ["1 lb chicken"], ["Chicken Breast"], ["main course"]),
+      ],
+    }).expect(200);
+    const { owner, g } = await household();
+    const titles: string[] = (await search(owner, g.id, { query: "chicken soup", limit: 10 })).body.recipes.map((r: { title: string }) => r.title);
+    expect(titles.indexOf("Chicken Soup Night")).toBeLessThan(titles.indexOf("Chicken Rice Plate"));
+    const [first] = rankByKitchenFit(
+      [{ distance: 0.3, ingredients: ["X"], title: "Chicken Plate" }, { distance: 0.33, ingredients: ["X"], title: "Chicken Soups" }],
+      [], [], "Chicken soup",
+    );
+    expect(first.r.title).toBe("Chicken Soups"); // 0.33 − 0.05 < 0.30
+  });
+
+  it("browse: safe main courses that use the mustUse items, ≤ 2 per site, no near-duplicates, distance 0, no embedding needed", async () => {
+    await ingest({
+      recipes: [
+        recipe("b-skillet", "Kale Chicken Skillet", ["kale", "okra"], ["Kale", "Okra", "Chicken Thighs"], ["main course"], "Site A"),
+        recipe("b-stew", "Kale Chicken Stew", ["kale", "okra"], ["Kale", "Okra", "Chicken Thighs"], ["main course"], "Site A"),
+        recipe("b-tacos", "Kale Okra Tacos", ["kale", "okra"], ["Kale", "Okra", "Tortillas"], ["main course"], "Site A"),
+        recipe("b-dup", "Chicken Skillet with Okra", ["okra"], ["Okra", "Chicken Thighs"], ["dinner"], "Site B"),
+        recipe("b-milk", "Kale Ricotta Bake", ["1 cup ricotta"], ["Kale", "Ricotta"], ["main course"], "Site C"),
+        recipe("b-side", "Kale Crisps", ["kale"], ["Kale"], ["side dish"], "Site D"),
+        recipe("b-plain", "Okra Bites", ["okra"], ["Okra"], [], "Site E"),
+        recipe("b-none", "Beef Bourguignon", ["beef"], ["Beef", "Carrots"], ["main course"], "Site F"),
+      ],
+    }).expect(200);
+    unconfigure(); // browse ranks without embeddings
+    const { owner, g } = await household({ allergens: ["milk"] });
+    const res = await search(owner, g.id, { query: "(ignored)", browse: true, mustUse: ["Kale", "Okra"], limit: 8 });
+    expect(res.status).toBe(200);
+    expect(res.body.available).toBe(true);
+    const got = res.body.recipes as { title: string; site: string; distance: number; uses: string[] }[];
+    // Site A's 3rd recipe is over the per-site cap; "Chicken Skillet with Okra" duplicates "Kale Chicken Skillet"
+    // (chicken + skillet); the ricotta bake hits the milk allergy; the side dish and the no-kale/okra stew drop out.
+    expect(got.map((r) => r.title)).toEqual(["Kale Chicken Skillet", "Kale Chicken Stew", "Okra Bites"]);
+    expect(got.every((r) => r.distance === 0)).toBe(true);
+    expect(got[0].uses).toEqual(["Kale", "Okra"]);
   });
 
   it("the agent's run token can call it; outsiders get 404", async () => {

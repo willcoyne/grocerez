@@ -8,51 +8,30 @@ import { EMBED_BATCH_MAX, embed, embeddingModel, embeddingsConfigured } from "..
 import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { agentRepo } from "./repo.js";
-import { recipeRepo, type EmbedTodo } from "./recipeRepo.js";
+import { BROWSE_MIN_COVERAGE, rankByKitchenFit, rankForBrowse, termsRegex, type Ranked } from "./recipeRanking.js";
+import { recipeRepo, type DinnerFilter, type EmbedTodo, type RecipeRow } from "./recipeRepo.js";
 import { catalogMatch } from "./safety.js";
 
-/**
- * Kitchen-fit ranking (cosine distance units; lower score = better):
- *   score = distance − 0.03·(mustUse items used) − 0.10·(cabinet coverage) + 0.01·max(0, missing − 4)
- * coverage = share of a recipe's ingredients the household already has; missing = how many it doesn't.
- */
-export const MUST_USE_BOOST = 0.03;
-export const COVERAGE_BOOST = 0.1;
-export const MISSING_PENALTY = 0.01;
-const MISSING_FREE = 4;
+const dinnerFilter = (): DinnerFilter => ({
+  mainCourse: config.RECIPE_MAIN_COURSE,
+  excludedCourse: config.RECIPE_EXCLUDED_COURSE,
+  nonDinnerTitle: config.RECIPE_NON_DINNER_TITLE,
+});
+
+/** recipeCategory as stored: trimmed, lower-cased, de-duplicated. */
+const cleanCourse = (course: string[]) => [...new Set(course.map((c) => c.trim().toLowerCase()).filter(Boolean))];
+
+const toResult = ({ r, uses }: Ranked<RecipeRow>) => ({
+  id: r.id, url: r.url, site: r.site, title: r.title, imageUrl: r.imageUrl, minutes: r.minutes, servings: r.servings,
+  ingredientLines: r.ingredientLines, ingredients: r.ingredients, course: r.course, distance: r.distance, uses,
+});
+
+export { rankByKitchenFit, rankForBrowse } from "./recipeRanking.js";
+
 /** SQL candidate pool = limit × this, so the re-ranking has room. */
 const CANDIDATE_POOL = 6;
-/** Always in a kitchen: neither "covered" nor "missing". */
-const STAPLES = new Set(["salt", "pepper", "black pepper", "kosher salt", "sea salt", "water", "ice", "cooking spray"]);
-
-type Ranked<R> = { r: R; uses: string[]; coverage: number; missing: number; score: number };
-
-/**
- * Re-ranks search candidates by how well they fit this kitchen. Names match whole-word in either direction
- * (normalized, as listWriter/safety do): "Boneless Chicken Breast" ⊇ "chicken breast", "Chicken" ⊆ "chicken breast".
- */
-export function rankByKitchenFit<R extends { distance: number; ingredients: string[] }>(
-  rows: R[],
-  mustUse: string[],
-  cabinet: string[],
-): Ranked<R>[] {
-  const pad = (s: string) => ` ${normalize(s)} `;
-  const cab = [...new Set(cabinet.map(pad))].filter((c) => c.trim());
-  const wants = mustUse.map((name) => ({ name, key: pad(name) })).filter((u) => u.key.trim());
-  const matches = (a: string, b: string) => a.includes(b) || b.includes(a);
-  return rows
-    .map((r) => {
-      const names = [...new Set(r.ingredients.map(pad))].filter((n) => n.trim() && !STAPLES.has(n.trim()));
-      const have = names.filter((n) => cab.some((c) => matches(n, c))).length;
-      const coverage = names.length ? have / names.length : 0;
-      const missing = names.length - have;
-      const uses = wants.filter((u) => names.some((n) => n.includes(u.key))).map((u) => u.name);
-      const score =
-        r.distance - MUST_USE_BOOST * uses.length - COVERAGE_BOOST * coverage + MISSING_PENALTY * Math.max(0, missing - MISSING_FREE);
-      return { r, uses, coverage, missing, score };
-    })
-    .sort((a, b) => a.score - b.score);
-}
+/** Browse: rows ranked in TS at most (the SQL prefilter orders by its approximation first). */
+const BROWSE_CAP = 300;
 /** Catalog lookups in flight at once during ingest (each is one search_items query). */
 const LOOKUP_CONCURRENCY = 8;
 
@@ -76,6 +55,15 @@ async function mapLimit<T, R>(xs: T[], limit: number, fn: (x: T) => Promise<R>):
   };
   await Promise.all(Array.from({ length: Math.min(limit, xs.length) }, worker));
   return out;
+}
+
+/** Drops recipes whose title/lines/ingredients conflict with any member's diet (conflicts() per member, as in safety.ts). */
+function dietSafe<R extends RecipeRow>(rows: R[], members: { diets: Parameters<typeof conflicts>[1] }[]): R[] {
+  const dieters = members.filter((m) => m.diets.length > 0);
+  return rows.filter((r) => {
+    const text = [r.title, ...r.ingredientLines, ...r.ingredients].join("\n");
+    return dieters.every((m) => conflicts(text, m.diets, []).length === 0);
+  });
 }
 
 /** Embeds rows in batches of ≤ EMBED_BATCH_MAX and stores each batch in one UPDATE; counts stored rows in `progress`. */
@@ -110,7 +98,7 @@ export const recipeIndex = {
         ...[r.title, ...r.ingredientLines, ...r.ingredients].flatMap((t) => allergensInText(t)),
         ...r.ingredients.flatMap((i) => catalog.get(normalize(i)) ?? []),
       ]);
-      const row = await recipeRepo.upsert(r, [...found].sort(), model);
+      const row = await recipeRepo.upsert(r, cleanCourse(r.course), [...found].sort(), model);
       if (row.needsEmbedding) todo.push(row);
     }
 
@@ -142,6 +130,7 @@ export const recipeIndex = {
    * available=false (→ the agent falls back to Tavily) when Akamai isn't configured/reachable or nothing is embedded.
    */
   async search(groupId: string, body: RecipeSearchBody): Promise<RecipeSearchResponse> {
+    if (body.browse) return this.browse(groupId, body);
     const unavailable: RecipeSearchResponse = { recipes: [], available: false };
     if (!embeddingsConfigured()) return unavailable;
     const model = embeddingModel();
@@ -159,24 +148,30 @@ export const recipeIndex = {
 
     const excluded = [...new Set(members.flatMap((m) => m.allergens))];
     const [rows, cabinet] = await Promise.all([
-      recipeRepo.nearest(vector, model, excluded, body.limit * CANDIDATE_POOL, config.RECIPE_NON_DINNER_TITLE),
+      recipeRepo.nearest(vector, model, excluded, body.limit * CANDIDATE_POOL, dinnerFilter()),
       recipeRepo.cabinetNames(groupId),
     ]);
     if (rows.length === 0) return { recipes: [], available: await recipeRepo.hasEmbedded(model) };
 
-    const dieters = members.filter((m) => m.diets.length > 0);
-    const safe = rows.filter((r) => {
-      const text = [r.title, ...r.ingredientLines, ...r.ingredients].join("\n");
-      return dieters.every((m) => conflicts(text, m.diets, []).length === 0);
-    });
-    const ranked = rankByKitchenFit(safe, body.mustUse, cabinet).slice(0, body.limit);
+    const ranked = rankByKitchenFit(dietSafe(rows, members), body.mustUse, cabinet, body.query).slice(0, body.limit);
+    return { available: true, recipes: ranked.map(toResult) };
+  },
 
-    return {
-      available: true,
-      recipes: ranked.map(({ r, uses }) => ({
-        id: r.id, url: r.url, site: r.site, title: r.title, imageUrl: r.imageUrl, minutes: r.minutes, servings: r.servings,
-        ingredientLines: r.ingredientLines, ingredients: r.ingredients, distance: r.distance, uses,
-      })),
-    };
+  /**
+   * Browse mode (spec §12.1): "what can we make" without a query embedding. ONE SQL query prefilters safe main courses
+   * that mention a mustUse item or roughly cover ≥ 40% from the cabinet (≤ 300 rows), then TS scores them by kitchen
+   * fit + mustUse and diversifies (≤ 2 per site, no near-duplicates). distance = 0. `query` is only logged.
+   * available=false only when the index is empty (no embeddings needed).
+   */
+  async browse(groupId: string, body: RecipeSearchBody): Promise<RecipeSearchResponse> {
+    const [members, cabinet] = await Promise.all([agentRepo.members(groupId), recipeRepo.cabinetNames(groupId)]);
+    const excluded = [...new Set(members.flatMap((m) => m.allergens))];
+    const rows = await recipeRepo.browse(
+      excluded, dinnerFilter(), termsRegex(body.mustUse), termsRegex(cabinet), BROWSE_MIN_COVERAGE, BROWSE_CAP,
+    );
+    logger.info({ groupId, query: body.query, candidates: rows.length }, "recipe browse");
+    if (rows.length === 0) return { recipes: [], available: await recipeRepo.hasAny() };
+    const ranked = rankForBrowse(dietSafe(rows, members), body.mustUse, cabinet, body.limit);
+    return { available: true, recipes: ranked.map(toResult) };
   },
 };
