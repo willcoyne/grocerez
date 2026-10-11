@@ -394,7 +394,8 @@ export function PantryScreen() {
         visible={phase === "list" && listOpen}
         groupId={groupId}
         onClose={closeList}
-        onStartShopping={() => router.push("/shopping")}
+        // The 3D store (features/shopping) has no route yet, so "Start shopping" opens the List tab.
+        onStartShopping={() => router.push("/list")}
       />
 
       {inShelves ? (
