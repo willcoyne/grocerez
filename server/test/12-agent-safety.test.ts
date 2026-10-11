@@ -165,6 +165,25 @@ describe("12 agent safety check (per member)", () => {
     expect(m).toEqual({ title: "Salad", passes: true, problems: [], unknown: [] });
   });
 
+  it("catalog staples resolve as verified with their allergens; plain 'Corn' passes an allergy household", async () => {
+    const owner = await makeUser({ displayName: "Owner" });
+    const fin = await makeUser({ displayName: "Fin", allergens: ["fish"] });
+    const sol = await makeUser({ displayName: "Sol", allergens: ["soy", "wheat"] });
+    const ses = await makeUser({ displayName: "Ses", allergens: ["sesame"] });
+    const g = await makeGroup(owner, [fin, sol, ses]);
+    const names = ["Worcestershire Sauce", "Hoisin Sauce", "Sesame Oil", "Corn"];
+    const res = await safety.check(g.id, names.map((n) => meal("Dinner", n)));
+    for (const m of res.meals) expect(m.unknown).toEqual([]);
+    const [worcestershire, hoisin, sesame, corn] = res.meals;
+    expect(worcestershire.problems).toEqual([{ ingredient: "Worcestershire Sauce", reason: "contains fish", members: ["Fin"] }]);
+    expect(hoisin.problems).toEqual(expect.arrayContaining([
+      { ingredient: "Hoisin Sauce", reason: "contains soy", members: ["Sol"] },
+      { ingredient: "Hoisin Sauce", reason: "contains wheat", members: ["Sol"] },
+    ]));
+    expect(sesame.problems).toEqual([{ ingredient: "Sesame Oil", reason: "contains sesame", members: ["Ses"] }]);
+    expect(corn).toEqual({ title: "Dinner", passes: true, problems: [], unknown: [] });
+  });
+
   it("POST /agent/safety-check returns the same result; non-member → 404; bad body → 400", async () => {
     const { owner, g } = await household();
     const body = { meals: [meal("PB toast", "Peanut butter"), meal("Greens", "Spinach")] };

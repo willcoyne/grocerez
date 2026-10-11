@@ -1510,5 +1510,470 @@
   "category": "other",
   "default_allergens": [],
   "shelf_life_days": null
+ },
+ {
+  "name": "Corn",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 5
+ },
+ {
+  "name": "Cumin",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Paprika",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Smoked Paprika",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Chili Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Oregano",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Bay Leaves",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Red Pepper Flakes",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Cayenne",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Garlic Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Onion Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Italian Seasoning",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Nutmeg",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Turmeric",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Curry Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Garam Masala",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Ground Coriander",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Thyme",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Rosemary",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Dill",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Mint",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Red Onion",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Shallots",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Scallions",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Cherry Tomatoes",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Eggplant",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Butternut Squash",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 30
+ },
+ {
+  "name": "Kidney Beans",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Pinto Beans",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Coconut Milk",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Vegetable Broth",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Beef Broth",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Tomato Paste",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Cornstarch",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Powdered Sugar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Cocoa Powder",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Rice Vinegar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Balsamic Vinegar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Apple Cider Vinegar",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Dijon Mustard",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Coconut Oil",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Capers",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Olives",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Lemon Juice",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Lime Juice",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Sriracha",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Rice Noodles",
+  "category": "pantry",
+  "default_allergens": [],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Sesame Oil",
+  "category": "pantry",
+  "default_allergens": [
+   "sesame"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Sesame Seeds",
+  "category": "pantry",
+  "default_allergens": [
+   "sesame"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Worcestershire Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Fish Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Oyster Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "gluten",
+   "shellfish",
+   "wheat"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Hoisin Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "gluten",
+   "soy",
+   "wheat"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Teriyaki Sauce",
+  "category": "pantry",
+  "default_allergens": [
+   "gluten",
+   "soy",
+   "wheat"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Miso",
+  "category": "pantry",
+  "default_allergens": [
+   "soy"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Tofu",
+  "category": "produce",
+  "default_allergens": [
+   "soy"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Pesto",
+  "category": "dairy",
+  "default_allergens": [
+   "milk",
+   "tree_nuts"
+  ],
+  "shelf_life_days": 14
+ },
+ {
+  "name": "Feta",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 21
+ },
+ {
+  "name": "Ricotta",
+  "category": "dairy",
+  "default_allergens": [
+   "milk"
+  ],
+  "shelf_life_days": 10
+ },
+ {
+  "name": "Walnuts",
+  "category": "snacks",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Pecans",
+  "category": "snacks",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 180
+ },
+ {
+  "name": "Pine Nuts",
+  "category": "pantry",
+  "default_allergens": [
+   "tree_nuts"
+  ],
+  "shelf_life_days": 90
+ },
+ {
+  "name": "Egg Noodles",
+  "category": "pantry",
+  "default_allergens": [
+   "eggs",
+   "gluten",
+   "wheat"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Lasagna Noodles",
+  "category": "pantry",
+  "default_allergens": [
+   "gluten",
+   "wheat"
+  ],
+  "shelf_life_days": 730
+ },
+ {
+  "name": "Panko",
+  "category": "pantry",
+  "default_allergens": [
+   "gluten",
+   "wheat"
+  ],
+  "shelf_life_days": 365
+ },
+ {
+  "name": "Ground Pork",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Chicken Wings",
+  "category": "meat",
+  "default_allergens": [],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Cod",
+  "category": "seafood",
+  "default_allergens": [
+   "fish"
+  ],
+  "shelf_life_days": 2
+ },
+ {
+  "name": "Scallops",
+  "category": "seafood",
+  "default_allergens": [
+   "shellfish"
+  ],
+  "shelf_life_days": 2
  }
 ]
