@@ -7,6 +7,8 @@ import { logger } from "./lib/logger.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
+import { agentInternalRouter } from "./modules/agent/internal.js";
+import { agentRouter } from "./modules/agent/router.js";
 import { aiRouter } from "./modules/ai/router.js";
 import { cabinetRouter } from "./modules/cabinet/router.js";
 import { dietaryRouter } from "./modules/dietary/router.js";
@@ -49,6 +51,8 @@ export function createApp() {
   api.use(healthRouter);
   api.use(authRouter);
   api.use(devRouter());
+  // Pantry Agent → server events: authenticated by X-Agent-Secret, not an app JWT.
+  api.use(agentInternalRouter);
   // Everything below needs a valid app JWT.
   api.use(requireAuth);
   api.use(meRouter);
@@ -64,6 +68,7 @@ export function createApp() {
   group.use(preferencesRouter);
   group.use(cabinetRouter);
   group.use(aiRouter);
+  group.use(agentRouter);
   group.use(shoppingListRouter);
   group.use(alertsRouter);
   api.use("/groups/:groupId", requireGroupMember, group);

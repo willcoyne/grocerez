@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
+import { sweepStaleRuns } from "./modules/agent/service.js";
 import { createSocketServer } from "./realtime/socket.js";
 
 const app = createApp();
@@ -13,6 +14,8 @@ const jobs = config.ENABLE_JOBS ? [scheduleRecallImport()] : [];
 
 httpServer.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
+  // Pantry Agent runs left `running` by a dead agent or a previous process are failed (their timers are gone).
+  sweepStaleRuns().catch((err) => logger.error({ err }, "agent run sweep failed"));
 });
 
 async function shutdown(signal: string) {

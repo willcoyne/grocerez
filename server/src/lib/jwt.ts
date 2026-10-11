@@ -1,9 +1,9 @@
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
 
-/** App session token: { sub: userId }, HS256, 7 days. */
-export function signAppToken(userId: string): string {
-  return jwt.sign({}, config.JWT_SECRET, { algorithm: "HS256", subject: userId, expiresIn: "7d" });
+/** App session token: { sub: userId }, HS256, 7 days by default (Pantry Agent run tokens use "15m"). */
+export function signAppToken(userId: string, expiresIn: jwt.SignOptions["expiresIn"] = "7d"): string {
+  return jwt.sign({}, config.JWT_SECRET, { algorithm: "HS256", subject: userId, expiresIn });
 }
 
 /** Returns the user id, or null if the token is invalid/expired. */

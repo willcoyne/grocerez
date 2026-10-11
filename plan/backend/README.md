@@ -61,12 +61,20 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/groups/:groupId/recipes/suggest` | `{maxRecipes?, mustUseExpiring?}` | `Recipe[]` | 10 |
 | POST | `/groups/:groupId/shopping-list/prices` | `{zipCode?}` | `{items[], totalLowCents, totalHighCents}` | 10 |
 | POST | `/uploads/presign` | `{contentType, purpose}` | `{uploadUrl, key}` | 11 |
+| POST | `/groups/:groupId/agent/runs` | `{prompt ≤500, budgetCents? 0..100000}` | 202 `{runId}`. 503 `NOT_CONFIGURED` (no `AGENT_URL`), 503 `AGENT_UNAVAILABLE` (run → failed), 429 (10/h per group) | challenge 01 |
+| GET | `/groups/:groupId/agent/runs/:runId` | — | `AgentRun` (404 if not in this group) | challenge 01 |
+| GET | `/groups/:groupId/agent/runs` | `?limit=1..20` (default 5) | `AgentRunSummary[]` (no steps), newest first | challenge 01 |
+| POST | `/groups/:groupId/agent/runs/:runId/apply` | `{}` | `{added, skipped[{name, reason:'in_cabinet'\|'on_list'}], items: ShoppingListItem[]}` (the added rows). 409 `RUN_NOT_PROPOSED`, 422 `PLAN_UNSAFE` (`details.meals[{title, problems[]}]`) | challenge 01 |
+| GET | `/groups/:groupId/agent/household` | — | `AgentHousehold {today, timeZone, zipCode (caller's), members[{displayName, allergens[], diets[]}]}` | challenge 01 |
+| POST | `/groups/:groupId/agent/safety-check` | `{meals[{title, ingredients[]}] 1..7}` | `{meals[{title, passes, problems[{ingredient, reason, members[]}], unknown[]}]}` | challenge 01 |
+| POST | `/internal/agent-events` | `AgentEvent` (header `X-Agent-Secret`, no JWT) | 204. 401 bad secret, 404 unknown run, 409 run not running, 422 `PLAN_INVALID` (run → failed) | challenge 01 |
 
 **Errors** always look like `{ "error": { "code": "NOT_FOUND", "message": "..." } }`, with the matching HTTP status.
 
 **Socket.IO events** (folder 07): the client sends `group:join {groupId}`. The server sends `shopping-list:changed`,
 `cabinet:changed`, `preferences:changed`, and `group:changed`, each with `{groupId, by: userId}`. Each socket also joins a
-personal `user:<id>` room for `invites:changed`.
+personal `user:<id>` room for `invites:changed`. Pantry Agent (challenge 01): `agent:changed` `{groupId, by, runId}`,
+throttled to ≤ 1 per 250 ms per run.
 
 ## Shared types
 
