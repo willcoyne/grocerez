@@ -1,7 +1,8 @@
 # GrocerEZ on one Akamai Cloud (Linode) instance: Postgres + API (incl. the Akamai AI agent) + web app,
 # behind Caddy with automatic HTTPS. deploy.sh copies the repo to /opt/grocerez and runs:
 #   docker compose -f deploy/linode/compose.yml --env-file deploy/linode/.env up -d --build
-# deploy/linode/.env (git-ignored, written by deploy.sh) holds SITE_HOST, POSTGRES_PASSWORD, JWT_SECRET, DEMO_KEY.
+# deploy/linode/.env (git-ignored, written by deploy.sh) holds SITE_HOST, POSTGRES_PASSWORD, JWT_SECRET, DEMO_KEY,
+# AGENT_SHARED_SECRET.
 # API secrets (AKAMAI_*, S3_* / AWS_*, GOOGLE_CLIENT_IDS, ...) come from server/.env.prod.
 name: grocerez
 
@@ -41,7 +42,21 @@ services:
       APP_LINK_BASE: grocerez://
       CORS_ORIGINS: https://${SITE_HOST}
       ENABLE_JOBS: "true"
+      AGENT_URL: http://agent:8000
+      AGENT_SHARED_SECRET: ${AGENT_SHARED_SECRET:?set in deploy/linode/.env}
+      AGENT_PUBLIC_API_URL: http://api:3000/api
     command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed && node dist/src/index.js"]
+
+  # Pantry Agent ("Plan our week"): internal only, the API reaches it at http://agent:8000.
+  # deploy/linode/.env.agent (git-ignored, written by deploy.sh) holds AKAMAI_INFERENCE_KEY.
+  agent:
+    build: ../../agent
+    restart: unless-stopped
+    env_file:
+      - path: ./.env.agent
+        required: false
+    environment:
+      AGENT_SHARED_SECRET: ${AGENT_SHARED_SECRET:?set in deploy/linode/.env}
 
   web:
     build:

@@ -7,6 +7,9 @@
 #                                  # API Tokens with read/write on Linodes, Firewalls and Object Storage
 #   deploy/linode/deploy.sh                 # create or update the instance
 #   deploy/linode/deploy.sh --with-storage  # also create the Object Storage bucket + keys and wire them into the API
+#   deploy/linode/deploy.sh --load-recipes ~/Downloads/grocerez-db-<date>.dump
+#                                           # also load the Pantry Agent recipe index (only the `recipes` table) from a
+#                                           # pg_dump; never commit the dump (it holds a whole database)
 #
 # Optional env: LINODE_REGION (default us-ord, Chicago), LINODE_TYPE (default g6-standard-2, 4 GB),
 #               SITE_HOST (your own domain pointed at the instance, instead of the rDNS name).
@@ -21,7 +24,16 @@ TYPE="${LINODE_TYPE:-g6-standard-2}"
 LABEL="grocerez"
 KEY="$HOME/.ssh/grocerez_linode"
 WITH_STORAGE=false
-[[ "${1:-}" == "--with-storage" ]] && WITH_STORAGE=true
+RECIPES_DUMP=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-storage) WITH_STORAGE=true ;;
+    --load-recipes) RECIPES_DUMP="${2:?--load-recipes needs a dump file}"; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ -z "$RECIPES_DUMP" || -f "$RECIPES_DUMP" ]] || { echo "no such dump: $RECIPES_DUMP" >&2; exit 2; }
 # Token: $LINODE_TOKEN, else the git-ignored file deploy/linode/.token (one line).
 [[ -z "${LINODE_TOKEN:-}" && -f "$HERE/.token" ]] && LINODE_TOKEN="$(tr -d '[:space:]' < "$HERE/.token")"
 : "${LINODE_TOKEN:?export LINODE_TOKEN or put it in deploy/linode/.token (cloud.linode.com → Profile → API Tokens)}"
@@ -74,14 +86,17 @@ JWT_SECRET=$(openssl rand -hex 32)
 DEMO_KEY=$(openssl rand -hex 12)
 EOF
 fi
+grep -q '^AGENT_SHARED_SECRET=' "$HERE/.env" || echo "AGENT_SHARED_SECRET=$(openssl rand -hex 32)" >> "$HERE/.env"
 # SITE_HOST always follows the current instance / override.
 grep -v '^SITE_HOST=' "$HERE/.env" > "$HERE/.env.tmp" || true
 echo "SITE_HOST=$HOST" >> "$HERE/.env.tmp" && mv "$HERE/.env.tmp" "$HERE/.env" && chmod 600 "$HERE/.env"
 
 # ── API secrets: server/.env minus the local-only database settings ────────────────
 umask 077
-grep -vE '^(DATABASE_URL|MIGRATE_DATABASE_URL|TEST_DATABASE_URL|JWT_SECRET|NODE_ENV|PORT|CORS_ORIGINS)=' "$ROOT/server/.env" \
+grep -vE '^(DATABASE_URL|MIGRATE_DATABASE_URL|TEST_DATABASE_URL|JWT_SECRET|NODE_ENV|PORT|CORS_ORIGINS|AGENT_[A-Z_]+)=' "$ROOT/server/.env" \
   > "$ROOT/server/.env.prod" 2>/dev/null || true
+# Pantry Agent: the same Akamai key as the API.
+echo "AKAMAI_INFERENCE_KEY=$(grep '^AKAMAI_API_KEY=' "$ROOT/server/.env" | cut -d= -f2-)" > "$HERE/.env.agent"
 
 # ── Optional: Linode Object Storage for photos (S3-compatible) ─────────────────────
 if $WITH_STORAGE; then
@@ -124,6 +139,7 @@ log "Copying the repo"
 rsync -az --delete -e "${SSH[*]}" \
   --exclude .git --exclude node_modules --exclude '.claude' --exclude dev-console --exclude 'server/generated' \
   --exclude 'server/.env' --exclude 'app/.env' --exclude 'deploy/linode/.token' --exclude 'app/dist' --exclude '.expo' \
+  --exclude 'agent/.env' --exclude 'agent/.venv' --exclude '.pytest_cache' --exclude '__pycache__' --exclude '*.dump' \
   "$ROOT/" "root@$IP:/opt/grocerez/"
 log "Building and starting (first build takes a few minutes)"
 "${SSH[@]}" "root@$IP" 'cd /opt/grocerez && docker compose -f deploy/linode/compose.yml --env-file deploy/linode/.env up -d --build --remove-orphans'
@@ -131,3 +147,15 @@ log "Building and starting (first build takes a few minutes)"
 log "Waiting for https://$HOST/api/health"
 for _ in $(seq 1 60); do curl -sf "https://$HOST/api/health" >/dev/null && break; sleep 5; done
 curl -sf "https://$HOST/api/health" >/dev/null && log "Live: https://$HOST" || log "Not healthy yet: ssh -i $KEY root@$IP 'cd /opt/grocerez && docker compose -f deploy/linode/compose.yml logs --tail 50'"
+
+# ── Optional: Pantry Agent recipe index from a pg_dump (only the `recipes` rows) ───
+if [[ -n "$RECIPES_DUMP" ]]; then
+  log "Loading recipes from $(basename "$RECIPES_DUMP")"
+  scp -i "$KEY" -o StrictHostKeyChecking=accept-new -q "$RECIPES_DUMP" "root@$IP:/tmp/recipes.dump"
+  "${SSH[@]}" "root@$IP" 'cd /opt/grocerez && C=$(docker compose -f deploy/linode/compose.yml --env-file deploy/linode/.env ps -q db) \
+    && docker cp /tmp/recipes.dump "$C":/tmp/recipes.dump && rm /tmp/recipes.dump \
+    && docker exec "$C" psql -q -U grocerez -d grocerez -c "TRUNCATE recipes" \
+    && docker exec "$C" pg_restore --data-only -t recipes --no-owner -U grocerez -d grocerez /tmp/recipes.dump \
+    && docker exec "$C" rm /tmp/recipes.dump \
+    && docker exec "$C" psql -tA -U grocerez -d grocerez -c "select count(*) || '\'' recipes loaded'\'' from recipes"'
+fi

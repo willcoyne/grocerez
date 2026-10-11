@@ -7,7 +7,7 @@
 # Akamai AI (semantic search + the product lookup agent) runs inside the `api` container and calls Akamai's hosted
 # inference endpoint; it only needs AKAMAI_API_KEY / AKAMAI_BASE_URL in server/.env.
 # Portable: these are plain OCI images (api: server/Dockerfile, web: app/Dockerfile, db: pgvector/pgvector:pg16-trixie),
-# so the same stack runs on any container host. Production runs on Akamai Cloud (Linode): deploy/linode/deploy.sh
+# agent: agent/Dockerfile; so the same stack runs on any container host. Production runs on Akamai Cloud (Linode): deploy/linode/deploy.sh
 # (see plan/backend/12-deployment/README.md).
 name: grocerez-stack
 
@@ -45,10 +45,21 @@ services:
       APP_LINK_BASE: grocerez://
       CORS_ORIGINS: http://localhost:8080
       ENABLE_JOBS: "false"
+      # Pantry Agent ("Plan our week"): the agent container on the compose network. AGENT_SHARED_SECRET comes from
+      # server/.env and must equal the one in agent/.env.
+      AGENT_URL: http://agent:8000
+      AGENT_PUBLIC_API_URL: http://api:3000/api
     # Migrate, load the demo data (safe to re-run), then start the API.
     command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed && node dist/src/index.js"]
     ports:
       - "3100:3000"
+
+  # Pantry Agent (Python, Akamai hackathon-chat). Internal only; keys in agent/.env (copy agent/.env.example).
+  agent:
+    build: ./agent
+    env_file:
+      - path: ./agent/.env
+        required: false
 
   web:
     build:
