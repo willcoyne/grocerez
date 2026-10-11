@@ -260,6 +260,8 @@ export const IndexedRecipe = z.object({
   ingredientLines: z.array(text().trim().min(1).max(200)).min(1).max(40),
   /** Cleaned generic names ("Mozzarella"), from the agent's deterministic cleaner. */
   ingredients: z.array(text().trim().min(1).max(120)).min(1).max(40),
+  /** The page's schema.org recipeCategory, lower-cased ("main course", "dinner", "side dish"). Empty when the site doesn't say. */
+  course: z.array(text().trim().min(1).max(60)).max(8).default([]),
 });
 export type IndexedRecipe = z.infer<typeof IndexedRecipe>;
 
@@ -274,6 +276,8 @@ export const RecipeSearchBody = z.object({
   /** Cabinet items to prefer (expiring first); boosts recipes that use them. */
   mustUse: z.array(text().trim().min(1).max(120)).max(10).default([]),
   limit: z.number().int().min(1).max(10).default(6),
+  /** Browse mode (spec §12.1): ignore `query` similarity and rank by kitchen fit + mustUse for "what can we make". */
+  browse: z.boolean().default(false),
 });
 export type RecipeSearchBody = z.infer<typeof RecipeSearchBody>;
 

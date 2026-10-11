@@ -559,3 +559,16 @@ tokens wherever possible.
 - **Progressive fill:** a step event carries an optional meal preview {date, title, site}, so rows fill before `proposed`.
 - The existing agent sheet and trace screen stay as the internals and the dev view. The calendar becomes the user-facing entry
   point. The Household "Plan our week" button and the alerts "Plan meals" both open the Week sheet.
+
+### 12.1 Index-first ideas (decided 2026-10-11, after live runs)
+
+Live runs showed the model inventing ideas ("tomato garlic pasta") that the index can't satisfy for allergy households. With milk and peanut
+allergies, 136 of 169 pasta recipes and 6 of 7 quesadillas are excluded. So the flow flips:
+
+1. **Browse first.** `suggest_recipes` (agent tool) calls `POST /agent/recipes/search {browse:true, mustUse: expiring items, limit: ~12}`. That
+   returns safe main courses that use the expiring items, ranked by kitchen fit. The model then picks one per date from those real options.
+   `find_recipe(idea)` remains for a specific request ("something with salmon"), with Tavily as its fallback.
+2. **Main courses only.** `IndexedRecipe.course` comes from recipeCategory. Search keeps a recipe whose course says main course, main dish,
+   dinner, entree, lunch, soup or salad, or whose course is empty and whose title passes the non-dinner filter. Side dish, appetizer,
+   dessert, breakfast, snack, drink, sauce and condiment are excluded.
+3. **Bigger index.** Re-crawl with `--refresh` (re-fetch already-indexed URLs, to fill in `course`) and `--per-domain 500`.
