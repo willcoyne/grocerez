@@ -22,6 +22,9 @@ import { GRACE_MS, TripBatcher, type TripBatcherSnapshot } from "./tripBatcher";
 
 export type Flight = { id: string; dir: "in" | "out"; startedAt: number };
 
+/** Placeholder completion call until the hook's first effect installs the real one. */
+const notReady = () => Promise.reject<number>(new Error("Shopping trip is still starting"));
+
 export type ShoppingTrip = ReturnType<typeof useShoppingTrip>;
 
 export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean } = {}) {
@@ -38,15 +41,16 @@ export function useShoppingTrip(groupId: string, opts: { reducedMotion?: boolean
   const checkRef = useRef(check.mutateAsync);
   const completeRef = useRef(complete.mutateAsync);
   const toastRef = useRef(toast);
+  // Created with a placeholder; the first effect below (it runs before any other effect or user action) hands the
+  // batcher a completion call that reads the latest mutation at call time.
+  const [batcher] = useState(() => new TripBatcher({ complete: notReady, graceMs: GRACE_MS }));
   useEffect(() => {
     checkRef.current = check.mutateAsync;
     completeRef.current = complete.mutateAsync;
     toastRef.current = toast;
+    batcher.setComplete(() => completeRef.current().then((r) => r.movedToCabinet));
   });
 
-  const [batcher] = useState(
-    () => new TripBatcher({ complete: () => completeRef.current().then((r) => r.movedToCabinet), graceMs: GRACE_MS }),
-  );
   const [snap, setSnap] = useState<TripBatcherSnapshot>(() => batcher.snapshot());
   const [completedIds, setCompletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [moved, setMoved] = useState(0);

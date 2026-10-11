@@ -48,4 +48,12 @@ describe("socket events → query invalidation", () => {
     handleSocketEvent(qc, "agent:changed", { groupId: "g1" });
     expect(invalidated()).toEqual([keys.agentRuns("g1")]);
   });
+
+  it("meal-plan:changed refreshes every cached range of that group's week plan, and nothing else", () => {
+    const { qc, invalidated } = setup();
+    handleSocketEvent(qc, "meal-plan:changed", { groupId: "g1", by: "u1" });
+    expect(invalidated()).toEqual([keys.mealPlans("g1")]);
+    // The prefix covers keys.mealPlan(g1, from, to) for any range.
+    expect(keys.mealPlan("g1", "2026-10-12", "2026-10-18").slice(0, 3)).toEqual([...keys.mealPlans("g1")]);
+  });
 });

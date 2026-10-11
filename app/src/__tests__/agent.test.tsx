@@ -18,7 +18,7 @@ jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: j
 jest.mock("expo-web-browser", () => ({ openBrowserAsync: jest.fn(async () => ({ type: "opened" })) }));
 jest.mock("@/lib/confirm", () => ({ confirm: jest.fn(async () => true) }));
 jest.mock("@/notifications/expirations", () => ({ maybeAskNotificationPermission: jest.fn() }));
-const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn() };
+const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn(), navigate: jest.fn() };
 let mockParams: Record<string, string> = {};
 jest.mock("expo-router", () => ({
   useRouter: () => mockRouter,
@@ -232,7 +232,7 @@ describe("Recorded-run replay", () => {
 });
 
 describe("Group tab entry point", () => {
-  it("'Plan our week' opens the agent; long-press opens the replay (dev build); the old recipes link is gone", async () => {
+  it("'Plan our week' opens the Week sheet on the pantry; long-press opens the replay (dev build); no recipes link", async () => {
     apiMock.mockImplementation(
       apiRoutes({
         [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }),
@@ -241,7 +241,9 @@ describe("Group tab entry point", () => {
     await renderWithProviders(<GroupScreen />);
     const plan = await screen.findByRole("button", { name: "Plan our week" });
     await fireEvent.press(plan);
-    expect(mockRouter.push).toHaveBeenCalledWith("/agent");
+    // The pantry tab opens the Week sheet whenever `week` changes, so each tap sends a fresh nonce (spec §13).
+    expect(mockRouter.navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/cabinet\?week=\d+$/));
+    expect(mockRouter.push).not.toHaveBeenCalledWith("/agent");
     await fireEvent(plan, "longPress");
     expect(mockRouter.push).toHaveBeenCalledWith("/agent?replay=1");
     expect(screen.queryByText(/What can we cook/)).toBeNull();

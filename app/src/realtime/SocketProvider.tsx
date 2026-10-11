@@ -50,6 +50,9 @@ export function handleSocketEvent(qc: QueryClient, event: string, payload: Group
         void qc.invalidateQueries({ queryKey: keys.agentRuns(groupId), exact: true });
       }
       break;
+    case "meal-plan:changed":
+      if (groupId) void qc.invalidateQueries({ queryKey: keys.mealPlans(groupId) });
+      break;
   }
 }
 
@@ -60,6 +63,7 @@ const EVENTS = [
   "group:changed",
   "invites:changed",
   "agent:changed",
+  "meal-plan:changed",
 ];
 
 /**

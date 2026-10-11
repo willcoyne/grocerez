@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError, errorMessage } from "@/api/client";
 import {
   agentRunTimedOut,
+  displaySteps,
   pickResumableRun,
   useAgentRun,
   useApplyAgentRun,
@@ -46,16 +47,7 @@ function applyError(e: unknown): string {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/**
- * Steps in display order. Once the run is over, a step left `running` (e.g. the agent's last "done" event arrived
- * after the plan and was rejected) is shown as finished, never as an endless spinner.
- */
-export function displaySteps(steps: AgentStep[], runStatus: AgentRun["status"]): AgentStep[] {
-  const sorted = [...steps].sort((a, b) => a.seq - b.seq);
-  if (runStatus === "running") return sorted;
-  const settled = runStatus === "failed" ? "failed" : "done";
-  return sorted.map((s) => (s.status === "running" ? { ...s, status: settled } : s));
-}
+export { displaySteps };
 
 /** The safety entry for meal i: perMeal[i] when it is that meal's entry (titles may repeat), else the first title match. */
 function mealSafety(plan: AgentPlan, i: number) {

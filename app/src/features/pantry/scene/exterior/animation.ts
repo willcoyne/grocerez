@@ -21,6 +21,10 @@ export type ExteriorAnimState = {
   noteHover: boolean;
   /** smoothed 0..1 hover lift of the note */
   noteLift: number;
+  /** pointer is over the pinned Week note (web hover) */
+  weekHover: boolean;
+  /** smoothed 0..1 hover lift of the Week note */
+  weekLift: number;
   glow: number;
 };
 
@@ -34,6 +38,8 @@ export function createAnimState(): ExteriorAnimState {
     hover: false,
     noteHover: false,
     noteLift: 0,
+    weekHover: false,
+    weekLift: 0,
     glow: 0,
   };
 }
@@ -197,9 +203,15 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   h.notePaper.position.set(np.x, np.y, np.z);
   h.notePaper.rotation.set(np.rx, 0, np.rz);
 
+  // --- pinned Week note: the same flutter/hover, out of step with the list; it never lifts off (the sheet opens)
+  s.weekLift += ((s.weekHover && phase === "closed" ? 1 : 0) - s.weekLift) * Math.min(1, dt * 10);
+  const wp = notePose(now + 2.6, s.weekLift, 0, phase === "closed", D.weekNote.rotZ);
+  h.weekPaper.position.set(wp.x, wp.y, wp.z);
+  h.weekPaper.rotation.set(wp.rx, 0, wp.rz);
+
   // --- knob breathing glow (closed only) to invite a tap
   const target =
-    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover ? 0.35 : 0) : 0;
+    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.weekHover ? 0.35 : 0) : 0;
   s.glow += (target - s.glow) * Math.min(1, dt * 6);
   getMaterials().knob.emissiveIntensity = s.glow;
 }

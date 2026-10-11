@@ -1,6 +1,7 @@
 import type {
   AgentRun,
   AgentRunSummary,
+  AgentStep,
   ApplyAgentRunResponse,
   StartAgentRunBody,
   StartAgentRunResponse,
@@ -19,6 +20,17 @@ export const AGENT_RUN_TIMEOUT_MS = 130_000;
 export const RESUME_PROPOSED_MS = 30 * 60_000;
 
 type RunTimes = Pick<AgentRunSummary, "status" | "createdAt">;
+
+/**
+ * Steps in display order. Once the run is over, a step left `running` (e.g. the agent's last "done" event arrived
+ * after the plan and was rejected) is shown as finished, never as an endless spinner.
+ */
+export function displaySteps(steps: AgentStep[], runStatus: AgentRun["status"]): AgentStep[] {
+  const sorted = [...steps].sort((a, b) => a.seq - b.seq);
+  if (runStatus === "running") return sorted;
+  const settled = runStatus === "failed" ? "failed" : "done";
+  return sorted.map((s) => (s.status === "running" ? { ...s, status: settled } : s));
+}
 
 /** True when a run still says `running` long after the server should have finished or failed it. */
 export function agentRunTimedOut(run: RunTimes, now = Date.now()): boolean {
@@ -80,6 +92,8 @@ export function useApplyAgentRun(groupId: string) {
       void qc.invalidateQueries({ queryKey: keys.shoppingList(groupId) });
       void qc.invalidateQueries({ queryKey: keys.agentRun(groupId, runId) });
       void qc.invalidateQueries({ queryKey: keys.agentRuns(groupId), exact: true });
+      // Apply also writes the run's planned meals (spec §13).
+      void qc.invalidateQueries({ queryKey: keys.mealPlans(groupId) });
     },
   });
 }
