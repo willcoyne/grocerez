@@ -235,6 +235,20 @@ describe("12 agent: apply", () => {
     return h;
   }
 
+  it("skips an item that is already checked off in the cart as on_list (not re-added or re-tagged)", async () => {
+    const { owner, g } = await kitchen();
+    const row = await api().post(`/api/groups/${g.id}/shopping-list`).set(owner.auth).send({ itemId: await itemId("Avocados") }).expect(201);
+    await api().patch(`/api/groups/${g.id}/shopping-list/${row.body.id}`).set(owner.auth).send({ checked: true }).expect(200);
+    const runId = await proposedRun(owner, g.id);
+
+    const res = await api().post(`/api/groups/${g.id}/agent/runs/${runId}/apply`).set(owner.auth).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.skipped).toEqual(expect.arrayContaining([{ name: "Avocados", reason: "on_list" }]));
+    expect(res.body.added).toBe(3);
+    const avocados = await prisma.shoppingListItem.findFirst({ where: { groupId: g.id, itemId: await itemId("Avocados") } });
+    expect(avocados).toMatchObject({ checked: true, note: null, agentRunId: null });
+  });
+
   it("adds exactly the missing items with ✨ notes, skips cabinet/list items, emits shopping-list:changed once", async () => {
     const { owner, g } = await kitchen();
     const runId = await proposedRun(owner, g.id);

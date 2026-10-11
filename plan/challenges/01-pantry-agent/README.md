@@ -266,7 +266,7 @@ model AgentRun {
 2. Validate `plan` with zod `AgentPlan` (500 if corrupt). Re-run `safety.check(plan.meals)`. Any `passes:false` → `422 PLAN_UNSAFE` with the problems.
 3. Resolve each `missingItems[].name` with `itemsService.search` (`exact`/`suggested` → that item). `none` → create a catalog item through the
    same path as `POST /items`, so allergens come from the keyword table.
-4. Skip items that are in the cabinet `in_stock` or already unchecked on the list. Report them in `skipped`.
+4. Skip items that are in the cabinet `in_stock` or already on the list (checked or not; a checked row is already in the cart). Report them in `skipped`.
 5. In **one** `withRegeneration(groupId, userId, ["shopping-list:changed"], tx => …)`: claim the run with
    `updateMany({where:{id, status:'proposed'}, data:{status:'applied', appliedAt}})`; count 0 → throw `409` (double-tap safe). Then
    `upsertManual` each item with `note: "✨ for " + forMeals.join(", ")` (truncate 120) and `agentRunId`. One emit total.

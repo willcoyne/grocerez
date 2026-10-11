@@ -214,8 +214,9 @@ export const agentService = {
         (await tx.cabinetItem.findMany({ where: { groupId, status: "in_stock", itemId: { in: itemIds } }, select: { itemId: true } }))
           .map((c) => c.itemId),
       );
+      // Any row already on the list counts, including checked ones (already in the cart).
       const onList = new Set(
-        (await tx.shoppingListItem.findMany({ where: { groupId, checked: false, itemId: { in: itemIds } }, select: { itemId: true } }))
+        (await tx.shoppingListItem.findMany({ where: { groupId, itemId: { in: itemIds } }, select: { itemId: true } }))
           .map((r) => r.itemId),
       );
       const skipped: ApplyAgentRunResponse["skipped"] = [];
