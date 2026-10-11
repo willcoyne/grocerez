@@ -1,4 +1,4 @@
-import type { PlannedMeal } from "@contracts/mealPlan";
+import type { MealPlanResponse, PlannedMeal } from "@contracts/mealPlan";
 import { addDays as addDaysFns, format } from "date-fns";
 
 import { parseCalendarDate, toCalendarDate } from "@/lib/format";
@@ -55,4 +55,45 @@ export function weekPreviewLines(plan: { from: string; meals: readonly PlannedMe
 export function datesToPlan(dates: readonly string[], planned: ReadonlyMap<string, unknown>, count = 3): string[] {
   const open = dates.filter((d) => !planned.has(d));
   return (open.length ? open : dates).slice(0, count);
+}
+
+type Expiring = MealPlanResponse["expiring"][number];
+type Deadline = { item: string; expiresAt: string };
+
+/** "Spinach expires Sun" (row line / chip). */
+export function warningText(w: Deadline): string {
+  return `${w.item} expires ${dayLabels(w.expiresAt).short}`;
+}
+
+/** Items this meal uses that expire before `date`: the server's `warnings` plus `expiring` entries tied to this meal. */
+export function deadlinesBefore(
+  planned: Pick<PlannedMeal, "id" | "warnings">,
+  expiring: readonly Expiring[] | undefined,
+  date: string,
+): Deadline[] {
+  const all: Deadline[] = [
+    ...planned.warnings.map((w) => ({ item: w.item, expiresAt: w.expiresAt })),
+    ...(expiring ?? []).filter((e) => e.plannedMealId === planned.id).map((e) => ({ item: e.name, expiresAt: e.expiresAt })),
+  ];
+  const seen = new Set<string>();
+  return all
+    .filter((w) => w.expiresAt < date)
+    .filter((w) => {
+      const k = w.item.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
+}
+
+/** "Spinach expires Sun 11. Move anyway?" */
+export function moveConfirmTitle(w: Deadline): string {
+  const d = dayLabels(w.expiresAt);
+  return `${w.item} expires ${d.short} ${d.section.split(" ")[1]}. Move anyway?`;
+}
+
+/** "today" / "tomorrow" / "3 days". */
+export function daysLeftText(n: number): string {
+  return n <= 0 ? "today" : n === 1 ? "tomorrow" : `${n} days`;
 }

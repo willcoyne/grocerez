@@ -6,9 +6,9 @@
  * Thin client: the plan, household `today`, safety and recipes come from the server; the app only lays out days.
  */
 import type { AgentStep, PlanMeal } from "@contracts/agent";
-import type { PlannedMeal } from "@contracts/mealPlan";
+import type { ExpiryWarning, PlannedMeal } from "@contracts/mealPlan";
 import * as WebBrowser from "expo-web-browser";
-import { Check, Pencil, Plus, Sparkles, X } from "lucide-react-native";
+import { Check, CircleAlert, Pencil, Plus, Sparkles, X } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
@@ -30,7 +30,8 @@ import { plural } from "@/lib/format";
 
 import { useWeekRun, type DayPreview } from "./useWeekRun";
 import { WeekRecipeCard } from "./WeekRecipeCard";
-import { byDate, datesToPlan, dayLabels, rangeLabel, weekDates } from "./weekDates";
+import { UseSoonSection } from "./UseSoonSection";
+import { byDate, datesToPlan, dayLabels, rangeLabel, warningText, weekDates } from "./weekDates";
 
 export type WeekSheetProps = { visible: boolean; groupId: string; onClose: () => void };
 
@@ -56,6 +57,8 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
   const previews = v.state === "running" ? v.previews : new Map<string, DayPreview>();
   const proposed = v.state === "proposed" ? v.proposed : new Map<string, PlanMeal>();
 
+  // "Plan a dinner with these": the earliest free date in the week (the agent already puts expiring items first).
+  const freeDate = dates.find((d) => !planned.has(d));
   const planWeek = () => week.begin(datesToPlan(dates, planned), "plan");
 
   let body: React.ReactNode;
@@ -75,7 +78,10 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
       </View>
     );
   } else {
-    body = dates.map((d) => {
+    const useSoon = (
+      <UseSoonSection items={plan.data.expiring} canPlan={!busy && !!freeDate} onPlan={() => freeDate && week.begin([freeDate], "plan")} />
+    );
+    const days = dates.map((d) => {
       const saved = planned.get(d);
       const proposal = proposed.get(d);
       const preview = previews.get(d);
@@ -83,7 +89,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
       if (proposal) row = <MealRow date={d} meal={proposal} pending />;
       else if (preview) row = <PreviewRow date={d} preview={preview} />;
       else if (busy && runDates.has(d)) row = <FindingRow date={d} />;
-      else if (saved) row = <MealRow date={d} meal={saved.meal} onPress={() => setOpenId(saved.id)} />;
+      else if (saved) row = <MealRow date={d} meal={saved.meal} warnings={saved.warnings} onPress={() => setOpenId(saved.id)} />;
       else row = <EmptyRow date={d} disabled={busy} onPress={() => week.begin([d], "plan")} />;
       return (
         <View key={d}>
@@ -92,6 +98,12 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
         </View>
       );
     });
+    body = (
+      <>
+        {useSoon}
+        {days}
+      </>
+    );
   }
 
   const footer =
@@ -140,6 +152,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
             groupId={groupId}
             planned={open}
             dates={dates}
+            expiring={plan.data?.expiring}
             busy={busy}
             onClose={() => setOpenId(null)}
             onSwap={(m) => {
@@ -243,7 +256,19 @@ function TextButton({
 }
 
 /** A dinner on a day: saved (tap → recipe card) or proposed by the agent (pencil, not saved yet). */
-function MealRow({ date, meal, pending, onPress }: { date: string; meal: PlanMeal; pending?: boolean; onPress?: () => void }) {
+function MealRow({
+  date,
+  meal,
+  pending,
+  warnings = [],
+  onPress,
+}: {
+  date: string;
+  meal: PlanMeal;
+  pending?: boolean;
+  warnings?: readonly ExpiryWarning[];
+  onPress?: () => void;
+}) {
   const day = dayLabels(date);
   const uses = meal.uses.length ? `uses ${meal.uses.slice(0, 3).map((u) => u.toLowerCase()).join(", ")}` : null;
   // Title + time open the card; the citation is its own link next to it (never a link nested inside a button).
@@ -302,6 +327,14 @@ function MealRow({ date, meal, pending, onPress }: { date: string; meal: PlanMea
             </AppText>
           ) : null}
         </View>
+        {warnings.map((w) => (
+          <View key={w.item} style={styles.warnLine} accessible accessibilityLabel={`Warning: ${warningText(w)}`} testID={`week-warning-${date}`}>
+            <CircleAlert size={14} color={pantry.redInk} />
+            <AppText variant="caption" weight="semi" style={styles.failedText}>
+              {warningText(w)}
+            </AppText>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -387,6 +420,7 @@ const styles = StyleSheet.create({
   name: { color: NOTE_PAPER.ink },
   pendingName: { color: NOTE_PAPER.pencil },
   metaLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 },
+  warnLine: { flexDirection: "row", alignItems: "center", gap: 4 },
   aiCreated: { flexDirection: "row", alignItems: "center", gap: 3 },
   sketch: { fontSize: 19, lineHeight: 25, transform: [{ rotate: "-0.8deg" }] },
   faint: { opacity: 0.6 },

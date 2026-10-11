@@ -1,5 +1,5 @@
-import type { PlannedMeal } from "@contracts/mealPlan";
-import { ArrowLeftRight, CalendarDays, ListPlus, Trash2, X } from "lucide-react-native";
+import type { MealPlanResponse, PlannedMeal } from "@contracts/mealPlan";
+import { ArrowLeftRight, CalendarDays, CircleAlert, ListPlus, Trash2, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,13 +13,15 @@ import { pantry, softShadow } from "@/features/pantry/overlay/palette";
 import { confirm } from "@/lib/confirm";
 import { plural } from "@/lib/format";
 
-import { dayLabels } from "./weekDates";
+import { dayLabels, deadlinesBefore, moveConfirmTitle, warningText } from "./weekDates";
 
 export type WeekRecipeCardProps = {
   groupId: string;
   planned: PlannedMeal;
   /** The week's dates, for "Move day". */
   dates: string[];
+  /** For the move-past-deadline check. */
+  expiring?: MealPlanResponse["expiring"];
   /** Swap is disabled while another agent run is going. */
   busy: boolean;
   onClose: () => void;
@@ -31,7 +33,7 @@ export type WeekRecipeCardProps = {
  * A planned dinner as a paper recipe card that slides up over the Week sheet: AgentMealCard's content (photo, time and
  * servings, ingredient lines, our steps, citation, safety chip) plus Swap / Move day / Remove / Add missing to List.
  */
-export function WeekRecipeCard({ groupId, planned, dates, busy, onClose, onSwap }: WeekRecipeCardProps) {
+export function WeekRecipeCard({ groupId, planned, dates, expiring, busy, onClose, onSwap }: WeekRecipeCardProps) {
   const insets = useSafeAreaInsets();
   const { show: toast } = useToast();
   const move = useMovePlannedMeal(groupId);
@@ -47,7 +49,10 @@ export function WeekRecipeCard({ groupId, planned, dates, busy, onClose, onSwap 
   const day = dayLabels(planned.date);
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 
-  const moveTo = (date: string) =>
+  const moveTo = async (date: string) => {
+    // Moving past a used item's expiry is allowed by the server; confirm first.
+    const late = deadlinesBefore(planned, expiring, date)[0];
+    if (late && !(await confirm(moveConfirmTitle(late), `${meal.title} would be on ${dayLabels(date).spoken}.`, "Move anyway"))) return;
     move.mutate(
       { id: planned.id, date },
       {
@@ -58,6 +63,7 @@ export function WeekRecipeCard({ groupId, planned, dates, busy, onClose, onSwap 
         onError,
       },
     );
+  };
 
   async function onRemove() {
     if (!(await confirm(`Remove ${meal.title}?`, `${day.spoken} goes back to empty.`, "Remove", true))) return;
@@ -119,6 +125,14 @@ export function WeekRecipeCard({ groupId, planned, dates, busy, onClose, onSwap 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
           {/* Saved dinners passed the server's household safety check when they were saved (apply / add re-check). */}
           <AgentMealCard meal={meal} safety={{ title: meal.title, passes: true, unknown: [] }} style={styles.meal} />
+          {planned.warnings.map((w) => (
+            <View key={w.item} style={styles.chip} accessible accessibilityLabel={`Warning: ${warningText(w)}`} testID="week-card-warning">
+              <CircleAlert size={16} color={pantry.redInk} />
+              <AppText variant="caption" weight="bold" style={styles.dangerText}>
+                {warningText(w)}
+              </AppText>
+            </View>
+          ))}
 
           {picking ? (
             <View style={styles.picker} accessibilityRole="radiogroup" accessibilityLabel="Move to which day">
@@ -131,7 +145,7 @@ export function WeekRecipeCard({ groupId, planned, dates, busy, onClose, onSwap 
                     accessibilityLabel={dayLabels(d).spoken}
                     accessibilityState={{ checked: current, selected: current, disabled: current || move.isPending }}
                     disabled={current || move.isPending}
-                    onPress={() => moveTo(d)}
+                    onPress={() => void moveTo(d)}
                     style={({ pressed }) => [styles.dayChip, current && styles.dayChipOn, pressed && paperStyles.pressed]}
                     testID={`week-card-move-${d}`}
                   >
@@ -263,6 +277,16 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: NOTE_PAPER.rule,
     backgroundColor: "#FFFFFF",
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    minHeight: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: pantry.redTint,
   },
   actionOff: { opacity: 0.5 },
   actionText: { color: pantry.oakInk },
