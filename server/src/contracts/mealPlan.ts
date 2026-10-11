@@ -7,6 +7,16 @@ import { PlanMeal } from "./agent.js";
 export const MealSlot = z.enum(["dinner"]);
 export type MealSlot = z.infer<typeof MealSlot>;
 
+/** A cabinet item this meal relies on that expires before the meal's date (spec §14). */
+export const ExpiryWarning = z.object({
+  kind: z.literal("expires_before"),
+  /** Cabinet item name, e.g. "Spinach". */
+  item: z.string(),
+  /** YYYY-MM-DD */
+  expiresAt: CalendarDate,
+});
+export type ExpiryWarning = z.infer<typeof ExpiryWarning>;
+
 export const PlannedMeal = z.object({
   id: z.uuid(),
   groupId: z.uuid(),
@@ -16,6 +26,8 @@ export const PlannedMeal = z.object({
   meal: PlanMeal,
   /** The agent run that planned it; null when added by hand. */
   agentRunId: z.uuid().nullable(),
+  /** Computed on read: cabinet items this meal uses that expire before `date`. Empty = fine. */
+  warnings: z.array(ExpiryWarning).default([]),
   createdBy: z.uuid().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -30,6 +42,21 @@ export const MealPlanResponse = z.object({
   /** Household "today", so the app doesn't guess the time zone. */
   today: CalendarDate,
   meals: z.array(PlannedMeal),
+  /**
+   * Cabinet items expiring within 7 days of today (or already expired), soonest first, and which planned meal (if any)
+   * in the next 7 days uses each. plannedOn null = "use soon, not planned".
+   */
+  expiring: z.array(
+    z.object({
+      cabinetItemId: z.uuid(),
+      name: z.string(),
+      expiresAt: CalendarDate,
+      /** Negative = already expired. */
+      daysLeft: z.number().int(),
+      plannedOn: CalendarDate.nullable(),
+      plannedMealId: z.uuid().nullable(),
+    }),
+  ).default([]),
 });
 export type MealPlanResponse = z.infer<typeof MealPlanResponse>;
 

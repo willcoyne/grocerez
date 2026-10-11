@@ -572,3 +572,27 @@ allergies, 136 of 169 pasta recipes and 6 of 7 quesadillas are excluded. So the 
    dinner, entree, lunch, soup or salad, or whose course is empty and whose title passes the non-dinner filter. Side dish, appetizer,
    dessert, breakfast, snack, drink, sauce and condiment are excluded.
 3. **Bigger index.** Re-crawl with `--refresh` (re-fetch already-indexed URLs, to fill in `course`) and `--per-domain 500`.
+
+## 14. Expiration-aware planning (decided 2026-10-11)
+
+What already exists:
+- Cabinet items carry `expiresAt`: set by hand, or estimated from shelf life when a trip moves items to the cabinet.
+- The agent puts meals that use soon-expiring items on the earliest dates.
+
+New rules:
+1. **Hard deadline.** A planned meal must not rely on a cabinet item that expires before the meal's date. "Relies on" means the item appears in
+   `meal.uses`, matched whole-word in both directions, the same matching as listWriter.
+   - **Server:** `GET /meal-plan` computes `PlannedMeal.warnings` (`expires_before`) on read.
+   - **Moves:** `PATCH` (move) to a date after a used item's expiry is still allowed, but the meal returns with warnings so the app can confirm first.
+   - **Agent apply:** a meal dated after its expiring items' deadline is moved to the latest free date ≤ the deadline. If none exists, it's kept and warned.
+2. **Deadline-first scheduling (agent).** Assign dates by each meal's earliest expiring-item deadline (EDF): the soonest deadline goes on the
+   earliest date. use_recipe and find_recipe refuse a date later than the deadline of an expiring item the meal uses, and say why
+   ("Spinach expires Sun 11; pick Sat 10 or Sun 11").
+3. **Coverage.** `MealPlanResponse.expiring` lists cabinet items expiring within 7 days (or already expired), each with
+   `plannedOn`/`plannedMealId` if a planned meal in the next 7 days uses it.
+   - **Week sheet:** a "Use soon" section lists them as small-caps rows. Planned ones show "✓ Mon" and unplanned ones show
+     "not planned" plus a "Plan a dinner with these" action (an agent run for the earliest free date that uses them).
+   - **Expired items:** shown greyed with "expired" and never used for planning.
+   - **Meal rows and the recipe card:** show `warnings` as a warning chip ("Spinach expires Sun").
+   - **Move day:** warns before moving past a deadline.
+4. **Out of scope for now:** quantities and consuming items when a meal is cooked.
