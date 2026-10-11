@@ -17,7 +17,7 @@ set -euo pipefail
 API="${API:-http://localhost:3000/api}"
 USER_ID="${USER_ID:-00000000-0000-4000-8000-000000000101}"
 # Default kept in its own variable: macOS bash 3.2 treats the apostrophe inside ${VAR:-...} as a quote.
-DEFAULT_PROMPT="Plan 4 dinners for this week. Use what's expiring first, keep it under \$60, and make sure everyone can eat it."
+DEFAULT_PROMPT="Plan 3 dinners for this week. Use what's expiring first, keep it under \$60, and make sure everyone can eat it."
 PROMPT="${PROMPT:-$DEFAULT_PROMPT}"
 BUDGET="${BUDGET:-6000}"
 TIMEOUT="${TIMEOUT:-150}"

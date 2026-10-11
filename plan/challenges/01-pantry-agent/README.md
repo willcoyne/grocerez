@@ -66,18 +66,18 @@ routes working as the fallback when `AGENT_URL` isn't set.
 
 ## 2. The demo (≈ 45 seconds of the 3-minute pitch)
 
-1. On the **Household** tab, tap **"Plan our week"** (✨). Prompt is pre-filled: *"Plan 4 dinners for this week. Use what's
+1. On the **Household** tab, tap **"Plan our week"** (✨). Prompt is pre-filled: *"Plan 3 dinners for this week. Use what's
    expiring first, keep it under $60, and make sure everyone can eat it."* Tap **Run**.
 2. The **Agent sheet** streams steps as they happen:
    `Reading the household… 4 people` → `Checking allergies: Carson (peanuts), Maya (milk)` → `Reading the cabinet… 14 items` →
-   `Using up: spinach (2 days), chicken (3 days)` → `Drafting 4 meals…` → `Safety check: 4/4 pass` →
+   `Using up: spinach (2 days), chicken (3 days)` → `Drafting 3 meals…` → `Safety check: 3/3 pass` →
    `Pricing 6 missing items… $38–$46`.
-3. Result card: 4 meals (each with "uses: spinach, chicken · missing: lemons") and **"Add 6 items to the list"**.
+3. Result card: 3 meals (each with "uses: spinach, chicken · missing: lemons") and **"Add 6 items to the list"**.
 4. Tap it. **The second phone's List tab updates live**, each new row tagged "✨ for: Lemon chicken (Tue)".
 5. Close: "That's Strands running on Akamai's inference, calling our API as tools. It changed the household's state; it didn't just talk."
 
 Fallback if the network is bad: a **recorded run** (§7.7) replays the same steps from the run log.
-**Target latency:** ≤ 30 s end to end. Pre-warm once before judging.
+**Latency (measured 2026-10-11):** ~100 s for 4 meals on the shared Akamai endpoint (Qwen, ~15–20 tok/s). Decision: stay on Akamai, trim to 3 meals (target ~60 s), pre-warm before judging, and show the recorded replay (§7.7) on stage with the live run as backup.
 
 ## 3. Architecture
 

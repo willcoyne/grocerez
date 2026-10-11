@@ -15,7 +15,7 @@ import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { colors, fontSize, spacing } from "@/theme";
 
 export const DEFAULT_PROMPT =
-  "Plan 4 dinners for this week. Use what's expiring first, keep it under $60, and make sure everyone can eat it.";
+  "Plan 3 dinners for this week. Use what's expiring first, keep it under $60, and make sure everyone can eat it.";
 const BUDGETS: { label: string; cents: number | null }[] = [
   { label: "$40", cents: 4000 },
   { label: "$60", cents: 6000 },
