@@ -21,6 +21,7 @@ function cab(id: string, name: string, expiresAt: string | null): CabinetItem {
     itemId: `i-${id}`,
     item: { id: `i-${id}`, name, category: "dairy" },
     product: null,
+    allergens: [],
     status: "in_stock",
     quantityText: null,
     location: "fridge",

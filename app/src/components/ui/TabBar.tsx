@@ -1,5 +1,5 @@
 import type { Tabs } from 'expo-router/js-tabs';
-import { Archive, List, User, Users, type LucideIcon } from 'lucide-react-native';
+import { DoorClosed, List, User, Users, type LucideIcon } from 'lucide-react-native';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +14,7 @@ type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>
 export const TAB_META: Record<string, { label: string; Icon: LucideIcon }> = {
   index: { label: 'List', Icon: List },
   list: { label: 'List', Icon: List },
-  cabinet: { label: 'Cabinet', Icon: Archive },
+  cabinet: { label: 'Pantry', Icon: DoorClosed },
   me: { label: 'Me', Icon: User },
   group: { label: 'Household', Icon: Users },
 };

@@ -240,3 +240,23 @@ Format: date · folder · what the plan said · what was done · why.
 - **Response:** `{zipCode, items:[{itemId, name, lowCents, highCents, typicalCents, unit, sources, estimate:true, cached, fetchedAt}], missingItemIds,
   totalLowCents, totalHighCents}` (the contract's three fields plus extras). An empty list returns zeros without calling Claude.
   20 requests/hour per group (not in the plan; caps web-search cost).
+
+### 2026-10-10 · 05 · Cabinet: allergens + product nutrition (for the Pantry scene)
+- **Additive contract change** (`server/src/contracts/cabinet.ts`): `CabinetItem.allergens: Allergen[]` and
+  `ProductRef.caloriesPerServing: number|null`, `ProductRef.healthScore: string|null` (Nutri-Score letter, stored uppercase).
+  Applies everywhere `CabinetItem` is returned (GET/POST/PATCH cabinet, `alerts.expiring`).
+- `allergens` = `item.default_allergens ∪ product.allergens ∪ product.may_contain` for the row's own linked product, deduped,
+  in `ALLERGENS` order. Computed in `toCabinetItem` from the included columns (no extra query). `item_allergens_for()` was
+  **not** reused: it is per-(group,item) (one call per row), prefers the list row's scanned product, and returns the product's
+  allergens *instead of* the item defaults (coalesce). For "glow red if I'm allergic" the conservative union was chosen, so a
+  product label can add allergens but never hide the catalog default. List badges keep using `item_allergens_for()`.
+- Test: `test/05-cabinet.test.ts` "GET returns allergens = item defaults ∪ …".
+  **Frontend must update:** test fixtures typed `CabinetItem` need `allergens` (done for the two existing ones).
+
+### 2026-10-10 · 05 · Cabinet: product ingredients + serving size (Pantry item flip / back label)
+- **Additive contract change:** `ProductRef.ingredients: string|null` and `ProductRef.servingSize: string|null`, straight from
+  `products.ingredients` / `products.serving_size` (already stored by the 07 product lookup/scan). Selected in `cabinetInclude`,
+  mapped in `toCabinetItem`; no extra query. `null` = no label scanned (the app shows a "No label scanned yet" fallback).
+- Tests: `test/05-cabinet.test.ts` (product with label text → both fields; product without → both `null`).
+  **Frontend must update:** `PantryItem` gets `ingredients`/`servingSize` (done in `app/src/features/pantry`); fixtures typed
+  `CabinetItem` with a non-null `product` need the two fields.

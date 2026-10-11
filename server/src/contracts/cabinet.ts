@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CalendarDate } from "./common.js";
+import { Allergen } from "./dietary.js";
 import { ItemRef } from "./items.js";
 
 export const StockStatus = z.enum(["in_stock", "running_low"]);
@@ -37,6 +38,13 @@ export const ProductRef = z.object({
   name: z.string(),
   /** Presigned S3 GET URL (11), or null. */
   imageUrl: z.string().nullable(),
+  caloriesPerServing: z.number().nullable(),
+  /** Nutri-Score letter A–E (uppercase, from Open Food Facts), or null. */
+  healthScore: z.string().nullable(),
+  /** Ingredient text from the label (Open Food Facts / scan), or null when no label was scanned. */
+  ingredients: z.string().nullable(),
+  /** Serving size as printed, e.g. "30 g" or "1 cup (240 ml)", or null. */
+  servingSize: z.string().nullable(),
 });
 
 export const CabinetItem = z.object({
@@ -45,6 +53,11 @@ export const CabinetItem = z.object({
   itemId: z.uuid(),
   item: ItemRef,
   product: ProductRef.nullable(),
+  /**
+   * item.default_allergens ∪ product.allergens ∪ product.may_contain (the row's own linked product), sorted in
+   * ALLERGENS order. Conservative union: a label can only add allergens, never hide the catalog default.
+   */
+  allergens: z.array(Allergen),
   status: StockStatus,
   quantityText: z.string().nullable(),
   location: Location.nullable(),

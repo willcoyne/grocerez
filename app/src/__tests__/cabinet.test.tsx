@@ -2,7 +2,7 @@ import type { CabinetItem } from "@contracts/cabinet";
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import { api } from "@/api/client";
-import CabinetScreen from "@/app/(tabs)/cabinet";
+import CabinetScreen from "@/features/cabinet/CabinetScreen";
 import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
@@ -16,6 +16,7 @@ const oreos: CabinetItem = {
   itemId: "88888888-8888-4888-8888-888888888888",
   item: { id: "88888888-8888-4888-8888-888888888888", name: "Oreos", category: "snacks" },
   product: null,
+  allergens: [],
   status: "in_stock",
   quantityText: null,
   location: "pantry",
