@@ -97,9 +97,11 @@ describe("AI product lookup (backend/13)", () => {
     expect(res.status).toBe(200);
     const row = await prisma.cabinetItem.findUniqueOrThrow({ where: { id: add.body.id } });
     expect(row.expirationSource).toBe("estimated");
+    // Cautious end of the pantry range (180–270 days), not the best case.
     const days = Math.round((row.expiresAt!.getTime() - Date.now()) / 86_400_000);
-    expect(days).toBeGreaterThanOrEqual(268);
-    expect(days).toBeLessThanOrEqual(271);
+    expect(days).toBeGreaterThanOrEqual(178);
+    expect(days).toBeLessThanOrEqual(181);
+    expect((await prisma.item.findUniqueOrThrow({ where: { id: pb } })).shelfLifeDays).toBe(180);
 
     await prisma.cabinetItem.update({ where: { id: row.id }, data: { expiresAt: new Date("2030-01-02"), expirationSource: "manual" } });
     const again = await api().post("/api/products/lookup").set(u.auth)

@@ -108,6 +108,17 @@ export const ProductFacts = z.object({
 });
 export type ProductFacts = z.infer<typeof ProductFacts>;
 
+/**
+ * Days used for an ESTIMATED expiration date: the cautious (low) end of the unopened range for the storage place
+ * (falling back to the usual place), never the best case. FoodKeeper "ultra-pasteurized milk, 30–90 days" → 30.
+ * The lookup card still shows the full range; only dates use this. Shared by the API and the app.
+ */
+export function safeShelfDays(shelfLife: NonNullable<ProductFacts["shelfLife"]>, place?: string | null): number {
+  const unopened = (p: string | null | undefined) => shelfLife.entries.find((e) => e.storage === p && !e.opened);
+  const entry = unopened(place) ?? unopened(shelfLife.usualStorage);
+  return entry ? (entry.minDays ?? entry.maxDays) : shelfLife.maxDays;
+}
+
 export const ProductLookup = z.object({
   itemId: z.uuid().nullable(),
   item: ItemRef.nullable(),

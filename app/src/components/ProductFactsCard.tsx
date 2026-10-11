@@ -1,4 +1,4 @@
-import type { Citation, ProductLookup } from "@contracts/products";
+import { type Citation, type ProductLookup, safeShelfDays } from "@contracts/products";
 import { Linking, StyleSheet, View } from "react-native";
 
 import { AiLabel, AppText, Card, StatusChip } from "@/components/ui";
@@ -68,6 +68,9 @@ export function ProductFactsCard({ lookup, household }: { lookup: ProductLookup;
               </AppText>
             ))}
           {shelfLife.notes ? <AppText variant="caption" color="muted">{shelfLife.notes}</AppText> : null}
+          <AppText variant="caption" weight="semi" color="muted">
+            {`Expiration dates use the safe end: ${days(safeShelfDays(shelfLife))} after purchase.`}
+          </AppText>
           <Sources sources={shelfLife.sources} />
         </>
       ) : (

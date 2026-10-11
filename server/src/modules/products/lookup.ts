@@ -2,7 +2,7 @@ import { z } from "zod";
 import { config } from "../../config.js";
 import { prisma } from "../../db.js";
 import { Allergen } from "../../contracts/dietary.js";
-import { type Citation, type LookupBody, ProductFacts, type ProductLookup, ShelfLifeEntry } from "../../contracts/products.js";
+import { type Citation, type LookupBody, ProductFacts, type ProductLookup, safeShelfDays, ShelfLifeEntry } from "../../contracts/products.js";
 import { akamaiPost, embeddingsConfigured } from "../../lib/embeddings.js";
 import { AppError, badRequest, notConfigured } from "../../lib/errors.js";
 import { groupTimeZone, localDate, toCalendarDate } from "../../lib/expiration.js";
@@ -343,15 +343,15 @@ const saveLookup = (lookupKey: string, itemId: string | null, result: ProductFac
 };
 
 /**
- * Fills the catalog item's missing shelf life, adds the found "contains" allergens to its default allergens (adding
- * only, never removing: a missed allergen is worse than an extra one), caches the price for the shopping-list
+ * Fills the catalog item's missing shelf life (cautious end of the range, safeShelfDays), adds the found "contains"
+ * allergens to its default allergens (adding only, never removing: a missed allergen is worse than an extra one), caches the price for the shopping-list
  * estimate (ai/prices), and, when the allergens changed, refreshes every group that uses the item.
  */
 async function applyToItem(itemId: string, r: ProductFacts, zipCode: string | null) {
   if (r.shelfLife) {
     // items.shelf_life_days means "after buying, stored normally": a freezer-only time doesn't qualify.
     if (r.shelfLife.usualStorage !== "freezer" || r.product.category === "frozen") {
-      await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: r.shelfLife.maxDays } });
+      await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: safeShelfDays(r.shelfLife) } });
     }
   }
   if (r.allergens.contains.length) await addItemAllergens(itemId, r.allergens.contains);
@@ -364,8 +364,8 @@ async function applyToItem(itemId: string, r: ProductFacts, zipCode: string | nu
 }
 
 /**
- * Gives a cabinet row an estimated expiration: purchase date + the max days for the row's storage place (unopened),
- * else the usual place. Never overwrites a date someone typed in (expiration_source = 'manual').
+ * Gives a cabinet row an estimated expiration: purchase date + the cautious (low) end of the unopened range for the
+ * row's storage place, else the usual place (safeShelfDays). Never overwrites a date someone typed in (expiration_source = 'manual').
  */
 async function applyToCabinet(userId: string, groupId: string, cabinetItemId: string, r: ProductFacts): Promise<string | null> {
   const member = await prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
@@ -374,7 +374,7 @@ async function applyToCabinet(userId: string, groupId: string, cabinetItemId: st
   if (!row) throw new AppError(404, "NOT_FOUND", "Cabinet item not found");
   if (!r.shelfLife || row.expirationSource === "manual") return toCalendarDate(row.expiresAt);
   const place = row.location === "fridge" || row.location === "freezer" || row.location === "pantry" ? row.location : null;
-  const days = r.shelfLife.entries.find((e) => e.storage === place && !e.opened)?.maxDays ?? r.shelfLife.maxDays;
+  const days = safeShelfDays(r.shelfLife, place);
   const expiresAt = localDate(row.purchasedAt ?? row.createdAt, await groupTimeZone(prisma, groupId), days);
   await prisma.cabinetItem.update({ where: { id: row.id }, data: { expiresAt, expirationSource: "estimated" } });
   return toCalendarDate(expiresAt);
