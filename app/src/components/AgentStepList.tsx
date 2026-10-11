@@ -27,6 +27,20 @@ function useMotionAllowed() {
   return ok;
 }
 
+/** Spoken status for a step ("Reading the cabinet, done"). */
+export function stepSpoken(step: Pick<AgentStep, "label" | "status">): string {
+  return `${step.label}, ${STATUS_WORD[step.status]}`;
+}
+
+/** Announces the latest step whenever it changes (iOS needs this; accessibilityLiveRegion is Android-only). */
+export function useStepAnnouncement(steps: readonly Pick<AgentStep, "label" | "status">[], enabled = true) {
+  const latest = steps[steps.length - 1];
+  const message = enabled && latest ? stepSpoken(latest) : null;
+  useEffect(() => {
+    if (message) AccessibilityInfo.announceForAccessibility(message);
+  }, [message]);
+}
+
 /**
  * The agent's steps as they happen: a spinner (and a soft pulse) on the running step, a check that pops in when a step
  * finishes, ✕ on failure. Every row says its status in words for screen readers (never color alone). With `announce`,
@@ -34,11 +48,7 @@ function useMotionAllowed() {
  */
 export function AgentStepList({ steps, announce }: { steps: StepLike[]; announce?: boolean }) {
   const motion = useMotionAllowed();
-  const latest = steps[steps.length - 1];
-  const message = announce && latest ? `${latest.label}, ${STATUS_WORD[latest.status]}` : null;
-  useEffect(() => {
-    if (message) AccessibilityInfo.announceForAccessibility(message);
-  }, [message]);
+  useStepAnnouncement(steps, !!announce);
 
   return (
     <View style={styles.list} accessibilityLiveRegion="polite" accessibilityLabel="Agent steps">

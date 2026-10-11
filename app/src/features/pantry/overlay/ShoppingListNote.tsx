@@ -9,9 +9,8 @@ import type { Item } from "@contracts/items";
 import type { ShoppingListItem } from "@contracts/shoppingList";
 import { useMutationState } from "@tanstack/react-query";
 import { AlertTriangle, Check, Plus, X } from "lucide-react-native";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { ApiError, errorMessage } from "@/api/client";
 import { useAddListItem, useCheckItem, useDeleteListItem, useShoppingList } from "@/api/hooks/shoppingList";
@@ -20,9 +19,9 @@ import { AppText, ErrorState, useToast } from "@/components/ui";
 import { labelize } from "@/lib/format";
 import { useSocketConnected } from "@/realtime/SocketProvider";
 import { useAuth } from "@/state/AuthContext";
-import { font } from "@/theme";
 
-import { allergenLabel, pantry, softShadow } from "./palette";
+import { allergenLabel, pantry } from "./palette";
+import { NOTE_PAPER, PAPER_MARGIN_X, PAPER_RULE, PaperCaption, PaperPrimaryButton, PaperSheet, paperStyles } from "./PaperSheet";
 
 export type ShoppingListNoteProps = {
   visible: boolean;
@@ -32,19 +31,11 @@ export type ShoppingListNoteProps = {
   onStartShopping: () => void;
 };
 
-/** Notepad colours, matching the 3D note (cream paper, blue rules, red margin, red pin). */
-export const NOTE_PAPER = {
-  paper: "#FFFBF2",
-  rule: "#CFDDEA",
-  margin: "#E58A7E",
-  pin: "#D64541",
-  pinShine: "#F08A80",
-  ink: pantry.ink,
-  pencil: pantry.oakInk,
-} as const;
+/** Notepad colours (now shared with the Week sheet, see PaperSheet.tsx). */
+export { NOTE_PAPER } from "./PaperSheet";
 
-const RULE = 44; // row rhythm (also the minimum tap height)
-const MARGIN_X = 50;
+const RULE = PAPER_RULE; // row rhythm (also the minimum tap height)
+const MARGIN_X = PAPER_MARGIN_X;
 
 /** Server 409 for deleting a row that exists because of someone's preference. */
 function isPreferenceRowError(e: unknown) {
@@ -79,7 +70,6 @@ export function ShoppingListNote({ visible, groupId, onClose, onStartShopping }:
 }
 
 function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteProps, "visible">) {
-  const insets = useSafeAreaInsets();
   const connected = useSocketConnected();
   // Live sync comes from the socket; while it's down, poll every 5 s while the note is open.
   const list = useShoppingList(groupId, { refetchInterval: connected ? false : 5000 });
@@ -100,12 +90,6 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
   const rows = useMemo(() => list.data ?? [], [list.data]);
   const { toBuy, checked } = useMemo(() => noteSections(rows), [rows]);
   const toBuyCount = rows.length - checked.length;
-
-  // Paper "lands" from the lifted 3D note: fade + settle.
-  const appear = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.spring(appear, { toValue: 1, useNativeDriver: Platform.OS !== "web", friction: 8, tension: 70 }).start();
-  }, [appear]);
 
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
   const toggle = (r: ShoppingListItem) => check.mutate({ id: r.id, checked: !r.checked }, { onError });
@@ -172,59 +156,30 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
   }
 
   return (
-    <View style={StyleSheet.absoluteFill} testID="list-note">
-      <Pressable
-        style={[StyleSheet.absoluteFill, styles.backdrop]}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close shopping list"
-        testID="list-note-backdrop"
-      />
-      <Animated.View
-        accessibilityViewIsModal
-        style={[
-          styles.sheet,
-          { top: insets.top + 18, bottom: insets.bottom + 12 },
-          {
-            opacity: appear,
-            transform: [
-              { translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [-24, 0] }) },
-              { scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
-              { rotate: appear.interpolate({ inputRange: [0, 1], outputRange: ["-3deg", "-0.6deg"] }) },
-            ],
-          },
-        ]}
-      >
-        <View style={styles.margin} pointerEvents="none" />
-        <View style={styles.header}>
-          <View style={styles.titleWrap}>
-            <AppText weight="display" style={styles.title} accessibilityRole="header">
-              List
-            </AppText>
-            <View style={styles.squiggle} />
-          </View>
-          <Pressable
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Close shopping list"
-            hitSlop={6}
-            style={({ pressed }) => [styles.close, pressed && styles.pressed]}
-            testID="list-note-close"
-          >
-            <X size={22} color={NOTE_PAPER.pencil} />
-          </Pressable>
-        </View>
-        {rows.length > 0 ? (
-          <AppText variant="bodyS" weight="semi" style={[styles.pencil, styles.count]}>
-            {`${toBuyCount} to buy · ${checked.length} in the cart`}
-          </AppText>
-        ) : null}
-        {!connected && !list.isPending ? (
-          <AppText variant="caption" style={[styles.pencil, styles.count]}>
-            Live updates paused · refreshing every 5 s
-          </AppText>
-        ) : null}
-
+    <PaperSheet
+      testID="list-note"
+      title="List"
+      closeLabel="Close shopping list"
+      onClose={onClose}
+      subheader={
+        <>
+          {rows.length > 0 ? <PaperCaption strong>{`${toBuyCount} to buy · ${checked.length} in the cart`}</PaperCaption> : null}
+          {!connected && !list.isPending ? <PaperCaption>Live updates paused · refreshing every 5 s</PaperCaption> : null}
+        </>
+      }
+      footer={
+        toBuyCount > 0 ? (
+          <PaperPrimaryButton
+            label="Start shopping 🛒"
+            accessibilityLabel="Start shopping"
+            accessibilityHint="Opens the store aisle to shop this list"
+            onPress={onStartShopping}
+            testID="list-note-start-shopping"
+          />
+        ) : null
+      }
+      overlay={<ItemPicker visible={picking} title="Add to the list" onClose={() => setPicking(false)} onPick={pick} />}
+    >
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           {body}
           {!list.isPending && !list.isError ? (
@@ -242,30 +197,7 @@ function NoteSheet({ groupId, onClose, onStartShopping }: Omit<ShoppingListNoteP
             </Pressable>
           ) : null}
         </ScrollView>
-
-        {toBuyCount > 0 ? (
-          <Pressable
-            onPress={onStartShopping}
-            accessibilityRole="button"
-            accessibilityLabel="Start shopping"
-            accessibilityHint="Opens the store aisle to shop this list"
-            style={({ pressed }) => [styles.shop, pressed && styles.pressed]}
-            testID="list-note-start-shopping"
-          >
-            <AppText weight="bold" style={styles.shopText}>
-              Start shopping 🛒
-            </AppText>
-          </Pressable>
-        ) : null}
-
-        {/* the pin the paper came off */}
-        <View style={styles.pin} pointerEvents="none">
-          <View style={styles.pinShine} />
-        </View>
-      </Animated.View>
-
-      <ItemPicker visible={picking} title="Add to the list" onClose={() => setPicking(false)} onPick={pick} />
-    </View>
+    </PaperSheet>
   );
 }
 
@@ -365,61 +297,11 @@ function NoteRow({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: pantry.backdrop },
-  sheet: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    backgroundColor: NOTE_PAPER.paper,
-    borderRadius: 6,
-    paddingTop: 26,
-    overflow: "visible",
-    ...softShadow,
-  },
-  margin: { position: "absolute", top: 0, bottom: 0, left: MARGIN_X - 10, width: 2, backgroundColor: NOTE_PAPER.margin },
-  header: { flexDirection: "row", alignItems: "flex-start", paddingLeft: MARGIN_X, paddingRight: 8 },
-  titleWrap: { flex: 1, paddingTop: 4 },
-  title: {
-    fontFamily: font.display,
-    fontSize: 40,
-    lineHeight: 46,
-    color: NOTE_PAPER.pencil,
-    transform: [{ rotate: "-3deg" }],
-  },
-  squiggle: {
-    width: 84,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: NOTE_PAPER.pencil,
-    opacity: 0.7,
-    marginTop: 2,
-    transform: [{ rotate: "-2deg" }],
-  },
-  close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  count: { paddingLeft: MARGIN_X, paddingRight: 16, marginTop: 6 },
-  scroll: { flex: 1, marginTop: 8 },
-  scrollContent: { paddingBottom: 24 },
-  center: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center", gap: 10, paddingLeft: MARGIN_X, paddingRight: 20 },
-  hand: { fontFamily: font.display, color: NOTE_PAPER.pencil },
+/** Paper chrome (sheet, rules, sections, hand lettering) is shared with the Week sheet; rows are List-only. */
+const styles = {
+  ...paperStyles,
+  ...StyleSheet.create({
   emptyText: { fontSize: 22, lineHeight: 30, transform: [{ rotate: "-1.5deg" }] },
-  pencil: { color: pantry.muted },
-  section: {
-    color: pantry.oakDark,
-    paddingLeft: MARGIN_X,
-    paddingTop: 14,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
-    letterSpacing: 1.2,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    minHeight: RULE,
-    borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
-  },
   rowMain: { flex: 1, flexDirection: "row", alignItems: "flex-start", minHeight: RULE, paddingVertical: 6 },
   box: {
     width: 24,
@@ -465,30 +347,6 @@ const styles = StyleSheet.create({
     borderBottomColor: NOTE_PAPER.rule,
   },
   addText: { fontSize: 20, lineHeight: 26, color: pantry.green },
-  shop: {
-    minHeight: 54,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 16,
-    borderRadius: 27,
-    backgroundColor: pantry.green,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    ...softShadow,
-  },
-  shopText: { color: "#FFFFFF", fontSize: 18, lineHeight: 24 },
   pressed: { opacity: 0.75 },
-  pin: {
-    position: "absolute",
-    top: -10,
-    alignSelf: "center",
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: NOTE_PAPER.pin,
-    ...softShadow,
-  },
-  pinShine: { position: "absolute", top: 5, left: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: NOTE_PAPER.pinShine },
-});
+  }),
+};

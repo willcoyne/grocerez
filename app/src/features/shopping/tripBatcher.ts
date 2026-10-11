@@ -57,9 +57,14 @@ export class TripBatcher {
   private readonly graceMs: number;
   private readonly maxRetries: number;
 
-  constructor(private readonly opts: TripBatcherOptions) {
+  constructor(private opts: TripBatcherOptions) {
     this.graceMs = opts.graceMs ?? GRACE_MS;
     this.maxRetries = opts.maxRetries ?? 3;
+  }
+
+  /** Swap the completion call (a React hook hands in its latest mutation from an effect, never during render). */
+  setComplete(complete: TripBatcherOptions["complete"]) {
+    this.opts = { ...this.opts, complete };
   }
 
   setListener(listener: TripBatcherListener | null) {

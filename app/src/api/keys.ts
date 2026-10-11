@@ -20,5 +20,8 @@ export const keys = {
   /** Pantry Agent: the recent-runs list (also the prefix of every single run's key). */
   agentRuns: (groupId: string) => ["group", groupId, "agent-runs"] as const,
   agentRun: (groupId: string, runId: string) => ["group", groupId, "agent-runs", runId] as const,
+  /** Week calendar (spec §13): every date range of a group's plan lives under this prefix. */
+  mealPlans: (groupId: string) => ["group", groupId, "meal-plan"] as const,
+  mealPlan: (groupId: string, from: string | null, to: string | null) => ["group", groupId, "meal-plan", from ?? "", to ?? ""] as const,
   itemSearch: (q: string) => ["items", "search", q] as const,
 };

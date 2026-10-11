@@ -85,7 +85,18 @@ export function AgentChoiceChips<T>({
   );
 }
 
-/** Household tab: the prominent "Plan our week" action. Long-press opens the recorded-run replay when `replay` is on. */
+/**
+ * Opens the Week sheet on the pantry (spec §13): the pantry tab opens it whenever `week` changes, so each tap sends a
+ * fresh nonce. The /agent modal stays as the internal/dev view (and the recorded-run replay).
+ */
+export function openWeekSheet(router: ReturnType<typeof useRouter>) {
+  router.navigate(`/cabinet?week=${Date.now()}`);
+}
+
+/**
+ * Household tab: the prominent "Plan our week" action → the Week sheet on the pantry. Long-press opens the recorded-run
+ * replay (/agent?replay=1) when `replay` is on.
+ */
 export function AgentEntryCard({ replay }: { replay: boolean }) {
   const router = useRouter();
   return (
@@ -106,8 +117,8 @@ export function AgentEntryCard({ replay }: { replay: boolean }) {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Plan our week"
-        accessibilityHint={replay ? "Long-press to replay the last recorded run" : undefined}
-        onPress={() => router.push("/agent")}
+        accessibilityHint={replay ? "Opens the week on the pantry. Long-press to replay the last recorded run" : "Opens the week on the pantry"}
+        onPress={() => openWeekSheet(router)}
         onLongPress={replay ? () => router.push("/agent?replay=1") : undefined}
         style={({ pressed }) => [styles.entryBtn, pressed && { opacity: pressedOpacity }]}
       >

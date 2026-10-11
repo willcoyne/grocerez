@@ -8,9 +8,10 @@ import { AppText, Button, Card, DashedEmpty, ErrorState, LoadingState, SectionLa
 import { expirationText, plural, shortDate } from "@/lib/format";
 import { color, pressedOpacity, radius, size, space } from "@/theme";
 
+import { openWeekSheet } from "./AgentControls";
 import { ExpirationPill } from "./Badges";
 
-/** Household tab → Alerts: expiring soon (tap → ItemDetail, "Plan meals" → Pantry Agent) and possible recalls (Dismiss). */
+/** Household tab → Alerts: expiring soon (tap → ItemDetail, "Plan meals" → the Week sheet) and possible recalls (Dismiss). */
 export function AlertsSection({ groupId }: { groupId: string }) {
   const alerts = useAlerts(groupId);
   const dismiss = useDismissRecall(groupId);
@@ -35,7 +36,7 @@ export function AlertsSection({ groupId }: { groupId: string }) {
                 <AppText variant="bodyL" weight="heavy">
                   Expiring soon
                 </AppText>
-                <Button label="Plan meals" variant="ghost" size="sm" onPress={() => router.push("/agent")} />
+                <Button label="Plan meals" variant="ghost" size="sm" onPress={() => openWeekSheet(router)} />
               </View>
               {alerts.data.expiring.map((c) => (
                 <Pressable
