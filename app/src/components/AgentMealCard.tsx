@@ -29,7 +29,7 @@ export function safetyStatus(
 const SAFETY_ICON = { ok: ShieldCheck, danger: ShieldAlert, neutral: ShieldQuestion, warn: ShieldQuestion } as const;
 
 /**
- * One proposed dinner, built to scan: the photo leads, then title, time and servings, and where the recipe comes from
+ * One proposed dinner, built to scan: a photo thumbnail beside the title, time and servings, and where the recipe comes from
  * (a cited web recipe, spec §11, or "AI-created recipe"). Then the household safety chip, what it uses and what to buy,
  * and collapsible ingredients and steps (closed by default to keep cards short).
  */
@@ -50,22 +50,27 @@ export function AgentMealCard({
 
   return (
     <Card style={[styles.card, style]}>
-      {source?.imageUrl ? <MealPhoto uri={source.imageUrl} title={source.title} /> : null}
       <View style={styles.body}>
-        <View style={styles.head}>
-          <AppText variant="bodyL" weight="heavy" accessibilityRole="header">
-            {meal.title}
-          </AppText>
-          {showSourceTitle ? (
-            <AppText variant="caption" color="muted">
-              {`“${source.title}”`}
-            </AppText>
-          ) : null}
-          <AppText variant="caption" weight="semi" color="ink2">
-            {meta}
-          </AppText>
+        {/* photo beside the heading (a full-width photo towered over the card on wide screens) */}
+        <View style={styles.top}>
+          {source?.imageUrl ? <MealPhoto uri={source.imageUrl} title={source.title} /> : null}
+          <View style={styles.topText}>
+            <View style={styles.head}>
+              <AppText variant="bodyL" weight="heavy" accessibilityRole="header">
+                {meal.title}
+              </AppText>
+              {showSourceTitle ? (
+                <AppText variant="caption" color="muted">
+                  {`“${source.title}”`}
+                </AppText>
+              ) : null}
+              <AppText variant="caption" weight="semi" color="ink2">
+                {meta}
+              </AppText>
+            </View>
+            {source ? <Citation source={source} /> : <AiLabel text="AI-created recipe" />}
+          </View>
         </View>
-        {source ? <Citation source={source} /> : <AiLabel text="AI-created recipe" />}
 
         <View style={styles.safety}>
           <StatusChip
@@ -189,8 +194,10 @@ function Citation({ source }: { source: MealSource }) {
 
 const styles = StyleSheet.create({
   card: { padding: 0, overflow: "hidden" },
-  photo: { width: "100%", aspectRatio: 16 / 9, backgroundColor: color.segment },
+  photo: { width: 112, height: 112, borderRadius: 10, backgroundColor: color.segment },
   body: { padding: space.md, gap: space.md },
+  top: { flexDirection: "row", alignItems: "flex-start", gap: space.md },
+  topText: { flex: 1, gap: space.xs },
   head: { gap: 2 },
   citation: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: size.hit, alignSelf: "flex-start" },
   safety: { gap: space.xs },
