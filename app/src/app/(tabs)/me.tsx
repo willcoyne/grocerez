@@ -1,5 +1,6 @@
 import type { Dietary } from "@contracts/dietary";
 import { Image } from "expo-image";
+import { router } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -27,6 +28,7 @@ export default function MeScreen() {
         <Profile />
         {activeGroupId ? <MyPreferences groupId={activeGroupId} /> : null}
         <DietarySection />
+        <Button title="✨ How the Pantry Agent works" variant="secondary" onPress={() => router.push("/agent-flow")} />
         <Button title="Sign out" variant="secondary" style={styles.signOut} onPress={() => void signOut()} />
       </View>
     </ScrollView>

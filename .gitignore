@@ -6,3 +6,4 @@
 agent/.env
 agent/.venv/
 outputs/
+.playwright-mcp/
