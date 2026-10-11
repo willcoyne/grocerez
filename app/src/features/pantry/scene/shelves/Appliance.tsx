@@ -3,11 +3,13 @@
  * Fridge / freezer theming for an ApplianceBlock: steel header with a temperature readout and an LED strip, liner
  * walls (white for the fridge, frosted ice-blue for the freezer), steel footer, plus freezer sparkles and mist.
  * Lights live in ShelfColumn (always mounted, so the light count never changes and shaders never recompile).
+ * Materials and the readout font follow the active theme (shelves/materials.ts).
  */
 import { useFrame } from "@react-three/fiber";
 import { memo, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { useSceneTheme } from "../../../theme/ThemeProvider";
 import {
   APPLIANCE_FOOTER_HEIGHT,
   APPLIANCE_HEADER_HEIGHT,
@@ -21,7 +23,8 @@ import { ShelfLabel } from "./ShelfLabel";
 const HALF = INNER_WIDTH / 2;
 
 export const Appliance = memo(function Appliance({ block }: { block: ApplianceBlock }) {
-  const { geometries: G, materials: M } = shelfAssets();
+  const theme = useSceneTheme();
+  const { geometries: G, materials: M } = shelfAssets(theme);
   const fridge = block.theme === "fridge";
   const wallMat = fridge ? M.fridgeWall : M.frostWall;
   const rowsH = block.rowsTop - block.rowsBottom;
@@ -70,7 +73,7 @@ export const Appliance = memo(function Appliance({ block }: { block: ApplianceBl
       />
       <mesh
         geometry={G.unitBox}
-        material={displayMaterial()}
+        material={M.display}
         position={[0, headerY + 0.012, 0.0115]}
         scale={[0.31, 0.078, 0.002]}
       />
@@ -79,7 +82,9 @@ export const Appliance = memo(function Appliance({ block }: { block: ApplianceBl
         size={0.042}
         depth={0.002}
         position={[0, headerY + 0.012, 0.0125]}
-        material={readoutMaterial()}
+        material={M.readout}
+        maxWidth={0.28}
+        theme={theme}
       />
       {/* tiny brand badge dots */}
       {[-0.62, 0.62].map((x) => (
@@ -123,19 +128,6 @@ export const Appliance = memo(function Appliance({ block }: { block: ApplianceBl
   );
 });
 
-let displayMat: THREE.MeshStandardMaterial | null = null;
-function displayMaterial() {
-  if (!displayMat) displayMat = new THREE.MeshStandardMaterial({ color: "#0E1A22", roughness: 0.25, metalness: 0.2 });
-  return displayMat;
-}
-let readoutMat: THREE.MeshStandardMaterial | null = null;
-function readoutMaterial() {
-  if (!readoutMat) {
-    readoutMat = new THREE.MeshStandardMaterial({ color: "#8FE9FF", emissive: "#5CDBFF", emissiveIntensity: 1.2 });
-  }
-  return readoutMat;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 
 const SPARKLES = 70;
@@ -143,7 +135,8 @@ const MISTS = 3;
 
 /** Slowly drifting ice-crystal sparkles (one Points draw call) and a few soft mist sprites. */
 function FreezerAtmosphere({ block }: { block: ApplianceBlock }) {
-  const { geometries: G, materials: M } = shelfAssets();
+  const theme = useSceneTheme();
+  const { geometries: G, materials: M } = shelfAssets(theme);
   const points = useRef<THREE.Points>(null);
   const mists = useRef<(THREE.Mesh | null)[]>([]);
   const top = block.rowsTop;
@@ -184,7 +177,7 @@ function FreezerAtmosphere({ block }: { block: ApplianceBlock }) {
       arr[i * 3] += Math.sin(t * 0.6 + phases[i]) * 0.0006;
     }
     attr.needsUpdate = true;
-    const mats = shelfAssets().materials;
+    const mats = M;
     mats.sparkle.opacity = 0.7 + Math.sin(t * 2.1) * 0.2;
     mats.mist.opacity = 0.14 + Math.sin(t * 0.4) * 0.04;
     mists.current.forEach((m, i) => {

@@ -1,39 +1,32 @@
-// Bundled typeface for 3D text (works on native: no DOM canvas needed).
-// helvetiker_bold.typeface.json comes from three.js examples/fonts (Helvetiker, Copyright (c) Magenta ltd, 2004,
-// MgOpen licence: free to use, modify and redistribute). It is not shipped in the `three` npm package, so it is
-// vendored here.
+// Typeface for 3D text (works on native: no DOM canvas needed). Follows the theme: helvetiker bold for cozy (vendored
+// from three.js examples/fonts: Helvetiker, Copyright (c) Magenta ltd, 2004, MgOpen licence), the theme's own typeface
+// otherwise (theme core `getThemeFont`). Every helper takes an optional theme and defaults to the active one, so
+// builders that run at mount (room props, keyed on the theme id by the scene) pick up the current theme.
 import type { BufferGeometry } from "three";
-import { Font, type FontData } from "three/examples/jsm/loaders/FontLoader.js";
+import type { Font } from "three/examples/jsm/loaders/FontLoader.js";
 import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
-import fontJson from "../fonts/helvetiker_bold.typeface.json";
 
-let font: Font | null = null;
+import { drawableTextFor, getThemeFont, textAdvance } from "../../../theme/fonts";
+import { getActiveTheme } from "../../../theme/store";
+import type { SceneTheme } from "../../../theme/types";
 
-export function getFont(): Font {
-  if (!font) font = new Font(fontJson as unknown as FontData);
-  return font;
+export function getFont(theme: SceneTheme = getActiveTheme()): Font {
+  return getThemeFont(theme);
 }
 
 /** Replace characters the typeface can't draw (emoji, accents...) so TextGeometry never logs/throws. */
-export function drawableText(text: string): string {
-  const glyphs = (getFont().data as unknown as { glyphs: Record<string, unknown> }).glyphs;
-  let out = "";
-  for (const ch of text) {
-    if (ch === " " || glyphs[ch]) out += ch;
-    else {
-      const plain = ch.normalize("NFD").replace(/[̀-ͯ]/g, "");
-      out += plain && glyphs[plain] ? plain : "";
-    }
-  }
-  return out;
+export function drawableText(text: string, theme: SceneTheme = getActiveTheme()): string {
+  return drawableTextFor(getFont(theme), text);
 }
 
 /** Horizontal advance of a string in world units at `size`. */
-export function advanceOf(text: string, size: number): number {
-  const data = getFont().data as unknown as { resolution: number; glyphs: Record<string, { ha: number }> };
-  let w = 0;
-  for (const ch of text) w += data.glyphs[ch]?.ha ?? data.resolution * 0.3;
-  return (w / data.resolution) * size;
+export function advanceOf(text: string, size: number, theme: SceneTheme = getActiveTheme()): number {
+  return textAdvance(getFont(theme), text, size);
+}
+
+/** Bevels put seams between the pixel font's merged rectangles (themes/pixel/README.md): blocks stay crisp. */
+export function themeAllowsBevel(theme: SceneTheme): boolean {
+  return theme.font !== "pixel";
 }
 
 export type TextOpts = {
@@ -44,10 +37,10 @@ export type TextOpts = {
   curveSegments?: number;
 };
 
-export function textGeometry(text: string, o: TextOpts): BufferGeometry {
-  const bevel = o.bevel ?? 0;
-  return new TextGeometry(drawableText(text), {
-    font: getFont(),
+export function textGeometry(text: string, o: TextOpts, theme: SceneTheme = getActiveTheme()): BufferGeometry {
+  const bevel = themeAllowsBevel(theme) ? (o.bevel ?? 0) : 0;
+  return new TextGeometry(drawableText(text, theme), {
+    font: getFont(theme),
     size: o.size,
     depth: o.depth,
     curveSegments: o.curveSegments ?? 4,

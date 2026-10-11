@@ -8,9 +8,9 @@ import demoRunJson from "../../../server/test/fixtures/agent/demo-run.json";
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
 import { ShoppingListNote } from "@/features/pantry/overlay/ShoppingListNote";
-import GroupScreen from "@/app/(tabs)/group";
 import AgentScreen, { DEFAULT_PROMPT, replayDelays } from "@/app/agent";
 import { AgentMealCard } from "@/components/AgentMealCard";
+import { HouseholdSheet } from "@/features/stations/HouseholdSheet";
 import { handleSocketEvent } from "@/realtime/SocketProvider";
 import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
@@ -231,18 +231,18 @@ describe("Recorded-run replay", () => {
   });
 });
 
-describe("Group tab entry point", () => {
-  it("'Plan our week' opens the Week sheet on the pantry; long-press opens the replay (dev build); no recipes link", async () => {
+describe("Household entry point (the cork board's sheet)", () => {
+  it("'Plan our week' opens the Week paper on the pantry; long-press opens the replay (dev build); no recipes link", async () => {
     apiMock.mockImplementation(
       apiRoutes({
         [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }),
       }),
     );
-    await renderWithProviders(<GroupScreen />);
+    await renderWithProviders(<HouseholdSheet visible onClose={jest.fn()} />);
     const plan = await screen.findByRole("button", { name: "Plan our week" });
     await fireEvent.press(plan);
-    // The pantry tab opens the Week sheet whenever `week` changes, so each tap sends a fresh nonce (spec §13).
-    expect(mockRouter.navigate).toHaveBeenCalledWith(expect.stringMatching(/^\/cabinet\?week=\d+$/));
+    // The room handles ?station= deep links (and clears the param), so the same link works every time.
+    expect(mockRouter.navigate).toHaveBeenCalledWith("/cabinet?station=week");
     expect(mockRouter.push).not.toHaveBeenCalledWith("/agent");
     await fireEvent(plan, "longPress");
     expect(mockRouter.push).toHaveBeenCalledWith("/agent?replay=1");

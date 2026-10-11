@@ -29,8 +29,8 @@ import { maybeAskNotificationPermission } from "@/notifications/expirations";
 import { useSocketConnected } from "@/realtime/SocketProvider";
 import { useAuth } from "@/state/AuthContext";
 
-import { allergenLabel, pantry } from "./palette";
-import { NOTE_PAPER, PAPER_MARGIN_X, PAPER_RULE, PaperCaption, PaperPrimaryButton, PaperSheet, paperStyles } from "./PaperSheet";
+import { allergenLabel, type OverlayPalette, useOverlayPalette, useOverlayStyles } from "./palette";
+import { makePaperStyles, PAPER_MARGIN_X, PAPER_RULE, PaperCaption, PaperPrimaryButton, PaperSheet } from "./PaperSheet";
 
 export type ShoppingListNoteProps = {
   visible: boolean;
@@ -72,11 +72,15 @@ export function noteSections(rows: readonly ShoppingListItem[]): { toBuy: Sectio
 }
 
 export function ShoppingListNote({ visible, groupId, onClose }: ShoppingListNoteProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   if (!visible) return null;
   return <NoteSheet groupId={groupId} onClose={onClose} />;
 }
 
 function NoteSheet({ groupId, onClose }: Omit<ShoppingListNoteProps, "visible">) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const connected = useSocketConnected();
   // Live sync comes from the socket; while it's down, poll every 5 s while the note is open.
   const list = useShoppingList(groupId, { refetchInterval: connected ? false : 5000 });
@@ -162,7 +166,7 @@ function NoteSheet({ groupId, onClose }: Omit<ShoppingListNoteProps, "visible">)
   if (list.isPending) {
     body = (
       <View style={styles.center} testID="list-note-loading" accessibilityRole="progressbar" accessibilityLabel="Loading the list">
-        <ActivityIndicator color={NOTE_PAPER.pencil} />
+        <ActivityIndicator color={P.oakInk} />
         <AppText variant="bodyS" style={styles.pencil}>
           Loading the list…
         </AppText>
@@ -274,7 +278,7 @@ function NoteSheet({ groupId, onClose }: Omit<ShoppingListNoteProps, "visible">)
               style={({ pressed }) => [styles.addRow, pressed && styles.pressed]}
               testID="list-note-add"
             >
-              <Plus size={20} color={pantry.green} strokeWidth={2.6} />
+              <Plus size={20} color={P.green} strokeWidth={2.6} />
               <AppText weight="display" style={[styles.hand, styles.addText]}>
                 Add item
               </AppText>
@@ -306,6 +310,8 @@ type NoteRowProps = {
 };
 
 function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, onDelete, onScan }: NoteRowProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
   const name = row.item.name;
   const wanted = row.checked
     ? `In the cart · checked by ${who(row.checkedBy, meId, names)}`
@@ -335,7 +341,7 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
         testID={`list-note-check-${row.id}`}
       >
         <View style={[styles.box, row.checked && styles.boxOn]}>
-          {row.checked ? <Check size={18} color={NOTE_PAPER.paper} strokeWidth={3.2} /> : null}
+          {row.checked ? <Check size={18} color={P.notePaper} strokeWidth={3.2} /> : null}
         </View>
         <View style={styles.rowText}>
           <View style={styles.nameLine}>
@@ -361,7 +367,7 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
           ) : null}
           {agentNote ? (
             <View style={styles.agentNote} accessible accessibilityLabel={`AI note: ${agentNote}`}>
-              <Sparkles size={12} color={NOTE_PAPER.pencil} strokeWidth={2.5} />
+              <Sparkles size={12} color={P.oakInk} strokeWidth={2.5} />
               <AppText variant="caption" weight="semi" style={[styles.pencil, styles.name]}>
                 {agentNote.charAt(0).toUpperCase() + agentNote.slice(1)}
               </AppText>
@@ -380,7 +386,7 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
                     accessibilityLabel={`Allergen warning: contains ${allergenLabel(f.allergen).toLowerCase()}, ${mine ? "you are" : `${f.displayName} is`} allergic`}
                     testID={`list-note-allergen-${row.id}-${f.userId}-${f.allergen}`}
                   >
-                    <AlertTriangle size={13} color={mine ? "#FFFFFF" : pantry.redInk} strokeWidth={2.6} />
+                    <AlertTriangle size={13} color={mine ? "#FFFFFF" : P.redInk} strokeWidth={2.6} />
                     <AppText variant="caption" weight="bold" style={mine ? styles.badgeMineText : styles.badgeOtherText}>
                       {`${allergenLabel(f.allergen)} · ${whom}`}
                     </AppText>
@@ -399,7 +405,7 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
           style={({ pressed }) => [styles.del, pressed && styles.pressed]}
           testID={`list-note-scan-${row.id}`}
         >
-          <ScanBarcode size={18} color={pantry.muted} />
+          <ScanBarcode size={18} color={P.muted} />
         </Pressable>
       ) : null}
       {row.reason === "manual" ? (
@@ -410,7 +416,7 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
           style={({ pressed }) => [styles.del, pressed && styles.pressed]}
           testID={`list-note-delete-${row.id}`}
         >
-          <X size={18} color={pantry.muted} />
+          <X size={18} color={P.muted} />
         </Pressable>
       ) : null}
     </View>
@@ -418,8 +424,8 @@ function NoteRow({ row, meId, names, runningLow, priceText, syncing, onToggle, o
 }
 
 /** Paper chrome (sheet, rules, sections, hand lettering) is shared with the Week sheet; rows are List-only. */
-const styles = {
-  ...paperStyles,
+const makeStyles = (P: OverlayPalette) => ({
+  ...makePaperStyles(P),
   ...StyleSheet.create({
   emptyText: { fontSize: 22, lineHeight: 30, transform: [{ rotate: "-1.5deg" }] },
   rowMain: { flex: 1, flexDirection: "row", alignItems: "flex-start", minHeight: RULE, paddingVertical: 6 },
@@ -431,17 +437,17 @@ const styles = {
     marginRight: 22,
     borderRadius: 4,
     borderWidth: 2,
-    borderColor: NOTE_PAPER.pencil,
+    borderColor: P.oakInk,
     alignItems: "center",
     justifyContent: "center",
     transform: [{ rotate: "-4deg" }],
   },
-  boxOn: { backgroundColor: pantry.green, borderColor: pantry.green },
+  boxOn: { backgroundColor: P.green, borderColor: P.green },
   rowText: { flex: 1, gap: 2, paddingRight: 4 },
   nameLine: { flexDirection: "row", alignItems: "center", gap: 8 },
-  name: { color: NOTE_PAPER.ink, flexShrink: 1 },
-  checkedText: { color: pantry.muted },
-  syncDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: pantry.muted },
+  name: { color: P.ink, flexShrink: 1 },
+  checkedText: { color: P.muted },
+  syncDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: P.muted },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
   badge: {
     flexDirection: "row",
@@ -452,10 +458,10 @@ const styles = {
     borderRadius: 12,
     borderWidth: 1,
   },
-  badgeMine: { backgroundColor: pantry.redInk, borderColor: pantry.redInk },
-  badgeOther: { backgroundColor: pantry.redTint, borderColor: "#F2B8B1" },
+  badgeMine: { backgroundColor: P.redInk, borderColor: P.redInk },
+  badgeOther: { backgroundColor: P.redTint, borderColor: "#F2B8B1" },
   badgeMineText: { color: "#FFFFFF" },
-  badgeOtherText: { color: pantry.redInk },
+  badgeOtherText: { color: P.redInk },
   del: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   addRow: {
     flexDirection: "row",
@@ -464,9 +470,9 @@ const styles = {
     minHeight: RULE + 4,
     paddingLeft: MARGIN_X - 2,
     borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
+    borderBottomColor: P.noteRule,
   },
-  addText: { fontSize: 20, lineHeight: 26, color: pantry.green },
+  addText: { fontSize: 20, lineHeight: 26, color: P.green },
   agentNote: { flexDirection: "row", alignItems: "center", gap: 4 },
   banner: { paddingLeft: PAPER_MARGIN_X - 4, paddingRight: 12 },
   priceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: MARGIN_X, marginTop: 8 },
@@ -476,9 +482,9 @@ const styles = {
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: pantry.green,
+    borderColor: P.green,
   },
-  priceText: { color: pantry.green },
+  priceText: { color: P.green },
   pressed: { opacity: 0.75 },
   }),
-};
+});

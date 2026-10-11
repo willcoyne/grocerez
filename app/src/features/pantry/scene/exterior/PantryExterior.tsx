@@ -1,13 +1,14 @@
 // The closed/opening pantry (closed-pantry.jpg, open-pantry.jpg): cabinet with louvred doors, wooden "Grocer"
-// letters, hanging EZ sign, pinned shopping list, stool + plant, floor and wall. Rendered inside the foundation's
-// <Canvas>; lights and the camera live there too.
+// letters, hanging EZ sign, the pinned List / Me / Week papers, stool + plant. Rendered inside the foundation's
+// <Canvas>; lights and the camera live there too (the wall + floor are the room shell, scene/room/RoomShell).
 /* eslint-disable react/no-unknown-property -- R3F JSX props (geometry, material, raycast...) */
 import { type ThreeEvent, useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
-import { Mesh } from "three";
+import { type MutableRefObject, useEffect, useMemo, useRef } from "react";
+import { type BufferGeometry, type Material, Mesh } from "three";
 
+import { useSceneTheme } from "../../../theme/ThemeProvider";
 import type { NoteKind, PantryPhase } from "../../types";
-import { createAnimState, updateExterior } from "./animation";
+import { createAnimState, type ExteriorAnimState, type ExteriorInput, updateExterior } from "./animation";
 import { createExterior, getSharedGeometry, HIT_BOX, ME_HIT, NOTE_HIT, WEEK_HIT } from "./builders";
 import { listLines, meNoteLines, weekNoteLines } from "./list";
 import { getMaterials } from "./materials";
@@ -35,6 +36,12 @@ export type PantryExteriorProps = {
   weekPreview?: string[];
   /** tap on the pinned Week note (its own hit target, `closed` only) */
   onWeekPress?: () => void;
+  /**
+   * Live phase clock (motion.ts PhaseClock; `open` is the LINEAR door clock). When given, the doors read it every
+   * frame instead of `openProgress`, so they move in step with the camera, without React-render lag or the
+   * re-render quantisation of `openProgress` (which made the last degrees of a close stutter).
+   */
+  clock?: { readonly current: { readonly open: number } };
 };
 
 const noRaycast = () => {};
@@ -42,6 +49,51 @@ const noRaycast = () => {};
 function setCursor(cursor: string) {
   const doc = (globalThis as { document?: { body?: { style: { cursor: string } } } }).document;
   if (doc?.body) doc.body.style.cursor = cursor;
+}
+
+type HoverKey = "noteHover" | "meHover" | "weekHover";
+
+/**
+ * Tap target for one pinned paper: its front face sits in front of the pantry's hit box, so it always wins the
+ * raycast and the doors stay shut.
+ */
+function PaperHit({
+  geometry,
+  material,
+  position,
+  enabled,
+  onPress,
+  anim,
+  hoverKey,
+}: {
+  geometry: BufferGeometry;
+  material: Material;
+  position: [number, number, number];
+  enabled: boolean;
+  onPress: MutableRefObject<(() => void) | undefined>;
+  anim: MutableRefObject<ExteriorAnimState>;
+  hoverKey: HoverKey;
+}) {
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      position={position}
+      raycast={enabled ? Mesh.prototype.raycast : noRaycast}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        e.stopPropagation();
+        onPress.current?.();
+      }}
+      onPointerOver={(e: ThreeEvent<PointerEvent>) => {
+        e.stopPropagation();
+        anim.current[hoverKey] = true;
+        setCursor("pointer");
+      }}
+      onPointerOut={() => {
+        anim.current[hoverKey] = false;
+      }}
+    />
+  );
 }
 
 export function PantryExterior({
@@ -56,14 +108,17 @@ export function PantryExterior({
   onMePress,
   weekPreview,
   onWeekPress,
+  clock,
 }: PantryExteriorProps) {
-  const exterior = useMemo(() => createExterior(), []);
+  const theme = useSceneTheme();
+  const exterior = useMemo(() => createExterior(theme), [theme]);
   const anim = useRef(createAnimState());
-  const input = useRef({ phase, openProgress, listProgress, liftedNote });
+  const input = useRef<ExteriorInput>({ phase, openProgress, listProgress, liftedNote });
   const pressRef = useRef(onPress);
   const listPressRef = useRef(onListPress);
   const mePressRef = useRef(onMePress);
   const weekPressRef = useRef(onWeekPress);
+  const clockRef = useRef(clock);
 
   useEffect(() => {
     input.current = { phase, openProgress, listProgress, liftedNote };
@@ -71,7 +126,8 @@ export function PantryExterior({
     listPressRef.current = onListPress;
     mePressRef.current = onMePress;
     weekPressRef.current = onWeekPress;
-  }, [phase, openProgress, listProgress, liftedNote, onPress, onListPress, onMePress, onWeekPress]);
+    clockRef.current = clock;
+  }, [phase, openProgress, listProgress, liftedNote, onPress, onListPress, onMePress, onWeekPress, clock]);
 
   useEffect(() => () => exterior.dispose(), [exterior]);
 
@@ -91,6 +147,7 @@ export function PantryExterior({
   }, [exterior, weekKey]);
 
   useFrame((state, delta) => {
+    input.current.openClock = clockRef.current?.current.open;
     updateExterior(exterior, anim.current, input.current, state.clock.elapsedTime, Math.min(delta, 0.1));
   });
 
@@ -104,18 +161,15 @@ export function PantryExterior({
       setCursor("auto");
     }
   }, [tappable, anim]);
-  const listTappable = tappable && !!onListPress;
-  const meTappable = tappable && !!onMePress;
-  const weekTappable = tappable && !!onWeekPress;
 
-  const { hit: hitGeo, noteHit: noteHitGeo, meHit: meHitGeo, weekHit: weekHitGeo } = getSharedGeometry();
-  const hitMat = getMaterials().hit;
+  const geos = getSharedGeometry(theme);
+  const hitMat = getMaterials(theme).hit;
 
   return (
     <group>
       <primitive object={exterior.root} />
       <mesh
-        geometry={hitGeo}
+        geometry={geos.hit}
         material={hitMat}
         position={HIT_BOX.position}
         raycast={tappable ? Mesh.prototype.raycast : noRaycast}
@@ -133,62 +187,32 @@ export function PantryExterior({
           setCursor("auto");
         }}
       />
-      {/* Pinned list: its front face sits in front of the pantry's hit box, so it always wins the raycast. */}
-      <mesh
-        geometry={noteHitGeo}
+      <PaperHit
+        geometry={geos.noteHit}
         material={hitMat}
-        position={NOTE_HIT.position}
-        raycast={listTappable ? Mesh.prototype.raycast : noRaycast}
-        onClick={(e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation();
-          listPressRef.current?.();
-        }}
-        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
-          e.stopPropagation();
-          anim.current.noteHover = true;
-          setCursor("pointer");
-        }}
-        onPointerOut={() => {
-          anim.current.noteHover = false;
-        }}
+        position={[...NOTE_HIT.position]}
+        enabled={tappable && !!onListPress}
+        onPress={listPressRef}
+        anim={anim}
+        hoverKey="noteHover"
       />
-      {/* Pinned Me note, directly below the list; same depth trick so it beats the pantry hit box. */}
-      <mesh
-        geometry={meHitGeo}
+      <PaperHit
+        geometry={geos.meHit}
         material={hitMat}
-        position={ME_HIT.position}
-        raycast={meTappable ? Mesh.prototype.raycast : noRaycast}
-        onClick={(e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation();
-          mePressRef.current?.();
-        }}
-        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
-          e.stopPropagation();
-          anim.current.meHover = true;
-          setCursor("pointer");
-        }}
-        onPointerOut={() => {
-          anim.current.meHover = false;
-        }}
+        position={[...ME_HIT.position]}
+        enabled={tappable && !!onMePress}
+        onPress={mePressRef}
+        anim={anim}
+        hoverKey="meHover"
       />
-      {/* Pinned Week note, below the Me note (spec §13). */}
-      <mesh
-        geometry={weekHitGeo}
+      <PaperHit
+        geometry={geos.weekHit}
         material={hitMat}
-        position={WEEK_HIT.position}
-        raycast={weekTappable ? Mesh.prototype.raycast : noRaycast}
-        onClick={(e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation();
-          weekPressRef.current?.();
-        }}
-        onPointerOver={(e: ThreeEvent<PointerEvent>) => {
-          e.stopPropagation();
-          anim.current.weekHover = true;
-          setCursor("pointer");
-        }}
-        onPointerOut={() => {
-          anim.current.weekHover = false;
-        }}
+        position={[...WEEK_HIT.position]}
+        enabled={tappable && !!onWeekPress}
+        onPress={weekPressRef}
+        anim={anim}
+        hoverKey="weekHover"
       />
     </group>
   );

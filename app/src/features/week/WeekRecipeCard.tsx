@@ -8,8 +8,8 @@ import { errorMessage } from "@/api/client";
 import { useAddMissingToList, useMovePlannedMeal, useRemovePlannedMeal } from "@/api/hooks/mealPlan";
 import { AgentMealCard } from "@/components/AgentMealCard";
 import { AppText, useToast } from "@/components/ui";
-import { NOTE_PAPER, PAPER_MARGIN_X, paperStyles } from "@/features/pantry/overlay/PaperSheet";
-import { pantry, softShadow } from "@/features/pantry/overlay/palette";
+import { makePaperStyles, PAPER_MARGIN_X } from "@/features/pantry/overlay/PaperSheet";
+import { type OverlayPalette, shadowFor, useOverlayPalette, useOverlayStyles } from "@/features/pantry/overlay/palette";
 import { confirm } from "@/lib/confirm";
 import { plural } from "@/lib/format";
 
@@ -36,6 +36,9 @@ export type WeekRecipeCardProps = {
  * servings, ingredient lines, our steps, citation, safety chip) plus Swap / Move day / Remove / Add missing to List.
  */
 export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, busy, onClose, onSwap }: WeekRecipeCardProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const insets = useSafeAreaInsets();
   const { show: toast } = useToast();
   const move = useMovePlannedMeal(groupId);
@@ -131,7 +134,7 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, 
             style={styles.close}
             testID="week-card-close"
           >
-            <X size={22} color={NOTE_PAPER.pencil} />
+            <X size={22} color={P.oakInk} />
           </Pressable>
         </View>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -143,7 +146,7 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, 
           />
           {planned.warnings.map((w) => (
             <View key={w.item} style={styles.chip} accessible accessibilityLabel={`Warning: ${warningText(w)}`} testID="week-card-warning">
-              <CircleAlert size={16} color={pantry.redInk} />
+              <CircleAlert size={16} color={P.redInk} />
               <AppText variant="caption" weight="bold" style={styles.dangerText}>
                 {warningText(w)}
               </AppText>
@@ -162,7 +165,7 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, 
                     accessibilityState={{ checked: current, selected: current, disabled: current || move.isPending }}
                     disabled={current || move.isPending}
                     onPress={() => void moveTo(d)}
-                    style={({ pressed }) => [styles.dayChip, current && styles.dayChipOn, pressed && paperStyles.pressed]}
+                    style={({ pressed }) => [styles.dayChip, current && styles.dayChipOn, pressed && paper.pressed]}
                     testID={`week-card-move-${d}`}
                   >
                     <AppText variant="caption" weight="bold" style={current ? styles.dayChipOnText : styles.dayChipText}>
@@ -176,7 +179,7 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, 
 
           <View style={styles.actions}>
             <CardAction
-              icon={<ArrowLeftRight size={18} color={pantry.oakInk} />}
+              icon={<ArrowLeftRight size={18} color={P.oakInk} />}
               label="Swap"
               hint="The agent finds a different dinner for this day"
               disabled={busy}
@@ -184,20 +187,20 @@ export function WeekRecipeCard({ groupId, planned, dates, expiring, allPlanned, 
               testID="week-card-swap"
             />
             <CardAction
-              icon={<CalendarDays size={18} color={pantry.oakInk} />}
+              icon={<CalendarDays size={18} color={P.oakInk} />}
               label="Move day"
               onPress={() => setPicking(!picking)}
               testID="week-card-move"
             />
             <CardAction
-              icon={<ListPlus size={18} color={pantry.oakInk} />}
+              icon={<ListPlus size={18} color={P.oakInk} />}
               label="Add missing to List"
               loading={addMissing.isPending}
               onPress={onAddMissing}
               testID="week-card-add-missing"
             />
             <CardAction
-              icon={<Trash2 size={18} color={pantry.redInk} />}
+              icon={<Trash2 size={18} color={P.redInk} />}
               label="Remove"
               danger
               loading={remove.isPending}
@@ -230,6 +233,9 @@ function CardAction({
   danger?: boolean;
   testID?: string;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const off = disabled || loading;
   return (
     <Pressable
@@ -239,7 +245,7 @@ function CardAction({
       accessibilityLabel={label}
       accessibilityHint={hint}
       accessibilityState={{ disabled: !!off, busy: !!loading }}
-      style={({ pressed }) => [styles.action, off && styles.actionOff, pressed && !off && paperStyles.pressed]}
+      style={({ pressed }) => [styles.action, off && styles.actionOff, pressed && !off && paper.pressed]}
       testID={testID}
     >
       {icon}
@@ -250,37 +256,38 @@ function CardAction({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: pantry.backdrop },
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+  backdrop: { backgroundColor: P.backdrop },
   card: {
     position: "absolute",
     left: 8,
     right: 8,
     bottom: 0,
-    backgroundColor: NOTE_PAPER.paper,
+    backgroundColor: P.notePaper,
     borderTopLeftRadius: 14,
     borderTopRightRadius: 14,
     paddingTop: 10,
-    ...softShadow,
+    ...shadowFor(P),
   },
-  margin: { position: "absolute", top: 0, bottom: 0, left: PAPER_MARGIN_X - 10, width: 2, backgroundColor: NOTE_PAPER.margin },
+  margin: { position: "absolute", top: 0, bottom: 0, left: PAPER_MARGIN_X - 10, width: 2, backgroundColor: P.noteMargin },
   head: { flexDirection: "row", alignItems: "center", paddingLeft: PAPER_MARGIN_X, paddingRight: 8 },
-  day: { flex: 1, color: pantry.oakDark, letterSpacing: 1.2 },
+  day: { flex: 1, color: P.oakDark, letterSpacing: 1.2 },
   close: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   scroll: { flex: 1 },
   scrollContent: { paddingLeft: PAPER_MARGIN_X - 2, paddingRight: 14, paddingBottom: 24, gap: 12 },
-  meal: { backgroundColor: NOTE_PAPER.paper, borderColor: NOTE_PAPER.rule },
+  meal: { backgroundColor: P.notePaper, borderColor: P.noteRule },
   picker: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   dayChip: {
     minHeight: 44,
     paddingHorizontal: 12,
     borderRadius: 22,
     borderWidth: 1.5,
-    borderColor: NOTE_PAPER.pencil,
+    borderColor: P.oakInk,
     justifyContent: "center",
   },
-  dayChipOn: { backgroundColor: pantry.green, borderColor: pantry.green },
-  dayChipText: { color: NOTE_PAPER.pencil },
+  dayChipOn: { backgroundColor: P.green, borderColor: P.green },
+  dayChipText: { color: P.oakInk },
   dayChipOnText: { color: "#FFFFFF" },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   action: {
@@ -291,7 +298,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 22,
     borderWidth: 1.5,
-    borderColor: NOTE_PAPER.rule,
+    borderColor: P.noteRule,
     backgroundColor: "#FFFFFF",
   },
   chip: {
@@ -302,9 +309,9 @@ const styles = StyleSheet.create({
     minHeight: 32,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: pantry.redTint,
+    backgroundColor: P.redTint,
   },
   actionOff: { opacity: 0.5 },
-  actionText: { color: pantry.oakInk },
-  dangerText: { color: pantry.redInk },
+  actionText: { color: P.oakInk },
+  dangerText: { color: P.redInk },
 });

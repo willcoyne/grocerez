@@ -109,3 +109,16 @@ Format: date · folder · what the plan said · what was done · why.
   are error toasts. "Tell them" (share sheet) is kept after a successful invite. Pending rows also say who invited and when.
 - **Create household** defaults to "Our house"; an empty name becomes "Our house". From onboarding it opens
   `invite?from=onboarding` ("Continue to the app"), otherwise `invite` ("Done").
+
+## One-room nav (pantry SPEC round 3)
+
+- **Nav bar drives the camera, not the router.** `(tabs)` keeps one real screen (`cabinet` = PantryScreen); the TabBar (Pantry, List,
+  Recipes, Me, Household) calls `requestStation` (features/pantry/roomNav.ts) and PantryScreen moves the camera. Old `/list`, `/me`,
+  `/group` routes are hidden redirects to `/cabinet?station=list|me|household`, so deep links keep working.
+- **Sheets open on arrival and frame the station in the visible top strip.** Station sheets cover the bottom 75 %; the camera frames the
+  station inside the top 25 % (motion.ts stationPeekPose). The scanner opens the full-screen ScanSheet (lookup), so it is framed whole.
+  Closing any sheet (x, backdrop, drag, Android back) glides back to the pantry view. Pressing Pantry while in the shelves closes them.
+- **Old List tab code kept** as `features/list/ListScreen.tsx` (with its tests: optimistic check-off + rollback, Finish trip disabled
+  in flight), unrouted. The List tab now zooms to the pinned note (ShoppingListNote) and in-store shopping is `/shopping`.
+- **Scanned rows in shopping mode** join the trip batch (`useShoppingTrip().addedElsewhere`): the ScanSheet saves the check itself, the
+  screen only plays the cart hop and includes the row in the batched move to the pantry. No store badge (no backend support).

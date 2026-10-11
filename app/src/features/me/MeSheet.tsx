@@ -1,6 +1,6 @@
 /**
  * "Me" as a paper note pinned below the shopping list on the pantry (it replaced the Me tab): my preferences, diet and
- * allergies, profile (photo, ZIP) and sign out. Opens after the camera flies to the note and the paper lifts off its pin,
+ * allergies, profile (photo, ZIP), the room's appearance (theme picker) and sign out. Opens after the camera flies to the note and the paper lifts off its pin,
  * exactly like the List note.
  */
 import type { Dietary } from "@contracts/dietary";
@@ -16,7 +16,9 @@ import { DietaryPicker } from "@/components/DietaryPicker";
 import { InviteBanner } from "@/components/InviteBanner";
 import { MyPreferences } from "@/components/MyPreferences";
 import { AppText, Avatar, Button, Card, ErrorState, LoadingState, TextField, useToast } from "@/components/ui";
-import { PAPER_MARGIN_X, PaperSection, PaperSheet, paperStyles } from "@/features/pantry/overlay/PaperSheet";
+import { makePaperStyles, PAPER_MARGIN_X, PaperSection, PaperSheet } from "@/features/pantry/overlay/PaperSheet";
+import { useOverlayStyles } from "@/features/pantry/overlay/palette";
+import { AppearancePicker } from "@/features/stations/AppearancePicker";
 import { useAuth } from "@/state/AuthContext";
 import { size, space } from "@/theme";
 
@@ -30,9 +32,10 @@ export function MeSheet({ visible, groupId, onClose }: MeSheetProps) {
 function MeNote({ groupId, onClose }: Omit<MeSheetProps, "visible">) {
   const { signOut } = useAuth();
   const router = useRouter();
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <PaperSheet testID="me-note" title="Me" closeLabel="Close my preferences" onClose={onClose}>
-      <ScrollView style={paperStyles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={paper.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.block}>
           <InviteBanner />
         </View>
@@ -43,6 +46,10 @@ function MeNote({ groupId, onClose }: Omit<MeSheetProps, "visible">) {
         <PaperSection title="Diet and allergies" />
         <View style={styles.block}>
           <DietarySection />
+        </View>
+        <PaperSection title="Appearance" />
+        <View style={styles.block}>
+          <AppearancePicker />
         </View>
         <PaperSection title="Profile" />
         <View style={styles.block}>
