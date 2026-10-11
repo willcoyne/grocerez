@@ -85,6 +85,13 @@ export const ProductFacts = z.object({
       usualStorage: StoragePlace,
       entries: z.array(ShelfLifeEntry),
       notes: z.string().nullable(),
+      /**
+       * The expiration estimate: days after purchase by which this product, bought at a store and stored the usual
+       * way, is most likely expired (time already spent in distribution and typical opening taken into account).
+       */
+      expiresAfterDays: z.number().int().nullable(),
+      /** One sentence explaining expiresAfterDays. */
+      expiresBasis: z.string().nullable(),
       sources: z.array(Citation),
     })
     .nullable(),
@@ -109,13 +116,17 @@ export const ProductFacts = z.object({
 export type ProductFacts = z.infer<typeof ProductFacts>;
 
 /**
- * Days used for an ESTIMATED expiration date: the cautious (low) end of the unopened range for the storage place
- * (falling back to the usual place), never the best case. FoodKeeper "ultra-pasteurized milk, 30–90 days" → 30.
- * The lookup card still shows the full range; only dates use this. Shared by the API and the app.
+ * Days after purchase used for an ESTIMATED expiration date ("most likely expired by"). In the usual storage place:
+ * the agent's researched expiresAfterDays (already checked against the sources by verifyFacts). Stored somewhere
+ * else (milk put in the freezer): that place's unopened maximum. Without an estimate: the cautious end of the
+ * unopened range. Shared by the API and the app.
  */
-export function safeShelfDays(shelfLife: NonNullable<ProductFacts["shelfLife"]>, place?: string | null): number {
+export function expirationDays(shelfLife: NonNullable<ProductFacts["shelfLife"]>, place?: string | null): number {
   const unopened = (p: string | null | undefined) => shelfLife.entries.find((e) => e.storage === p && !e.opened);
-  const entry = unopened(place) ?? unopened(shelfLife.usualStorage);
+  const elsewhere = place && place !== shelfLife.usualStorage ? unopened(place) : undefined;
+  if (elsewhere) return elsewhere.maxDays;
+  if (shelfLife.expiresAfterDays) return shelfLife.expiresAfterDays;
+  const entry = unopened(shelfLife.usualStorage);
   return entry ? (entry.minDays ?? entry.maxDays) : shelfLife.maxDays;
 }
 

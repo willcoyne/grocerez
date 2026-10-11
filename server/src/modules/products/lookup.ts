@@ -2,7 +2,7 @@ import { z } from "zod";
 import { config } from "../../config.js";
 import { prisma } from "../../db.js";
 import { Allergen } from "../../contracts/dietary.js";
-import { type Citation, type LookupBody, ProductFacts, type ProductLookup, safeShelfDays, ShelfLifeEntry } from "../../contracts/products.js";
+import { type Citation, type LookupBody, ProductFacts, type ProductLookup, expirationDays, ShelfLifeEntry } from "../../contracts/products.js";
 import { akamaiPost, embeddingsConfigured } from "../../lib/embeddings.js";
 import { AppError, badRequest, notConfigured } from "../../lib/errors.js";
 import { groupTimeZone, localDate, toCalendarDate } from "../../lib/expiration.js";
@@ -36,10 +36,17 @@ average_price_search and product_search together in your FIRST reply (with a bar
 
 1. IDENTIFY the product: name, brand (if any), the plain generic grocery name a shopper would use ("Milk", "Peanut Butter"),
    and its category. With a barcode, call product_by_barcode first.
-2. SHELF LIFE (maximum): call shelf_life_search with the generic food name. Pick the entry that best matches the product.
+2. SHELF LIFE: call shelf_life_search with the generic food name. Pick the entry that best matches the product.
    Report, for each storage place it lists, the maximum days (the upper end of the range) and minimum days, unopened and
    opened. maxDays is the longest safe time in the usual storage place, unopened. If an entry only says "Package use-by
    date", use a better-matching entry or the other storage places. notes: one short sentence, or null.
+   EXPIRATION ESTIMATE (the most important number): expiresAfterDays = days after purchase by which THIS product,
+   bought today at a store and stored the usual way, is most likely expired. Think like a food-safety expert:
+   store-bought products have already used part of their shelf life in distribution (milk is usually bought with
+   well under its full unopened time left), and perishables a household uses regularly (milk, juice, bread,
+   yogurt) are normally opened within a few days, after which the opened time applies. Base it on the shelf-life
+   data and what you know about this specific product; it must not exceed the longest unopened time.
+   expiresBasis: one sentence explaining the number (e.g. "Usually bought with ~3 weeks left; once opened 7-10 days").
 3. PRICE: call average_price_search with the generic name. Use the closest matching item; say which item and package
    size you used in "unit". If nothing matches the same kind of food, report no price.
 4. ALLERGENS: call product_search with the brand + product name (or the generic name). Use the allergen and trace data of
@@ -225,6 +232,8 @@ export function parseModelFacts(parsed: unknown): ProductFacts | null {
         ...sl,
         maxDays: typeof sl.maxDays === "number" ? Math.round(sl.maxDays) : 0,
         notes: typeof sl.notes === "string" ? sl.notes : null,
+        expiresAfterDays: typeof sl.expiresAfterDays === "number" ? Math.round(sl.expiresAfterDays) : null,
+        expiresBasis: typeof sl.expiresBasis === "string" ? sl.expiresBasis : null,
         entries: (Array.isArray(sl.entries) ? sl.entries : []).filter((e) => ShelfLifeEntry.safeParse(e).success),
       }).data ?? null
     : null;
@@ -264,8 +273,16 @@ export function verifyFacts(f: ProductFacts, sources: Map<string, string>): Prod
       ?? entries.find((e) => !e.opened && e.storage !== "freezer") ?? entries.find((e) => !e.opened);
     const maxDays = usual?.maxDays ?? (entries.length ? null : days(f.shelfLife.maxDays));
     const usualStorage = usual?.storage ?? f.shelfLife.usualStorage;
+    // The estimate can't beat the best case in the usual place, and is dropped when it isn't a sane day count.
+    const best = Math.max(maxDays ?? 0, ...entries.filter((e) => e.storage === usualStorage && !e.opened).map((e) => e.maxDays));
+    const estimate = days(f.shelfLife.expiresAfterDays);
+    const expiresAfterDays = estimate && (!best || estimate <= best) ? estimate : null;
     if (s.length && maxDays) {
-      shelfLife = { ...f.shelfLife, maxDays, usualStorage, entries, notes: f.shelfLife.notes?.slice(0, 300) ?? null, sources: s };
+      shelfLife = {
+        ...f.shelfLife, maxDays, usualStorage, entries, notes: f.shelfLife.notes?.slice(0, 300) ?? null,
+        expiresAfterDays, expiresBasis: expiresAfterDays ? (f.shelfLife.expiresBasis?.trim().slice(0, 300) || null) : null,
+        sources: s,
+      };
     }
   }
 
@@ -343,7 +360,7 @@ const saveLookup = (lookupKey: string, itemId: string | null, result: ProductFac
 };
 
 /**
- * Fills the catalog item's missing shelf life (cautious end of the range, safeShelfDays), adds the found "contains"
+ * Fills the catalog item's missing shelf life (the "most likely expired by" estimate, expirationDays), adds the found "contains"
  * allergens to its default allergens (adding only, never removing: a missed allergen is worse than an extra one), caches the price for the shopping-list
  * estimate (ai/prices), and, when the allergens changed, refreshes every group that uses the item.
  */
@@ -351,7 +368,7 @@ async function applyToItem(itemId: string, r: ProductFacts, zipCode: string | nu
   if (r.shelfLife) {
     // items.shelf_life_days means "after buying, stored normally": a freezer-only time doesn't qualify.
     if (r.shelfLife.usualStorage !== "freezer" || r.product.category === "frozen") {
-      await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: safeShelfDays(r.shelfLife) } });
+      await prisma.item.updateMany({ where: { id: itemId, shelfLifeDays: null }, data: { shelfLifeDays: expirationDays(r.shelfLife) } });
     }
   }
   if (r.allergens.contains.length) await addItemAllergens(itemId, r.allergens.contains);
@@ -364,8 +381,8 @@ async function applyToItem(itemId: string, r: ProductFacts, zipCode: string | nu
 }
 
 /**
- * Gives a cabinet row an estimated expiration: purchase date + the cautious (low) end of the unopened range for the
- * row's storage place, else the usual place (safeShelfDays). Never overwrites a date someone typed in (expiration_source = 'manual').
+ * Gives a cabinet row an estimated expiration: purchase date + the "most likely expired by" estimate for the row's
+ * storage place (expirationDays). Never overwrites a date someone typed in (expiration_source = 'manual').
  */
 async function applyToCabinet(userId: string, groupId: string, cabinetItemId: string, r: ProductFacts): Promise<string | null> {
   const member = await prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
@@ -374,7 +391,7 @@ async function applyToCabinet(userId: string, groupId: string, cabinetItemId: st
   if (!row) throw new AppError(404, "NOT_FOUND", "Cabinet item not found");
   if (!r.shelfLife || row.expirationSource === "manual") return toCalendarDate(row.expiresAt);
   const place = row.location === "fridge" || row.location === "freezer" || row.location === "pantry" ? row.location : null;
-  const days = safeShelfDays(r.shelfLife, place);
+  const days = expirationDays(r.shelfLife, place);
   const expiresAt = localDate(row.purchasedAt ?? row.createdAt, await groupTimeZone(prisma, groupId), days);
   await prisma.cabinetItem.update({ where: { id: row.id }, data: { expiresAt, expirationSource: "estimated" } });
   return toCalendarDate(expiresAt);

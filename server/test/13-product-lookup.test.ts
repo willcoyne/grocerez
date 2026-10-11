@@ -33,6 +33,7 @@ function fakeChat(body: Record<string, unknown>) {
     product: { name: "Jif Creamy Peanut Butter", brand: "Jif", genericName: "Peanut Butter", category: "pantry" },
     shelfLife: {
       maxDays: 999, usualStorage: "pantry", notes: null,
+      expiresAfterDays: 120, expiresBasis: "Usually opened soon; opened jars keep 2-3 months.",
       entries: [
         { storage: "pantry", opened: false, minDays: 180, maxDays: 270 },
         { storage: "fridge", opened: true, minDays: 90, maxDays: 120 },
@@ -50,7 +51,9 @@ function fakeChat(body: Record<string, unknown>) {
 
 const original = { key: config.AKAMAI_API_KEY, url: config.AKAMAI_BASE_URL };
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The shared test DB keeps items between runs; lookups only fill an EMPTY shelf life.
+  await prisma.item.updateMany({ where: { name: "Peanut Butter" }, data: { shelfLifeDays: null } });
   config.AKAMAI_API_KEY = "test-akamai-key";
   config.AKAMAI_BASE_URL = "https://akamai.test/v1";
   vi.spyOn(http, "fetch").mockImplementation(fakeOff);
@@ -73,6 +76,7 @@ describe("AI product lookup (backend/13)", () => {
     expect(res.body).toMatchObject({ estimate: true, cached: false, zipCode: "64111", item: { name: "Peanut Butter" } });
     // Headline max = the pantry unopened entry (not the model's 999); the 99999-day entry is dropped.
     expect(r.shelfLife.maxDays).toBe(270);
+    expect(r.shelfLife).toMatchObject({ expiresAfterDays: 120, expiresBasis: expect.stringContaining("opened") });
     expect(r.shelfLife.entries.map((e: { storage: string }) => e.storage)).toEqual(["pantry", "fridge"]);
     // Citation title comes from the tool, not the model.
     expect(r.shelfLife.sources[0].url).toMatch(/^https:\/\/www\.foodsafety\.gov\/.*#product-\d+$/);
@@ -97,11 +101,11 @@ describe("AI product lookup (backend/13)", () => {
     expect(res.status).toBe(200);
     const row = await prisma.cabinetItem.findUniqueOrThrow({ where: { id: add.body.id } });
     expect(row.expirationSource).toBe("estimated");
-    // Cautious end of the pantry range (180–270 days), not the best case.
+    // The agent's "most likely expired by" estimate (120 days), not a range end.
     const days = Math.round((row.expiresAt!.getTime() - Date.now()) / 86_400_000);
-    expect(days).toBeGreaterThanOrEqual(178);
-    expect(days).toBeLessThanOrEqual(181);
-    expect((await prisma.item.findUniqueOrThrow({ where: { id: pb } })).shelfLifeDays).toBe(180);
+    expect(days).toBeGreaterThanOrEqual(118);
+    expect(days).toBeLessThanOrEqual(121);
+    expect((await prisma.item.findUniqueOrThrow({ where: { id: pb } })).shelfLifeDays).toBe(120);
 
     await prisma.cabinetItem.update({ where: { id: row.id }, data: { expiresAt: new Date("2030-01-02"), expirationSource: "manual" } });
     const again = await api().post("/api/products/lookup").set(u.auth)
@@ -150,6 +154,7 @@ describe("AI product lookup (backend/13)", () => {
     expect(f.shelfLife!.entries).toEqual([{ storage: "freezer", opened: false, minDays: 90, maxDays: 90 }]);
     expect(f.price).toBeNull();
     expect(f.allergens.contains).toEqual(["milk"]);
+    expect(f.shelfLife!.expiresAfterDays).toBeNull();
     expect(parseModelFacts({ shelfLife: {} })).toBeNull();
   });
 });

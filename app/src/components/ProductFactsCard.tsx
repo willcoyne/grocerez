@@ -1,4 +1,4 @@
-import { type Citation, type ProductLookup, safeShelfDays } from "@contracts/products";
+import { type Citation, expirationDays, type ProductLookup } from "@contracts/products";
 import { Linking, StyleSheet, View } from "react-native";
 
 import { AiLabel, AppText, Card, StatusChip } from "@/components/ui";
@@ -59,7 +59,9 @@ export function ProductFactsCard({ lookup, household }: { lookup: ProductLookup;
       <AppText weight="heavy">Shelf life</AppText>
       {shelfLife ? (
         <>
-          <AppText>{`Lasts up to ${days(shelfLife.maxDays)} in the ${PLACE[shelfLife.usualStorage]} (unopened)`}</AppText>
+          <AppText weight="semi">{`Likely expired about ${days(expirationDays(shelfLife))} after purchase`}</AppText>
+          {shelfLife.expiresBasis ? <AppText variant="caption" color="muted">{shelfLife.expiresBasis}</AppText> : null}
+          <AppText variant="caption" color="muted">{`At best: up to ${days(shelfLife.maxDays)} in the ${PLACE[shelfLife.usualStorage]} (unopened)`}</AppText>
           {shelfLife.entries
             .filter((e) => !(e.storage === shelfLife.usualStorage && !e.opened))
             .map((e) => (
@@ -68,9 +70,6 @@ export function ProductFactsCard({ lookup, household }: { lookup: ProductLookup;
               </AppText>
             ))}
           {shelfLife.notes ? <AppText variant="caption" color="muted">{shelfLife.notes}</AppText> : null}
-          <AppText variant="caption" weight="semi" color="muted">
-            {`Expiration dates use the safe end: ${days(safeShelfDays(shelfLife))} after purchase.`}
-          </AppText>
           <Sources sources={shelfLife.sources} />
         </>
       ) : (
