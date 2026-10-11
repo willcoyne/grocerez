@@ -32,6 +32,7 @@ const schema = z.object({
   ANTHROPIC_API_KEY: optional,
   AWS_REGION: optional,
   S3_BUCKET: optional,
+  S3_ENDPOINT: optional,
   AWS_ACCESS_KEY_ID: optional,
   AWS_SECRET_ACCESS_KEY: optional,
   RESEND_API_KEY: optional,
