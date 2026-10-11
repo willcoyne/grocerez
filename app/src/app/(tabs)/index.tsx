@@ -184,6 +184,13 @@ function ListRow({
           {wanted ? <Text style={styles.muted}>for {wanted}</Text> : null}
           {row.checked && checkedByName ? <Text style={styles.muted}>✓ by {checkedByName}</Text> : null}
           {row.reason === "manual" && addedByName ? <Chip label={`added by ${addedByName}`} /> : null}
+          {row.note ? (
+            <Chip
+              tone="ai"
+              label={row.note.startsWith("✨") ? row.note : `✨ ${row.note}`}
+              accessibilityLabel={`AI note: ${row.note.replace(/^✨\s*/, "")}`}
+            />
+          ) : null}
           {row.allergenFlags.length > 0 ? (
             <View style={styles.badges}>
               {row.allergenFlags.map((f) => (

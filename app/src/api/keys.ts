@@ -17,5 +17,8 @@ export const keys = {
   shoppingList: (groupId: string) => ["group", groupId, "shopping-list"] as const,
   alerts: (groupId: string) => ["group", groupId, "alerts"] as const,
   prices: (groupId: string) => ["group", groupId, "prices"] as const,
+  /** Pantry Agent: the recent-runs list (also the prefix of every single run's key). */
+  agentRuns: (groupId: string) => ["group", groupId, "agent-runs"] as const,
+  agentRun: (groupId: string, runId: string) => ["group", groupId, "agent-runs", runId] as const,
   itemSearch: (q: string) => ["items", "search", q] as const,
 };

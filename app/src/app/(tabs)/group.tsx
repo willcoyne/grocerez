@@ -16,6 +16,9 @@ import { confirm } from "@/lib/confirm";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
 import { spacing } from "@/theme";
 
+/** Recorded-run replay (Pantry Agent §7.7): long-press "Plan our week" in dev builds or the demo build. */
+const DEMO_REPLAY = __DEV__ || process.env.EXPO_PUBLIC_DEMO_REPLAY === "1";
+
 export default function GroupScreen() {
   const { activeGroupId } = useActiveGroup();
   const detail = useGroupDetail(activeGroupId);
@@ -33,7 +36,13 @@ export default function GroupScreen() {
       <InviteBanner />
       <View style={styles.inner}>
         <AlertsSection groupId={group.id} />
-        <Button title="✨ What can we cook?" variant="secondary" style={styles.cook} onPress={() => router.push("/recipes")} />
+        <Button
+          title="✨ Plan our week"
+          style={styles.cook}
+          onPress={() => router.push("/agent")}
+          onLongPress={DEMO_REPLAY ? () => router.push("/agent?replay=1") : undefined}
+          accessibilityHint={DEMO_REPLAY ? "Long-press to replay the last recorded run" : undefined}
+        />
 
         <SectionHeader
           title={`Members (${group.members.length})`}
@@ -52,6 +61,7 @@ export default function GroupScreen() {
         <Card>
           <EveryonesWants groupId={group.id} />
         </Card>
+        <Button title="✨ What can we cook? (quick recipes)" variant="ghost" compact onPress={() => router.push("/recipes")} />
 
         <SectionHeader title="Settings" />
         <GroupSettings groupId={group.id} name={group.name} isOwner={group.role === "owner"} />

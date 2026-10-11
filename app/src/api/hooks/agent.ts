@@ -1,0 +1,64 @@
+import type {
+  AgentRun,
+  AgentRunSummary,
+  ApplyAgentRunResponse,
+  StartAgentRunBody,
+  StartAgentRunResponse,
+} from "@contracts/agent";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { z } from "zod";
+
+import { api } from "../client";
+import { keys } from "../keys";
+
+/** How often a running run is polled. The socket ("agent:changed") usually beats it; polling covers a dropped socket. */
+export const AGENT_POLL_MS = 1500;
+
+/**
+ * Start a Pantry Agent run → 202 {runId}. Never retried automatically (rate-limited 10/hour/group).
+ * Errors: 503 NOT_CONFIGURED (no agent on this server → the app falls back to /recipes), 503 AGENT_UNAVAILABLE, 429.
+ */
+export function useStartAgentRun(groupId: string) {
+  return useMutation({
+    mutationFn: (body: StartAgentRunBody) =>
+      api<z.infer<typeof StartAgentRunResponse>>(`/groups/${groupId}/agent/runs`, { method: "POST", body }),
+    retry: false,
+  });
+}
+
+/** One run with its steps. Polls every 1.5 s while the agent is still working, then stops. */
+export function useAgentRun(groupId: string, runId: string | null) {
+  return useQuery({
+    queryKey: keys.agentRun(groupId, runId ?? ""),
+    queryFn: () => api<AgentRun>(`/groups/${groupId}/agent/runs/${runId}`),
+    enabled: !!groupId && !!runId,
+    refetchInterval: (q) => (q.state.data?.status === "running" ? AGENT_POLL_MS : false),
+  });
+}
+
+/**
+ * Put the plan's missing items on the shopping list. The server re-checks safety (422 PLAN_UNSAFE) and claims the run
+ * once (409 RUN_NOT_PROPOSED on a second tap). Success or not, the list and the run are refetched afterwards.
+ */
+export function useApplyAgentRun(groupId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) =>
+      api<ApplyAgentRunResponse>(`/groups/${groupId}/agent/runs/${runId}/apply`, { method: "POST", body: {} }),
+    retry: false,
+    onSettled: (_data, _error, runId) => {
+      void qc.invalidateQueries({ queryKey: keys.shoppingList(groupId) });
+      void qc.invalidateQueries({ queryKey: keys.agentRun(groupId, runId) });
+      void qc.invalidateQueries({ queryKey: keys.agentRuns(groupId), exact: true });
+    },
+  });
+}
+
+/** Recent runs, newest first, without steps. The recorded-run replay uses it to find the last proposed/applied run. */
+export function useRecentAgentRuns(groupId: string, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: keys.agentRuns(groupId),
+    queryFn: () => api<AgentRunSummary[]>(`/groups/${groupId}/agent/runs`, { query: { limit: 5 } }),
+    enabled: !!groupId && (opts.enabled ?? true),
+  });
+}
