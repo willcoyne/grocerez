@@ -135,7 +135,14 @@ export type AgentHousehold = z.infer<typeof AgentHousehold>;
 
 export const SafetyCheckBody = z.object({
   meals: z
-    .array(z.object({ title: text().trim().min(1).max(120), ingredients: z.array(text().trim().min(1).max(120)).min(1).max(25) }))
+    .array(
+      z.object({
+        title: text().trim().min(1).max(120),
+        ingredients: z.array(text().trim().min(1).max(120)).min(1).max(25),
+        /** Checked too (the same as apply does), so a plan that passes here can't 422 on apply because of a step. */
+        steps: z.array(text().trim().min(1).max(500)).max(6).optional(),
+      }),
+    )
     .min(1)
     .max(7),
 });

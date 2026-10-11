@@ -86,6 +86,20 @@ describe("12 agent safety check (per member)", () => {
     expect(m.problems).toEqual([{ ingredient: "Cheddar Cheese", reason: "contains milk", members: ["Ann", "Bob"] }]);
   });
 
+  it("POST /agent/safety-check checks steps too: 'Stir in butter' fails for the milk-allergic member", async () => {
+    const { owner, g } = await household();
+    const res = await api().post(`/api/groups/${g.id}/agent/safety-check`).set(owner.auth)
+      .send({ meals: [{ title: "Rice bowl", ingredients: ["Rice"], steps: ["Cook the rice.", "Stir in butter"] }] });
+    expect(res.status).toBe(200);
+    expect(res.body.meals[0]).toMatchObject({
+      passes: false,
+      problems: [{ ingredient: "Stir in butter", reason: "contains milk", members: ["Maya"] }],
+    });
+    const bad = await api().post(`/api/groups/${g.id}/agent/safety-check`).set(owner.auth)
+      .send({ meals: [{ title: "x", ingredients: ["Rice"], steps: Array(7).fill("Stir.") }] });
+    expect(bad.status).toBe(400);
+  });
+
   it("POST /agent/safety-check returns the same result; non-member → 404; bad body → 400", async () => {
     const { owner, g } = await household();
     const body = { meals: [meal("PB toast", "Peanut butter"), meal("Greens", "Spinach")] };

@@ -86,8 +86,10 @@ async function check(groupId: string, meals: SafetyMeal[]): Promise<SafetyCheckR
   for (const meal of meals) {
     const problems = new Map<string, Problem>();
     const unknown: string[] = [];
-    for (const ingredient of meal.ingredients) {
-      const a = await lookup(ingredient);
+    // Catalog lookups in parallel (cached per check), then collected in ingredient order so output is unchanged.
+    const analyses = await Promise.all(meal.ingredients.map(lookup));
+    for (const [i, ingredient] of meal.ingredients.entries()) {
+      const a = analyses[i];
       if (a.unknown && !unknown.includes(ingredient)) unknown.push(ingredient);
       collect(problems, members, ingredient, a.text, a.category);
     }
