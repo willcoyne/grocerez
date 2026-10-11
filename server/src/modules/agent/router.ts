@@ -1,6 +1,7 @@
 import { Router, type Request } from "express";
 import { z } from "zod";
-import { AgentRunsQuery, SafetyCheckBody, StartAgentRunBody } from "../../contracts/agent.js";
+import { AgentRunsQuery, RecipeSearchBody, SafetyCheckBody, StartAgentRunBody } from "../../contracts/agent.js";
+import { recipeIndex } from "./recipes.js";
 import { uid } from "../../middleware/auth.js";
 import { perGroup } from "../../middleware/rateLimit.js";
 import { gid } from "../../middleware/requireGroupMember.js";
@@ -42,3 +43,13 @@ agentRouter.get("/agent/household", async (req, res) => {
 agentRouter.post("/agent/safety-check", validate({ body: SafetyCheckBody }), async (req, res) => {
   res.json(await agentService.safetyCheck(gid(req), req.body));
 });
+
+/** Recipe index search (challenge 01 §12), called by find_recipe with the run token. One Akamai embedding per call. */
+agentRouter.post(
+  "/agent/recipes/search",
+  perGroup(300, 60 * 60_000, "recipe-search"),
+  validate({ body: RecipeSearchBody }),
+  async (req, res) => {
+    res.json(await recipeIndex.search(gid(req), req.body));
+  },
+);

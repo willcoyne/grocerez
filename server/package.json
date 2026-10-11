@@ -21,6 +21,7 @@
     "db:test:setup": "docker compose exec -T postgres psql -U grocerez -d postgres -c \"CREATE DATABASE grocerez_test\"",
     "job:recalls": "tsx src/jobs/runImportRecalls.ts",
     "embeddings:backfill": "tsx src/jobs/embedItems.ts",
+    "embeddings:recipes": "tsx src/jobs/embedRecipes.ts",
     "test:db-break": "vitest run --config test/db-break/vitest.config.ts",
     "test:break": "vitest run --config test/break/vitest.config.ts"
   },

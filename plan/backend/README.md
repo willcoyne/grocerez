@@ -66,6 +66,8 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/groups/:groupId/agent/runs/:runId/apply` | `{}` | `{added, skipped[{name, reason:'in_cabinet'\|'on_list'}], items: ShoppingListItem[]}` (the added rows). 409 `RUN_NOT_PROPOSED`, 422 `PLAN_UNSAFE` (`details.meals[{title, problems[]}]`) | challenge 01 |
 | GET | `/groups/:groupId/agent/household` | — | `AgentHousehold {today, timeZone, zipCode (caller's), members[{displayName, allergens[], diets[]}]}` | challenge 01 |
 | POST | `/groups/:groupId/agent/safety-check` | `{meals[{title, ingredients[], steps[]?, ingredientLines[]?}] 1..7}` | `{meals[{title, passes, problems[{ingredient, reason, members[]}], unknown[]}]}` | challenge 01 |
+| POST | `/groups/:groupId/agent/recipes/search` | `RecipeSearchBody {query ≤200, mustUse[]? ≤10, limit? 1..10 (6)}` (app token or the run token) | `{recipes: (IndexedRecipe & {id, distance, uses[]})[], available}`: excludes members' allergens + diet conflicts; `available:false` → agent falls back to Tavily. 300/h per group | challenge 01 §12 |
+| POST | `/internal/recipes` | `RecipeIngestBody {recipes: IndexedRecipe[1..100]}` (header `X-Agent-Secret`, no JWT) | `{upserted, embedded}`; upsert by url, server computes allergens + embeddings (backfill: `npm run embeddings:recipes`). 401 bad secret | challenge 01 §12 |
 | POST | `/internal/agent-events` | `AgentEvent` (header `X-Agent-Secret`, no JWT) | 204. 401 bad secret, 404 unknown run, 409 run not running, 422 `PLAN_INVALID` (run → failed) | challenge 01 |
 
 **Errors** always look like `{ "error": { "code": "NOT_FOUND", "message": "..." } }`, with the matching HTTP status.

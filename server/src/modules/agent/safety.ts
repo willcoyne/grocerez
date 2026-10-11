@@ -1,10 +1,11 @@
 import { prisma } from "../../db.js";
 import type { SafetyCheckResponse } from "../../contracts/agent.js";
 import { DIETS, type Allergen, type Diet } from "../../contracts/dietary.js";
+import type { Item } from "../../contracts/items.js";
 import { allergensInText } from "../../lib/allergens.js";
 import { conflicts } from "../../lib/diets.js";
 import { normalize } from "../../lib/normalize.js";
-import { itemsService } from "../items/service.js";
+import { itemsRepo, searchRowToItem } from "../items/repo.js";
 import { agentRepo } from "./repo.js";
 
 /** One keyword per allergen that allergensInText() recognises, used to fold catalog allergens into the checked text. */
@@ -47,18 +48,34 @@ function reasonsFor(m: Member, text: string, category: string | null): string[] 
  * Catalog allergens are added as keywords, "; "-separated so EXCLUDE phrases ("almond milk") can't form across them.
  */
 async function analyse(ingredient: string): Promise<Analysis> {
-  const res = await itemsService.search(ingredient, prisma).catch(() => null);
-  const padded = ` ${normalize(ingredient)} `;
-  // Whole-word containment is checked on every returned candidate: search_items classifies multi-word inputs like
-  // "Fresh Basil" as `none` (similarity below the suggestion cut-off) while still returning Basil as similar.
-  const contained = res && res.match !== "exact" ? res.results.find((r) => padded.includes(` ${r.normalizedName} `)) : undefined;
-  const hit = contained ?? (res && res.match !== "none" ? res.results[0] : null);
+  const m = await catalogMatch(ingredient);
+  const hit = m.verified ?? m.fallback;
   const keywordHit = allergensInText(ingredient).length > 0 || conflicts(ingredient, [...DIETS], []).length > 0;
   return {
     text: withCatalog(ingredient, hit?.defaultAllergens ?? []),
     category: hit?.category ?? null,
-    unknown: res?.match !== "exact" && !contained && !keywordHit,
+    unknown: !m.verified && !keywordHit,
   };
+}
+
+/**
+ * The catalog item an ingredient name really is: `verified` = an EXACT hit, or a candidate whose normalized name is
+ * whole words inside the normalized ingredient. `fallback` = a fuzzy `suggested` hit that isn't verified (its
+ * allergens are still applied by the safety check, fail safe). Shared by the safety check and recipe ingest.
+ */
+export async function catalogMatch(ingredient: string): Promise<{ verified: Item | null; fallback: Item | null }> {
+  if (!normalize(ingredient)) return { verified: null, fallback: null };
+  // The spelling search only (same match/results as itemsService.search), without its semantic `related` lookup:
+  // that would cost one Akamai embedding call per unmatched ingredient and we never use it here.
+  const rows = await itemsRepo.search(prisma, ingredient).catch(() => []);
+  if (rows.length === 0) return { verified: null, fallback: null };
+  const res = { match: rows[0].match, results: rows.map(searchRowToItem) };
+  if (res.match === "exact") return { verified: res.results[0], fallback: null };
+  // Containment is checked on every returned candidate: search_items classifies multi-word inputs like
+  // "Fresh Basil" as `none` (similarity below the suggestion cut-off) while still returning Basil as similar.
+  const padded = ` ${normalize(ingredient)} `;
+  const contained = res.results.find((r) => padded.includes(` ${r.normalizedName} `)) ?? null;
+  return { verified: contained, fallback: res.match === "suggested" ? res.results[0] : null };
 }
 
 /** Reason used when an allergy household can't be sure about an ingredient (user decision: unverifiable fails). */
