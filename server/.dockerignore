@@ -1,8 +1,7 @@
 node_modules
 dist
+generated
 .env
 .env.*
 !.env.example
 test
-coverage
-*.log

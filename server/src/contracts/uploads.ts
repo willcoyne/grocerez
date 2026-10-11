@@ -1,13 +1,21 @@
 import { z } from "zod";
 
-export const UPLOAD_CONTENT_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as const;
+export const UPLOAD_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" } as const;
+export const UploadPurpose = z.enum(["avatar", "item-photo"]);
 
-// Unknown fields (e.g. a client-supplied "key" or "filename") are stripped; the key is always server-generated.
-export const PresignRequest = z.object({
+export const PresignBody = z.object({
   contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-  purpose: z.enum(["avatar", "item-photo"]),
+  purpose: UploadPurpose,
 });
-export type PresignRequest = z.infer<typeof PresignRequest>;
+export type PresignBody = z.infer<typeof PresignBody>;
 
-export const PresignResponse = z.object({ uploadUrl: z.string().url(), key: z.string() });
+/**
+ * PUT the file to uploadUrl with header `Content-Type: <contentType>` within 5 minutes, then send `key` to
+ * PATCH /me {avatarKey} or PATCH /groups/:groupId/cabinet/:id {photoKey}.
+ */
+export const PresignResponse = z.object({ uploadUrl: z.string(), key: z.string() });
 export type PresignResponse = z.infer<typeof PresignResponse>;
+
+/** Key format the API hands out (and accepts back): `${purpose}/${userId}/${uuid}.${ext}`. */
+export const uploadKeyPattern = (purpose: "avatar" | "item-photo", userId: string) =>
+  new RegExp(`^${purpose}/${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`);

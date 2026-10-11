@@ -1,6 +1,8 @@
+name: grocerez
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16-trixie
+    restart: unless-stopped
     environment:
       POSTGRES_USER: grocerez
       POSTGRES_PASSWORD: grocerez
@@ -9,5 +11,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grocerez -d grocerez"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   pgdata:

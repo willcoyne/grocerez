@@ -1,60 +1,80 @@
 import { prisma } from "../../db.js";
-import { AppError } from "../../lib/errors.js";
-import { emitGroup, kickFromGroup } from "../../lib/realtime.js";
-import { groupsRepo } from "../groups/repo.js";
-import { presignGet } from "../../lib/s3.js";
-import type { UpdateMeBody, User } from "../../contracts/auth.js";
-import type { Dietary } from "../../contracts/dietary.js";
-import { generate, inListTx } from "../shopping-list/service.js";
-import { usersRepo, type UserRow } from "./repo.js";
+import type { AuthResponse, UpdateMeBody, User } from "../../contracts/auth.js";
+import { uploadKeyPattern } from "../../contracts/uploads.js";
+import { AppError, badRequest, notFound } from "../../lib/errors.js";
+import { google } from "../../lib/google.js";
+import { signAppToken } from "../../lib/jwt.js";
+import { emitGroup, getIo, userRoom } from "../../lib/realtime.js";
+import { lockGroups, regenerate } from "../shopping-list/engine.js";
+import { toUser, usersRepo } from "./repo.js";
 
-// An uploaded avatar wins over the Google picture; the stored key is never exposed, only a 1-hour GET URL.
-export async function toUser({ avatarKey, ...user }: UserRow): Promise<User> {
-  return avatarKey ? { ...user, avatarUrl: await presignGet(avatarKey) } : user;
-}
+export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-export async function getMe(userId: string): Promise<User> {
-  const user = await usersRepo.find(userId);
-  if (!user) throw new AppError(404, "NOT_FOUND", "User not found");
-  return toUser(user);
-}
-
-export async function updateMe(userId: string, data: UpdateMeBody): Promise<User> {
-  // Exactly the shape presignUpload generates for this user (userId is a UUID, checked by requireAuth),
-  // so nobody can claim another user's object.
-  const ownKey = new RegExp(`^avatar/${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`);
-  if (data.avatarKey != null && !ownKey.test(data.avatarKey)) {
-    throw new AppError(400, "VALIDATION_ERROR", "avatarKey must be an avatar key issued to you by /uploads/presign");
-  }
-  return toUser(await usersRepo.update(userId, data));
-}
-
-// Leaves every group first (owner handover / empty-group cleanup, database/11), then deletes the user. One transaction.
-export async function deleteMe(userId: string): Promise<User> {
-  const { user, groupIds } = await prisma.$transaction(async (tx) => {
-    const groupIds = (await groupsRepo.groupIdsForUser(userId, tx)).sort(); // fixed lock order
-    for (const groupId of groupIds) {
-      await groupsRepo.lock(tx, groupId);
-      if (!(await groupsRepo.removeMember(tx, groupId, userId)).groupDeleted) await generate(groupId, tx);
+export const usersService = {
+  /** POST /auth/google: verify the Google ID token, upsert the user by google_sub, issue our JWT. */
+  async signInWithGoogle(idToken: string): Promise<AuthResponse> {
+    let identity;
+    try {
+      identity = await google.verifyIdToken(idToken);
+    } catch {
+      throw new AppError(401, "UNAUTHENTICATED", "Google sign-in failed");
     }
-    return { user: await usersRepo.delete(userId, tx), groupIds };
-  });
-  for (const groupId of groupIds) {
-    await kickFromGroup(groupId, userId);
-    emitGroup(groupId, "group:changed", userId);
-    emitGroup(groupId, "shopping-list:changed", userId);
-  }
-  return toUser(user);
-}
+    if (!identity.emailVerified || !identity.email) {
+      throw new AppError(401, "EMAIL_NOT_VERIFIED", "Your Google account email is not verified");
+    }
+    const email = normalizeEmail(identity.email);
+    const displayName = identity.name?.trim() || email.split("@")[0];
+    const user = await usersRepo.upsertFromGoogle(prisma, {
+      sub: identity.sub,
+      email,
+      displayName: displayName.slice(0, 80),
+      picture: identity.picture ?? null,
+    });
+    return { token: signAppToken(user.id), user: await toUser(user) };
+  },
 
-export const getDietary = (userId: string) => usersRepo.dietary(userId);
+  /** Dev/demo only: a session for an existing (seeded) user. */
+  async loginAs(userId: string): Promise<AuthResponse> {
+    const user = await usersRepo.findById(prisma, userId);
+    if (!user) throw notFound("User");
+    return { token: signAppToken(user.id), user: await toUser(user) };
+  },
 
-// Allergens drive the list's allergen flags, so every group the user is in regenerates (one transaction per group).
-export async function setDietary(userId: string, body: Dietary): Promise<Dietary> {
-  await usersRepo.setDietary(userId, body);
-  for (const groupId of await groupsRepo.groupIdsForUser(userId)) {
-    await inListTx(groupId, (tx) => generate(groupId, tx));
-    emitGroup(groupId, "shopping-list:changed", userId);
-  }
-  return usersRepo.dietary(userId);
-}
+  async getMe(userId: string): Promise<User> {
+    const user = await usersRepo.findById(prisma, userId);
+    if (!user) throw notFound("User");
+    return await toUser(user);
+  },
+
+  async updateMe(userId: string, body: UpdateMeBody): Promise<User> {
+    const { avatarKey, ...rest } = body;
+    if (avatarKey && !uploadKeyPattern("avatar", userId).test(avatarKey)) {
+      throw badRequest("avatarKey must be a key from POST /uploads/presign (purpose avatar)", "INVALID_UPLOAD_KEY");
+    }
+    const user = await usersRepo.update(prisma, userId, { ...rest, ...(avatarKey !== undefined ? { avatarS3Key: avatarKey } : {}) });
+    return await toUser(user);
+  },
+
+  /**
+   * DELETE /me. One transaction: delete the user (memberships and preferences cascade; the owner_handoff trigger
+   * promotes the longest-standing member if they were the last owner), delete groups left with no members,
+   * and regenerate the lists of the groups that remain (their preferences changed).
+   */
+  async deleteMe(userId: string): Promise<void> {
+    const remaining = await prisma.$transaction(async (tx) => {
+      const groupIds = await usersRepo.groupIds(tx, userId);
+      await lockGroups(tx, groupIds);
+      await tx.user.delete({ where: { id: userId } });
+      await tx.group.deleteMany({ where: { id: { in: groupIds }, members: { none: {} } } });
+      const left = (await tx.group.findMany({ where: { id: { in: groupIds } }, select: { id: true } })).map((g) => g.id);
+      for (const gid of left) await regenerate(tx, gid);
+      return left;
+    });
+    for (const gid of remaining) {
+      emitGroup(gid, "group:changed", userId);
+      emitGroup(gid, "preferences:changed", userId);
+      emitGroup(gid, "shopping-list:changed", userId);
+    }
+    getIo()?.in(userRoom(userId)).disconnectSockets(true);
+  },
+};

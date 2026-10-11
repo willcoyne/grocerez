@@ -34,5 +34,5 @@
 
 ## Done when
 
-- [ ] Re-importing the same openFDA recall doesn't duplicate it (`external_id` is unique)
-- [ ] A dismissed recall match no longer shows in alerts
+- [x] Re-importing the same openFDA recall doesn't duplicate it (`external_id` is unique)
+- [x] A dismissed recall match no longer shows in alerts

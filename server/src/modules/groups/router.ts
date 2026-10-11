@@ -1,83 +1,69 @@
 import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
 import {
-  CreateInviteBody,
-  GroupInviteParams,
-  GroupMemberParams,
-  GroupNameBody,
-  InviteParams,
-  InvitesQuery,
+  CreateGroupBody, GroupInviteParams, GroupMemberParams, InviteBody, InviteParams, InvitesQuery, UpdateGroupBody,
 } from "../../contracts/groups.js";
-import { AppError } from "../../lib/errors.js";
-import { requireOwner } from "../../middleware/requireGroupMember.js";
+import { uid } from "../../middleware/auth.js";
+import { perUser } from "../../middleware/rateLimit.js";
+import { gid, requireOwner } from "../../middleware/requireGroupMember.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { groupsService } from "./service.js";
 
-// Membership on /groups/:groupId/* is enforced by requireGroupMember in app.ts; req.membership is set there.
+/** Routes not scoped to one group: /groups (list/create), /me/invites, /invites/:inviteId/*. */
 export const groupsRouter = Router();
 
-const inviteLimiter = rateLimit({
-  windowMs: 60 * 60_000,
-  limit: 20,
-  keyGenerator: (req) => req.userId,
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  handler: (_req, _res, next) => next(new AppError(429, "RATE_LIMITED", "Too many invites, try again later")),
-});
-
 groupsRouter.get("/groups", async (req, res) => {
-  res.json(await service.listGroups(req.userId));
+  res.json(await groupsService.list(uid(req)));
 });
-
-groupsRouter.post("/groups", validate({ body: GroupNameBody }), async (req, res) => {
-  res.status(201).json(await service.createGroup(req.userId, req.body.name));
+groupsRouter.post("/groups", validate({ body: CreateGroupBody }), async (req, res) => {
+  res.status(201).json(await groupsService.create(uid(req), req.body.name, req.body.timeZone));
 });
-
-groupsRouter.get("/groups/:groupId", async (req, res) => {
-  res.json(await service.getGroup(req.membership.groupId, req.membership.role));
-});
-
-groupsRouter.patch("/groups/:groupId", requireOwner, validate({ body: GroupNameBody }), async (req, res) => {
-  res.json(await service.renameGroup(req.membership.groupId, req.membership.role, req.body.name, req.userId));
-});
-
-groupsRouter.delete("/groups/:groupId", requireOwner, async (req, res) => {
-  await service.deleteGroup(req.membership.groupId, req.userId);
-  res.status(204).end();
-});
-
-groupsRouter.get("/groups/:groupId/invites", validate({ query: InvitesQuery }), async (req, res) => {
-  res.json(await service.listInvites(req.membership.groupId, (req.query as { status: string }).status === "all"));
-});
-
-groupsRouter.post("/groups/:groupId/invites", inviteLimiter, validate({ body: CreateInviteBody }), async (req, res) => {
-  res.status(201).json(await service.invite(req.membership.groupId, req.body.email, req.userId));
-});
-
-groupsRouter.delete("/groups/:groupId/invites/:inviteId", validate({ params: GroupInviteParams }), async (req, res) => {
-  await service.revokeInvite(req.membership.groupId, req.params.inviteId as string, req.userId, req.membership.role);
-  res.status(204).end();
-});
-
-groupsRouter.post("/groups/:groupId/leave", async (req, res) => {
-  await service.leaveGroup(req.membership.groupId, req.userId);
-  res.status(204).end();
-});
-
-groupsRouter.delete("/groups/:groupId/members/:userId", requireOwner, validate({ params: GroupMemberParams }), async (req, res) => {
-  await service.removeMember(req.membership.groupId, req.params.userId as string, req.userId);
-  res.status(204).end();
-});
-
 groupsRouter.get("/me/invites", async (req, res) => {
-  res.json(await service.myInvites(req.userId));
+  res.json(await groupsService.myInvites(uid(req)));
 });
-
 groupsRouter.post("/invites/:inviteId/accept", validate({ params: InviteParams }), async (req, res) => {
-  res.json(await service.acceptInvite(req.params.inviteId as string, req.userId));
+  res.json(await groupsService.accept(String(req.params.inviteId), uid(req)));
+});
+groupsRouter.post("/invites/:inviteId/decline", validate({ params: InviteParams }), async (req, res) => {
+  await groupsService.decline(String(req.params.inviteId), uid(req));
+  res.status(204).end();
 });
 
-groupsRouter.post("/invites/:inviteId/decline", validate({ params: InviteParams }), async (req, res) => {
-  await service.declineInvite(req.params.inviteId as string, req.userId);
+/** Mounted at /groups/:groupId behind requireGroupMember. */
+export const groupScopedRouter = Router({ mergeParams: true });
+
+groupScopedRouter.get("/", async (req, res) => {
+  res.json(await groupsService.get(gid(req), req.membership!.role));
+});
+groupScopedRouter.patch("/", requireOwner, validate({ body: UpdateGroupBody }), async (req, res) => {
+  res.json(await groupsService.rename(gid(req), { name: req.body.name, timeZone: req.body.timeZone }, uid(req)));
+});
+groupScopedRouter.delete("/", requireOwner, async (req, res) => {
+  await groupsService.remove(gid(req), uid(req));
+  res.status(204).end();
+});
+
+groupScopedRouter.get("/invites", validate({ query: InvitesQuery }), async (req, res) => {
+  const { status } = req.query as unknown as { status: "pending" | "all" };
+  res.json(await groupsService.listInvites(gid(req), status === "all"));
+});
+groupScopedRouter.post(
+  "/invites",
+  perUser(20, 60 * 60_000, "invites"),
+  validate({ body: InviteBody }),
+  async (req, res) => {
+    res.status(201).json(await groupsService.invite(gid(req), uid(req), req.body.email));
+  },
+);
+groupScopedRouter.delete("/invites/:inviteId", validate({ params: GroupInviteParams }), async (req, res) => {
+  await groupsService.revokeInvite(gid(req), String(req.params.inviteId), uid(req), req.membership!.role);
+  res.status(204).end();
+});
+
+groupScopedRouter.post("/leave", async (req, res) => {
+  await groupsService.leave(gid(req), uid(req));
+  res.status(204).end();
+});
+groupScopedRouter.delete("/members/:userId", requireOwner, validate({ params: GroupMemberParams }), async (req, res) => {
+  await groupsService.removeMember(gid(req), uid(req), String(req.params.userId));
   res.status(204).end();
 });

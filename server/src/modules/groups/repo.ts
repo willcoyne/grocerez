@@ -1,147 +1,98 @@
-import { Prisma, type GroupRole, type InviteStatus } from "@prisma/client";
-import { prisma } from "../../db.js";
-import type { Group, Invite, MyInvite } from "../../contracts/groups.js";
+import type { Db } from "../../db.js";
 
-type Db = Prisma.TransactionClient | typeof prisma;
+const inviteInclude = { inviter: { select: { id: true, displayName: true } } } as const;
 
-const groupSelect = { id: true, name: true, createdAt: true, _count: { select: { members: true } } } as const;
-type GroupRow = Prisma.GroupGetPayload<{ select: typeof groupSelect }>;
-const toGroup = (g: GroupRow, role: GroupRole): Group => ({
-  id: g.id,
-  name: g.name,
-  role,
-  memberCount: g._count.members,
-  createdAt: g.createdAt.toISOString(),
-});
-
-const inviteSelect = {
-  id: true,
-  groupId: true,
-  email: true,
-  status: true,
-  createdAt: true,
-  respondedAt: true,
-  inviter: { select: { id: true, displayName: true } },
-} as const;
-type InviteRow = Prisma.GroupInviteGetPayload<{ select: typeof inviteSelect }>;
-const toInvite = (i: InviteRow): Invite => ({
-  id: i.id,
-  groupId: i.groupId,
-  email: i.email,
-  status: i.status,
-  invitedBy: i.inviter,
-  createdAt: i.createdAt.toISOString(),
-  respondedAt: i.respondedAt?.toISOString() ?? null,
-});
-
+/** Every function is scoped by groupId (and userId where relevant). */
 export const groupsRepo = {
-  // The membership check behind requireGroupMember and group:join. null = not a member.
-  role: async (groupId: string, userId: string, db: Db = prisma): Promise<GroupRole | null> =>
-    (await db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { role: true } }))?.role ?? null,
+  findMembership: (db: Db, groupId: string, userId: string) =>
+    db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { role: true, joinedAt: true } }),
 
-  // Serializes membership changes per group (last-owner handover, accept vs. remove races).
-  lock: (db: Prisma.TransactionClient, groupId: string) =>
-    db.$queryRaw`SELECT id FROM groups WHERE id = ${groupId}::uuid FOR UPDATE`,
-
-  listForUser: async (userId: string): Promise<Group[]> => {
-    const rows = await prisma.groupMember.findMany({
-      where: { userId },
-      orderBy: { joinedAt: "asc" },
-      select: { role: true, group: { select: groupSelect } },
-    });
-    return rows.map((r) => toGroup(r.group, r.role));
-  },
-
-  get: async (groupId: string, role: GroupRole, db: Db = prisma): Promise<Group> =>
-    toGroup(await db.group.findUniqueOrThrow({ where: { id: groupId }, select: groupSelect }), role),
-
-  members: (groupId: string) =>
-    prisma.groupMember.findMany({
-      where: { groupId },
-      orderBy: { joinedAt: "asc" },
-      select: { role: true, user: { select: { id: true, displayName: true, email: true, avatarUrl: true, avatarKey: true, zipCode: true } } },
+  create: (db: Db, name: string, ownerId: string, timeZone?: string) =>
+    db.group.create({
+      data: { name, ...(timeZone ? { timeZone } : {}), createdBy: ownerId, members: { create: { userId: ownerId, role: "owner" } } },
+      include: { _count: { select: { members: true } } },
     }),
 
-  create: (name: string, userId: string) =>
-    prisma.group.create({
-      data: { name, createdBy: userId, members: { create: { userId, role: "owner" } } },
-      select: groupSelect,
-    }).then((g) => toGroup(g, "owner")),
+  listForUser: (db: Db, userId: string) =>
+    db.groupMember.findMany({
+      where: { userId },
+      include: { group: { include: { _count: { select: { members: true } } } } },
+      orderBy: { joinedAt: "asc" },
+    }),
 
-  rename: (groupId: string, name: string) => prisma.group.update({ where: { id: groupId }, data: { name } }),
+  getWithMembers: (db: Db, groupId: string) =>
+    db.group.findUnique({
+      where: { id: groupId },
+      include: {
+        members: {
+          include: { user: { select: { id: true, displayName: true, email: true, avatarUrl: true, avatarS3Key: true } } },
+          orderBy: [{ joinedAt: "asc" }, { userId: "asc" }],
+        },
+        _count: { select: { members: true } },
+      },
+    }),
 
-  delete: (groupId: string) => prisma.group.delete({ where: { id: groupId } }),
+  rename: (db: Db, groupId: string, data: { name?: string; timeZone?: string }) =>
+    db.group.update({ where: { id: groupId }, data, include: { _count: { select: { members: true } } } }),
 
-  // Removes one membership. Promotes the longest-standing member if the last owner left,
-  // deletes the group if nobody is left. Caller holds the group lock.
-  // Per-group rows (preferences, backend/04) must cascade from group_members so they go with the membership.
-  removeMember: async (db: Prisma.TransactionClient, groupId: string, userId: string): Promise<{ groupDeleted: boolean }> => {
-    const { count } = await db.groupMember.deleteMany({ where: { groupId, userId } });
-    if (!count) return { groupDeleted: false };
-    if (await db.groupMember.count({ where: { groupId, role: "owner" } })) return { groupDeleted: false };
-    const next = await db.groupMember.findFirst({ where: { groupId }, orderBy: [{ joinedAt: "asc" }, { userId: "asc" }] });
-    if (!next) {
-      await db.group.delete({ where: { id: groupId } });
-      return { groupDeleted: true };
-    }
-    await db.groupMember.update({ where: { groupId_userId: { groupId, userId: next.userId } }, data: { role: "owner" } });
-    return { groupDeleted: false };
+  delete: (db: Db, groupId: string) => db.group.delete({ where: { id: groupId } }),
+
+  memberIds: async (db: Db, groupId: string) =>
+    (await db.groupMember.findMany({ where: { groupId }, select: { userId: true } })).map((m) => m.userId),
+
+  removeMember: async (db: Db, groupId: string, userId: string) => {
+    // Preferences cascade through the (group_id, user_id) FK; the explicit delete documents the rule (backend/03 step 11).
+    await db.preference.deleteMany({ where: { groupId, userId } });
+    await db.groupMember.delete({ where: { groupId_userId: { groupId, userId } } });
   },
 
-  groupIdsForUser: async (userId: string, db: Db = prisma) =>
-    (await db.groupMember.findMany({ where: { userId }, select: { groupId: true } })).map((m) => m.groupId),
+  /** Deletes the group if nobody is left; returns true if it was deleted. */
+  deleteIfEmpty: async (db: Db, groupId: string) =>
+    (await db.group.deleteMany({ where: { id: groupId, members: { none: {} } } })).count > 0,
 
-  // --- invites ---
+  addMember: (db: Db, groupId: string, userId: string) =>
+    db.groupMember.createMany({ data: [{ groupId, userId, role: "member" }], skipDuplicates: true }),
 
-  isMemberByEmail: async (groupId: string, email: string) =>
-    (await prisma.groupMember.count({ where: { groupId, user: { email } } })) > 0,
+  // ─── Invites ───
+  isMemberByEmail: async (db: Db, groupId: string, email: string) =>
+    (await db.groupMember.count({ where: { groupId, user: { email } } })) > 0,
 
-  upsertInvite: async (groupId: string, email: string, invitedBy: string): Promise<Invite> =>
-    toInvite(
-      await prisma.groupInvite.upsert({
-        where: { groupId_email: { groupId, email } },
-        create: { groupId, email, invitedBy },
-        update: { status: "pending", invitedBy, createdAt: new Date(), respondedAt: null },
-        select: inviteSelect,
-      }),
-    ),
+  /** Re-inviting resets the row to pending (one row per (group, email)). */
+  upsertInvite: (db: Db, groupId: string, email: string, invitedBy: string) =>
+    db.groupInvite.upsert({
+      where: { groupId_email: { groupId, email } },
+      create: { groupId, email, invitedBy },
+      update: { status: "pending", invitedBy, createdAt: new Date(), respondedAt: null },
+      include: inviteInclude,
+    }),
 
-  listInvites: async (groupId: string, all: boolean): Promise<Invite[]> =>
-    (
-      await prisma.groupInvite.findMany({
-        where: { groupId, ...(all ? {} : { status: "pending" }) },
-        orderBy: { createdAt: "desc" },
-        select: inviteSelect,
-      })
-    ).map(toInvite),
+  listInvites: (db: Db, groupId: string, all: boolean) =>
+    db.groupInvite.findMany({
+      where: { groupId, ...(all ? {} : { status: "pending" }) },
+      include: inviteInclude,
+      orderBy: { createdAt: "desc" },
+    }),
 
-  findInvite: (groupId: string, inviteId: string) =>
-    prisma.groupInvite.findFirst({ where: { id: inviteId, groupId }, select: { email: true, status: true, invitedBy: true } }),
+  findInviteInGroup: (db: Db, groupId: string, inviteId: string) =>
+    db.groupInvite.findFirst({ where: { id: inviteId, groupId } }),
 
-  // Conditional update: only changes a row that is still in `from` status (and matches `email` if given).
-  // Returns false if nothing matched, which makes concurrent accept/revoke/decline safe.
-  setInviteStatus: async (
-    where: { id: string; groupId?: string; email?: string },
-    from: InviteStatus,
-    to: InviteStatus,
-    db: Db = prisma,
-  ) => (await db.groupInvite.updateMany({ where: { ...where, status: from }, data: { status: to, respondedAt: new Date() } })).count > 0,
+  findInvite: (db: Db, inviteId: string) => db.groupInvite.findUnique({ where: { id: inviteId } }),
 
-  revokeByEmail: (db: Prisma.TransactionClient, groupId: string, email: string) =>
+  setInviteStatus: (db: Db, inviteId: string, status: "accepted" | "declined" | "revoked") =>
+    db.groupInvite.update({ where: { id: inviteId }, data: { status, respondedAt: new Date() } }),
+
+  /** Conditional transition: only a pending invite changes (returns 0 if someone else got there first). */
+  respondIfPending: async (db: Db, inviteId: string, status: "accepted" | "declined" | "revoked") =>
+    (await db.groupInvite.updateMany({ where: { id: inviteId, status: "pending" }, data: { status, respondedAt: new Date() } }))
+      .count,
+
+  revokeForEmail: (db: Db, groupId: string, email: string) =>
     db.groupInvite.updateMany({ where: { groupId, email, status: { not: "revoked" } }, data: { status: "revoked", respondedAt: new Date() } }),
 
-  pendingInviteForEmail: (inviteId: string, email: string, db: Db = prisma) =>
-    db.groupInvite.findFirst({ where: { id: inviteId, email, status: "pending" }, select: { groupId: true } }),
-
-  myInvites: async (email: string): Promise<MyInvite[]> =>
-    (
-      await prisma.groupInvite.findMany({
-        where: { email, status: "pending" },
-        orderBy: { createdAt: "desc" },
-        select: { ...inviteSelect, group: { select: groupSelect } },
-      })
-    ).map(({ group, ...i }) => ({
-      ...toInvite(i),
-      group: { id: group.id, name: group.name, memberCount: group._count.members },
-    })),
+  myPendingInvites: (db: Db, email: string) =>
+    db.groupInvite.findMany({
+      where: { email, status: "pending" },
+      include: { ...inviteInclude, group: { include: { _count: { select: { members: true } } } } },
+      orderBy: { createdAt: "desc" },
+    }),
 };

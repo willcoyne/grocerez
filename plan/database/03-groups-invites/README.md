@@ -36,6 +36,6 @@
 
 ## Done when
 
-- [ ] A user can belong to multiple groups; `(group_id, user_id)` can't be duplicated
-- [ ] Inviting the same email twice to one group leaves one row
-- [ ] Deleting a group cascades its members and invites
+- [x] A user can belong to multiple groups; `(group_id, user_id)` can't be duplicated
+- [x] Inviting the same email twice to one group leaves one row
+- [x] Deleting a group cascades its members and invites

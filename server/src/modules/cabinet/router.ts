@@ -1,33 +1,32 @@
 import { Router } from "express";
-import { CabinetParams, CabinetQuery, CreateCabinetBody, UpdateCabinetBody } from "../../contracts/cabinet.js";
+import { AddCabinetBody, CabinetQuery, UpdateCabinetBody } from "../../contracts/cabinet.js";
+import { GroupIdParams } from "../../contracts/common.js";
+import { uid } from "../../middleware/auth.js";
+import { gid } from "../../middleware/requireGroupMember.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { cabinetService } from "./service.js";
 
-// Membership is enforced by requireGroupMember in app.ts; req.membership is set there.
-export const cabinetRouter = Router();
+/** Mounted at /groups/:groupId behind requireGroupMember. */
+export const cabinetRouter = Router({ mergeParams: true });
 
-cabinetRouter.get("/groups/:groupId/cabinet", validate({ query: CabinetQuery }), async (req, res) => {
-  res.json(await service.list(req.membership.groupId, req.query as CabinetQuery));
+cabinetRouter.get("/cabinet", validate({ query: CabinetQuery }), async (req, res) => {
+  res.json(await cabinetService.list(gid(req), req.query as never));
 });
 
-// Upsert on (group, item); 200 either way.
-cabinetRouter.post("/groups/:groupId/cabinet", validate({ body: CreateCabinetBody }), async (req, res) => {
-  res.json(await service.add(req.membership.groupId, req.userId, req.body));
+cabinetRouter.post("/cabinet", validate({ body: AddCabinetBody }), async (req, res) => {
+  const { row, created } = await cabinetService.add(gid(req), uid(req), req.body);
+  res.status(created ? 201 : 200).json(row);
 });
 
-cabinetRouter.patch(
-  "/groups/:groupId/cabinet/:id",
-  validate({ params: CabinetParams, body: UpdateCabinetBody }),
-  async (req, res) => {
-    res.json(await service.update(req.membership.groupId, req.params.id as string, req.userId, req.body));
-  },
-);
-
-cabinetRouter.post("/groups/:groupId/cabinet/:id/ran-out", validate({ params: CabinetParams }), async (req, res) => {
-  res.json(await service.ranOut(req.membership.groupId, req.params.id as string, req.userId));
+cabinetRouter.patch("/cabinet/:id", validate({ params: GroupIdParams, body: UpdateCabinetBody }), async (req, res) => {
+  res.json(await cabinetService.update(gid(req), uid(req), String(req.params.id), req.body));
 });
 
-cabinetRouter.delete("/groups/:groupId/cabinet/:id", validate({ params: CabinetParams }), async (req, res) => {
-  await service.remove(req.membership.groupId, req.params.id as string, req.userId);
+cabinetRouter.post("/cabinet/:id/ran-out", validate({ params: GroupIdParams }), async (req, res) => {
+  res.json(await cabinetService.ranOut(gid(req), uid(req), String(req.params.id)));
+});
+
+cabinetRouter.delete("/cabinet/:id", validate({ params: GroupIdParams }), async (req, res) => {
+  await cabinetService.remove(gid(req), uid(req), String(req.params.id));
   res.status(204).end();
 });

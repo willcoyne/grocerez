@@ -1,31 +1,33 @@
-import type { RequestHandler } from "express";
-import type { GroupRole } from "@prisma/client";
+import type { Request, RequestHandler } from "express";
 import { z } from "zod";
-import { AppError } from "../lib/errors.js";
+import { prisma } from "../db.js";
+import { AppError, forbidden } from "../lib/errors.js";
 import { groupsRepo } from "../modules/groups/repo.js";
 
-declare global {
-  namespace Express {
-    interface Request {
-      membership: { groupId: string; role: GroupRole };
-    }
-  }
-}
+const groupNotFound = () => new AppError(404, "NOT_FOUND", "Group not found");
 
-const notFound = () => new AppError(404, "NOT_FOUND", "Group not found");
-
-// Mounted on /api/groups/:groupId in app.ts, so every /groups/:groupId/* route passes through it.
-// Non-members get 404 so they can't tell whether the group exists.
+/**
+ * For every /groups/:groupId/* route: the caller must be a member of :groupId.
+ * Non-members (and malformed ids) get 404, so the response never reveals that a group exists.
+ * Sets req.membership = { groupId, role }.
+ */
 export const requireGroupMember: RequestHandler = async (req, _res, next) => {
-  const groupId = (req.params.groupId as string).toLowerCase(); // canonical id for everything downstream (rooms, logs)
-  if (!z.uuid().safeParse(groupId).success) throw notFound();
-  const role = await groupsRepo.role(groupId, req.userId);
-  if (!role) throw notFound();
-  req.membership = { groupId, role };
+  const groupId = String(req.params.groupId ?? "");
+  if (!z.uuid().safeParse(groupId).success || !req.userId) throw groupNotFound();
+  const m = await groupsRepo.findMembership(prisma, groupId, req.userId);
+  if (!m) throw groupNotFound();
+  req.membership = { groupId, role: m.role };
   next();
 };
 
+/** Owner-only routes; mount after requireGroupMember. */
 export const requireOwner: RequestHandler = (req, _res, next) => {
-  if (req.membership?.role !== "owner") throw new AppError(403, "FORBIDDEN", "Only the group owner can do this");
+  if (req.membership?.role !== "owner") throw forbidden("Only the group owner can do that");
   next();
 };
+
+/** The verified group id (set by requireGroupMember). */
+export function gid(req: Request): string {
+  if (!req.membership) throw groupNotFound();
+  return req.membership.groupId;
+}

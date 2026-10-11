@@ -1,0 +1,14 @@
+# Build context for app/Dockerfile is the repo root; keep it small.
+.git
+.claude
+dev-console
+**/node_modules
+**/.expo
+**/dist
+**/web-build
+**/generated
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/.DS_Store

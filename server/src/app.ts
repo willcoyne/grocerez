@@ -1,66 +1,76 @@
-import express from "express";
 import cors from "cors";
+import express, { Router } from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
+import { config } from "./config.js";
 import { logger } from "./lib/logger.js";
-import { errorHandler, notFound } from "./middleware/errorHandler.js";
-import { healthRouter } from "./modules/health/router.js";
-import { authRouter, devRouter, requireDemoKey } from "./modules/auth/router.js";
-import { usersRouter } from "./modules/users/router.js";
-import { groupsRouter } from "./modules/groups/router.js";
-import { uploadsRouter } from "./modules/uploads/router.js";
-import { itemsRouter } from "./modules/items/router.js";
-import { preferencesRouter } from "./modules/preferences/router.js";
-import { cabinetRouter } from "./modules/cabinet/router.js";
-import { shoppingListRouter } from "./modules/shopping-list/router.js";
-import { productsRouter } from "./modules/products/router.js";
-import { alertsRouter } from "./modules/recalls/router.js";
-import { aiRouter } from "./modules/ai/router.js";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requireAuth } from "./middleware/auth.js";
 import { requireGroupMember } from "./middleware/requireGroupMember.js";
-import { config } from "./config.js";
+import { aiRouter } from "./modules/ai/router.js";
+import { cabinetRouter } from "./modules/cabinet/router.js";
+import { dietaryRouter } from "./modules/dietary/router.js";
+import { groupScopedRouter, groupsRouter } from "./modules/groups/router.js";
+import { itemsRouter } from "./modules/items/router.js";
+import { preferencesRouter } from "./modules/preferences/router.js";
+import { productsRouter } from "./modules/products/router.js";
+import { healthRouter } from "./modules/health/router.js";
+import { alertsRouter } from "./modules/recalls/router.js";
+import { shoppingListRouter } from "./modules/shopping-list/router.js";
+import { uploadsRouter } from "./modules/uploads/router.js";
+import { authRouter, devRouter, meRouter } from "./modules/users/router.js";
 
-export const app = express();
-// Behind a host proxy, req.ip (used by the rate limiters) must come from X-Forwarded-For.
-if (config.TRUST_PROXY) app.set("trust proxy", config.TRUST_PROXY);
+/** Builds the Express app (no network listener; index.ts adds the HTTP server and Socket.IO). */
+export function createApp() {
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
 
-app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGINS }));
-app.use(express.json({ limit: "1mb" }));
-// Query strings are never logged: Socket.IO-style clients send `?token=`, and searches can be personal (GAPS #26).
-app.use(
-  pinoHttp({
-    logger,
-    serializers: {
-      req: (req) => {
-        req.url = String(req.url ?? "").split("?")[0];
-        delete req.query;
-        return req;
+  app.use(helmet());
+  app.use(
+    cors({
+      // Native apps send no Origin header; browsers (Expo web) must be on the allow-list.
+      origin: (origin, cb) => cb(null, !origin || config.CORS_ORIGINS.includes(origin) || config.NODE_ENV !== "production"),
+    }),
+  );
+  app.use(express.json({ limit: "1mb" }));
+  app.use(
+    pinoHttp({
+      logger,
+      serializers: {
+        req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url }),
+        res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
       },
-    },
-  }),
-);
+    }),
+  );
 
-// Public routes.
-app.use("/api", healthRouter);
-app.use("/api", authRouter);
-if (config.NODE_ENV !== "production") app.use("/api", devRouter);
-else if (config.DEMO_KEY) app.use("/api/dev", requireDemoKey(config.DEMO_KEY)).use("/api", devRouter); // demo deploy only
+  const api = Router();
+  // Public routes.
+  api.use(healthRouter);
+  api.use(authRouter);
+  api.use(devRouter());
+  // Everything below needs a valid app JWT.
+  api.use(requireAuth);
+  api.use(meRouter);
+  api.use(dietaryRouter);
+  api.use(groupsRouter);
+  api.use(itemsRouter);
+  api.use(productsRouter);
+  api.use(uploadsRouter);
 
-// Everything below requires a valid app JWT (unknown /api paths included, so routes can't be probed).
-app.use("/api", requireAuth);
-// Every /groups/:groupId/* route, in any router, requires membership (backend/03).
-app.use("/api/groups/:groupId", requireGroupMember);
-app.use("/api", usersRouter);
-app.use("/api", groupsRouter);
-app.use("/api", uploadsRouter);
-app.use("/api", itemsRouter);
-app.use("/api", preferencesRouter);
-app.use("/api", cabinetRouter);
-app.use("/api", aiRouter); // before shoppingListRouter: owns /shopping-list/prices
-app.use("/api", shoppingListRouter);
-app.use("/api", productsRouter);
-app.use("/api", alertsRouter);
+  // /groups/:groupId/* : membership is checked once here for every group-scoped feature router.
+  const group = Router({ mergeParams: true });
+  group.use(groupScopedRouter);
+  group.use(preferencesRouter);
+  group.use(cabinetRouter);
+  group.use(aiRouter);
+  group.use(shoppingListRouter);
+  group.use(alertsRouter);
+  api.use("/groups/:groupId", requireGroupMember, group);
 
-app.use(notFound);
-app.use(errorHandler);
+  app.use("/api", api);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+  return app;
+}

@@ -1,34 +1,33 @@
 import { Router } from "express";
-import {
-  CreatePreferenceBody,
-  PreferenceParams,
-  PreferencesQuery,
-  UpdatePreferenceBody,
-} from "../../contracts/preferences.js";
+import { GroupIdParams } from "../../contracts/common.js";
+import { CreatePreferenceBody, PreferencesQuery, UpdatePreferenceBody } from "../../contracts/preferences.js";
+import { uid } from "../../middleware/auth.js";
+import { gid } from "../../middleware/requireGroupMember.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { preferencesService } from "./service.js";
 
-// Membership is enforced by requireGroupMember in app.ts; req.membership is set there.
-export const preferencesRouter = Router();
+/** Mounted at /groups/:groupId behind requireGroupMember. */
+export const preferencesRouter = Router({ mergeParams: true });
 
-preferencesRouter.get("/groups/:groupId/preferences", validate({ query: PreferencesQuery }), async (req, res) => {
-  res.json(await service.list(req.membership.groupId, req.userId, (req.query as { userId: "me" | "all" }).userId));
+preferencesRouter.get("/preferences", validate({ query: PreferencesQuery }), async (req, res) => {
+  const { userId } = req.query as unknown as { userId: "me" | "all" };
+  res.json(await preferencesService.list(gid(req), uid(req), userId));
 });
 
-// Creates or updates the caller's row for (group, user, item); 200 either way.
-preferencesRouter.post("/groups/:groupId/preferences", validate({ body: CreatePreferenceBody }), async (req, res) => {
-  res.json(await service.upsert(req.membership.groupId, req.userId, req.body));
+preferencesRouter.post("/preferences", validate({ body: CreatePreferenceBody }), async (req, res) => {
+  const { pref, created } = await preferencesService.upsert(gid(req), uid(req), req.body);
+  res.status(created ? 201 : 200).json(pref);
 });
 
 preferencesRouter.patch(
-  "/groups/:groupId/preferences/:id",
-  validate({ params: PreferenceParams, body: UpdatePreferenceBody }),
+  "/preferences/:id",
+  validate({ params: GroupIdParams, body: UpdatePreferenceBody }),
   async (req, res) => {
-    res.json(await service.update(req.membership.groupId, req.params.id as string, req.userId, req.body));
+    res.json(await preferencesService.update(gid(req), uid(req), String(req.params.id), req.body));
   },
 );
 
-preferencesRouter.delete("/groups/:groupId/preferences/:id", validate({ params: PreferenceParams }), async (req, res) => {
-  await service.remove(req.membership.groupId, req.params.id as string, req.userId);
+preferencesRouter.delete("/preferences/:id", validate({ params: GroupIdParams }), async (req, res) => {
+  await preferencesService.remove(gid(req), uid(req), String(req.params.id));
   res.status(204).end();
 });

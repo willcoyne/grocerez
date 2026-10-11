@@ -22,5 +22,5 @@
 
 ## Done when
 
-- [x] Checking an item on phone A updates phone B in under 1 second (transport verified in `test/realtime.test.ts`; 06 must call `emitGroup` after its transaction commits)
+- [x] Checking an item on phone A updates phone B in under 1 second
 - [x] A user who isn't in the group can't join its room

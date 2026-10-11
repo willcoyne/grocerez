@@ -25,5 +25,11 @@
 
 ## Done when
 
-- [ ] Kill and reopen the app → still signed in
-- [ ] A new Google account goes through onboarding; a returning one goes straight to the List tab
+- [ ] Kill and reopen the app → still signed in — logic tested in Jest (saved token → `GET /me`; 401 → signed out; offline → cached user); **needs device check**
+- [ ] A new Google account goes through onboarding; a returning one goes straight to the List tab — routing + `isNewUser` + onboarding steps tested in Jest; real Google sign-in **needs device check** (and Google client IDs)
+
+## Status (2026-10-10)
+
+Sign-in (`src/app/sign-in.tsx`, with the `__DEV__` Demo users list and a server health line), `AuthContext`, the route guard
+(`Stack.Protected` in `src/app/_layout.tsx`), 3-step skippable onboarding, and sign out (Me tab) are built.
+Missing config: `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME` (see `app/.env.example`).

@@ -1,12 +1,30 @@
 import { createServer } from "node:http";
-import { app } from "./app.js";
+import { createApp } from "./app.js";
 import { config } from "./config.js";
+import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
-import { attachRealtime } from "./lib/realtime.js";
+import { backfillItemEmbeddings } from "./jobs/embedItems.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
+import { createSocketServer } from "./realtime/socket.js";
 
-const server = createServer(app);
-attachRealtime(server, config.CORS_ORIGINS);
-void scheduleRecallImport(); // not in tests: they import app.ts, never index.ts
+const app = createApp();
+const httpServer = createServer(app);
+const io = createSocketServer(httpServer);
+const jobs = config.ENABLE_JOBS ? [scheduleRecallImport()] : [];
 
-server.listen(config.PORT, () => logger.info(`GrocerEZ API listening on :${config.PORT}`));
+httpServer.listen(config.PORT, () => {
+  logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
+  // Fill in embeddings for seeded/older items in the background; search works without them meanwhile.
+  backfillItemEmbeddings().catch((err) => logger.warn({ err: String(err) }, "item embedding backfill failed"));
+});
+
+async function shutdown(signal: string) {
+  logger.info({ signal }, "shutting down");
+  for (const j of jobs) j.stop();
+  io.close();
+  httpServer.close();
+  await prisma.$disconnect();
+  process.exit(0);
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

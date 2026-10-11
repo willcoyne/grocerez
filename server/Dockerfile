@@ -1,26 +1,24 @@
-# GrocerEZ API. Build from server/: docker build -t grocerez-api .
-FROM node:22-slim AS base
-# Prisma's query engine needs OpenSSL; slim images don't ship it.
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+# GrocerEZ API (backend/12 step 1). Build from server/:  docker build -t grocerez-api .
+FROM node:22-slim AS build
 WORKDIR /app
-
-FROM base AS build
 COPY package.json package-lock.json ./
-COPY prisma ./prisma
 RUN npm ci
-COPY tsconfig.json ./
-COPY src ./src
-RUN npx prisma generate && npm run build
+COPY . .
+# prisma.config.ts reads DATABASE_URL; generate doesn't connect, so a placeholder is enough at build time.
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build npx prisma generate && npm run build
 
-FROM base AS runtime
+FROM node:22-slim
+WORKDIR /app
 ENV NODE_ENV=production
-# ponytail: copies dev deps too, because the prisma CLI (a devDependency) runs `migrate deploy` at start.
-# Move prisma to dependencies and `npm prune --omit=dev` if image size matters.
+# node_modules keeps dev dependencies on purpose: the prisma CLI (migrate deploy at start) and tsx (prisma db seed) are dev deps.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY package.json ./
+COPY --from=build /app/generated ./generated
+COPY package.json prisma.config.ts tsconfig.json ./
 COPY prisma ./prisma
-USER node
+# The seed (tsx prisma/seed.ts) imports TypeScript from src/, so keep the sources for `prisma db seed`.
+COPY src ./src
 EXPOSE 3000
-# Migrations run on every start: `migrate deploy` is idempotent and the service runs as 1 instance (backend/12 step 3).
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/index.js"]
+USER node
+# MIGRATE_DATABASE_URL (owner) is used by migrate deploy when set; DATABASE_URL (grocerez_app) by the API.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/index.js"]

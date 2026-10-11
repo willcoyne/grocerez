@@ -1,30 +1,50 @@
 import { Router } from "express";
-import { UpdateMeBody, type User } from "../../contracts/auth.js";
-import { PutDietaryBody } from "../../contracts/dietary.js";
+import { z } from "zod";
+import { config } from "../../config.js";
+import { GoogleAuthBody, UpdateMeBody } from "../../contracts/auth.js";
+import { AppError } from "../../lib/errors.js";
+import { uid } from "../../middleware/auth.js";
+import { perIp } from "../../middleware/rateLimit.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { usersService } from "./service.js";
 
-export const usersRouter = Router();
-
-usersRouter.get("/me", async (req, res) => {
-  const body: User = await service.getMe(req.userId);
-  res.json(body);
+/** Public: POST /auth/google (20 requests/min per IP). */
+export const authRouter = Router();
+authRouter.post("/auth/google", perIp(20, 60_000), validate({ body: GoogleAuthBody }), async (req, res) => {
+  res.json(await usersService.signInWithGoogle(req.body.idToken));
 });
 
-usersRouter.patch("/me", validate({ body: UpdateMeBody }), async (req, res) => {
-  const body: User = await service.updateMe(req.userId, req.body);
-  res.json(body);
+/** GET / PATCH / DELETE /me (mounted behind requireAuth). */
+export const meRouter = Router();
+meRouter.get("/me", async (req, res) => {
+  res.json(await usersService.getMe(uid(req)));
+});
+meRouter.patch("/me", validate({ body: UpdateMeBody }), async (req, res) => {
+  res.json(await usersService.updateMe(uid(req), req.body));
+});
+meRouter.delete("/me", async (req, res) => {
+  await usersService.deleteMe(uid(req));
+  res.status(204).end();
 });
 
-usersRouter.delete("/me", async (req, res) => {
-  const body: User = await service.deleteMe(req.userId);
-  res.json(body);
-});
-
-usersRouter.get("/me/dietary", async (req, res) => {
-  res.json(await service.getDietary(req.userId));
-});
-
-usersRouter.put("/me/dietary", validate({ body: PutDietaryBody }), async (req, res) => {
-  res.json(await service.setDietary(req.userId, req.body));
-});
+/**
+ * POST /dev/login-as/:userId: a session for a seeded demo user (database/10 step 9).
+ * Mounted when NODE_ENV !== "production". In production it is mounted only if DEMO_KEY is set,
+ * and then requires header `x-demo-key: <DEMO_KEY>` (backend/12 step 4).
+ */
+export function devRouter() {
+  const router = Router();
+  if (config.NODE_ENV === "production" && !config.DEMO_KEY) return router;
+  router.post(
+    "/dev/login-as/:userId",
+    perIp(30, 60_000),
+    validate({ params: z.object({ userId: z.uuid() }) }),
+    async (req, res) => {
+      if (config.NODE_ENV === "production" && req.get("x-demo-key") !== config.DEMO_KEY) {
+        throw new AppError(404, "NOT_FOUND", "Not found");
+      }
+      res.json(await usersService.loginAs(String(req.params.userId)));
+    },
+  );
+  return router;
+}

@@ -1,206 +1,150 @@
-import type { Prisma } from "@prisma/client";
-import { prisma } from "../../db.js";
+import { prisma, type Db } from "../../db.js";
+import { CATEGORIES } from "../../contracts/common.js";
 import type { AddListItemBody, AllergenFlag, CheckListItemBody, ShoppingListItem } from "../../contracts/shoppingList.js";
-import { AppError } from "../../lib/errors.js";
-import { estimateExpiration } from "../../lib/expiration.js";
+import { conflict, notFound } from "../../lib/errors.js";
+import { estimateExpiration, groupTimeZone } from "../../lib/expiration.js";
 import { emitGroup } from "../../lib/realtime.js";
-import { cabinetRepo } from "../cabinet/repo.js";
-import { groupsRepo } from "../groups/repo.js";
-import { itemsRepo } from "../items/repo.js";
-import { recallsRepo } from "../recalls/repo.js";
-import { listRepo } from "./repo.js";
+import { cabinetHooks } from "../cabinet/service.js";
+import { lockGroup, regenerate, withRegeneration } from "./engine.js";
+import { shoppingListRepo } from "./repo.js";
 
-type Tx = Prisma.TransactionClient;
-const notFound = () => new AppError(404, "LIST_ITEM_NOT_FOUND", "Shopping list item not found");
+type Row = NonNullable<Awaited<ReturnType<typeof shoppingListRepo.find>>>;
 
-/**
- * Every write that can change the list runs here: one transaction holding the group row lock (the same lock
- * groups/03 uses for membership), taken FIRST so list, cabinet, preference and membership writers serialize per
- * group in one lock order (no deadlocks, no double moves).
- */
-export const inListTx = <T>(groupId: string, fn: (tx: Tx) => Promise<T>) =>
-  prisma.$transaction(
-    async (tx) => {
-      await groupsRepo.lock(tx, groupId);
-      return fn(tx);
-    },
-    { timeout: 15_000 },
-  );
+const AISLE = new Map<string, number>(CATEGORIES.map((c, i) => [c, i]));
+const aisle = (category: string | null) => AISLE.get(category ?? "other") ?? AISLE.get("other")!;
 
-/** Pure set math (property-tested): needed = desired − have; drop unchecked preference rows no longer needed. */
-export function setMath(
-  desired: Iterable<string>,
-  have: Iterable<string>,
-  rows: { id: string; itemId: string; reason: "preference" | "manual"; checked: boolean }[],
-) {
-  const haveSet = new Set(have);
-  const needed = new Set([...desired].filter((i) => !haveSet.has(i)));
-  const remove = rows.filter((r) => r.reason === "preference" && !r.checked && !needed.has(r.itemId));
-  const existing = new Set(rows.map((r) => r.itemId));
-  const create = [...needed].filter((i) => !existing.has(i));
-  return { needed, remove, create };
-}
-
-/**
- * THE list generator (backend/06 step 1), used by every caller: list = needed ∪ manual rows ∪ checked rows.
- * Runs inside the caller's transaction; callers emit shopping-list:changed after commit.
- * Idempotent: a second run writes nothing.
- */
-export async function generate(groupId: string, tx: Tx): Promise<void> {
-  await groupsRepo.lock(tx, groupId); // no-op when the caller already holds it (inListTx)
-  const prefs = await listRepo.preferences(tx, groupId);
-  const have = await cabinetRepo.haveItemIds(groupId, tx);
-  const members = await listRepo.members(tx, groupId);
-  const rows = await listRepo.rows(tx, groupId);
-
-  const desired = new Map<string, { wantedBy: string[]; quantities: string[] }>();
-  for (const p of prefs) {
-    const d = desired.get(p.itemId) ?? { wantedBy: [], quantities: [] };
-    d.wantedBy.push(p.userId);
-    if (p.quantityText && !d.quantities.includes(p.quantityText)) d.quantities.push(p.quantityText);
-    desired.set(p.itemId, d);
-  }
-  const { remove, create } = setMath(desired.keys(), have, rows);
-  const removed = new Set(remove.map((r) => r.id));
-  const kept = rows.filter((r) => !removed.has(r.id));
-
-  const allergens = await listRepo.itemAllergens(tx, [...create, ...kept.map((r) => r.itemId)]);
-  // A scanned row is flagged by the catalog item's allergens ∪ the product's allergens ∪ may_contain. Deviates from
-  // backend/06 step 1.3 (product only): OFF often has no allergen data, and "no data" must not clear a flag (M3-10).
-  const scanned = new Map(kept.flatMap((r) => (r.scannedProduct ? [[r.itemId, [...r.scannedProduct.allergens, ...r.scannedProduct.mayContain] as string[]]] : [])));
-  const flags = (itemId: string): AllergenFlag[] => {
-    const has = [...(allergens.get(itemId) ?? []), ...(scanned.get(itemId) ?? [])];
-    return members.flatMap((m) =>
-      m.allergens.filter((a) => has.includes(a)).map((allergen) => ({ userId: m.id, displayName: m.displayName, allergen })),
-    );
+function toListItem(r: Row, names: Map<string, string>): ShoppingListItem {
+  return {
+    id: r.id,
+    groupId: r.groupId,
+    itemId: r.itemId,
+    item: { id: r.item.id, name: r.item.name, category: r.item.category },
+    reason: r.reason,
+    wantedBy: r.wantedBy.map((userId) => ({ userId, displayName: names.get(userId) ?? "Former member" })),
+    quantityText: r.quantityText,
+    allergenFlags: (r.allergenFlags ?? []) as AllergenFlag[],
+    checked: r.checked,
+    checkedBy: r.checkedBy,
+    checkedAt: r.checkedAt?.toISOString() ?? null,
+    scannedProductId: r.scannedProductId,
+    addedBy: r.addedBy,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
   };
-  const target = (itemId: string) => ({
-    wantedBy: desired.get(itemId)?.wantedBy ?? [],
-    quantityText: desired.get(itemId)?.quantities.join(", ") || null,
-    allergenFlags: flags(itemId),
-  });
+}
 
-  // `checked: false` is re-evaluated by Postgres at delete time (READ COMMITTED), so a lock-free check-off that commits
-  // after our read above is never deleted.
-  if (remove.length) await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: [...removed] }, checked: false } });
-  if (create.length) {
-    await tx.shoppingListItem.createMany({
-      data: create.map((itemId) => ({ groupId, itemId, reason: "preference" as const, ...target(itemId) })),
+/** The list in store-aisle order (category), then name. */
+async function readList(db: Db, groupId: string): Promise<ShoppingListItem[]> {
+  const [rows, names] = await Promise.all([shoppingListRepo.list(db, groupId), shoppingListRepo.memberNames(db, groupId)]);
+  rows.sort((a, b) => aisle(a.item.category) - aisle(b.item.category) || a.item.name.localeCompare(b.item.name));
+  return rows.map((r) => toListItem(r, names));
+}
+
+async function readOne(db: Db, groupId: string, id: string) {
+  const row = await shoppingListRepo.find(db, groupId, id);
+  if (!row) throw notFound("List item");
+  return toListItem(row, await shoppingListRepo.memberNames(db, groupId));
+}
+
+export const shoppingListService = {
+  /**
+   * generate(groupId): the one generation entry point (initial list / explicit regenerate). Runs the engine in a
+   * transaction, emits shopping-list:changed if anything changed, and returns the list.
+   * Other writes (preferences, cabinet, ran-out, finish trip) call the same engine inside their own transaction.
+   */
+  async generate(groupId: string, by: string | null): Promise<ShoppingListItem[]> {
+    const changed = await prisma.$transaction((tx) => regenerate(tx, groupId));
+    if (changed > 0) emitGroup(groupId, "shopping-list:changed", by);
+    return readList(prisma, groupId);
+  },
+
+  list: (groupId: string) => readList(prisma, groupId),
+
+  /** Manual add ("we're out of X"). Upsert with reason 'manual', then regenerate (fills wanted_by / allergen flags). */
+  async addManual(groupId: string, userId: string, body: AddListItemBody): Promise<{ row: ShoppingListItem; created: boolean }> {
+    if (!(await prisma.item.findUnique({ where: { id: body.itemId }, select: { id: true } }))) throw notFound("Item");
+    const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], async (tx) => {
+      const before = await shoppingListRepo.findByItem(tx, groupId, body.itemId);
+      const row = await shoppingListRepo.upsertManual(tx, groupId, body.itemId, userId, body.quantityText);
+      return { id: row.id, created: !before };
     });
-  }
-  // Existing rows keep reason / checked state; manual rows keep their own quantity.
-  for (const r of kept) {
-    const t = target(r.itemId);
-    const next = { wantedBy: t.wantedBy, allergenFlags: t.allergenFlags, quantityText: r.reason === "preference" ? t.quantityText : r.quantityText };
-    const cur = {
-      wantedBy: r.wantedBy,
-      allergenFlags: (r.allergenFlags as AllergenFlag[]).map(({ userId, displayName, allergen }) => ({ userId, displayName, allergen })),
-      quantityText: r.quantityText,
-    };
-    if (JSON.stringify(next) !== JSON.stringify(cur)) await listRepo.update(groupId, r.id, next, tx);
-  }
-}
+    return { row: await readOne(prisma, groupId, result.id), created: result.created };
+  },
 
-const changed = (groupId: string, by: string) => emitGroup(groupId, "shopping-list:changed", by);
-
-export const list = (groupId: string) => listRepo.load(prisma, groupId);
-
-export async function regenerateNow(groupId: string, userId: string): Promise<ShoppingListItem[]> {
-  const rows = await inListTx(groupId, async (tx) => {
-    await generate(groupId, tx);
-    return listRepo.load(tx, groupId);
-  });
-  changed(groupId, userId);
-  return rows;
-}
-
-// "We're out of X": a manual row survives regeneration. Re-adding an item already listed makes it manual.
-export async function addManual(groupId: string, userId: string, { itemId, quantityText }: AddListItemBody): Promise<ShoppingListItem> {
-  if (!(await itemsRepo.find(itemId))) throw new AppError(404, "ITEM_NOT_FOUND", "Item not found");
-  const row = await inListTx(groupId, async (tx) => {
-    const { id } = await listRepo.upsertManual(tx, groupId, itemId, userId, quantityText);
-    await generate(groupId, tx); // allergen flags + wantedBy
-    return (await listRepo.load(tx, groupId, id))[0];
-  });
-  changed(groupId, userId);
-  return row;
-}
-
-// Saved immediately; last write wins per row. Un-checking clears who/when and the scanned product.
-export async function check(groupId: string, id: string, userId: string, body: CheckListItemBody): Promise<ShoppingListItem> {
-  if (body.scannedProductId) {
-    const product = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { itemId: true } });
-    if (!product) throw new AppError(404, "PRODUCT_NOT_FOUND", "Product not found");
-    // A product linked to another catalog item is a different thing (M3-11). Unlinked products are accepted.
-    if (product.itemId) {
-      const row = await prisma.shoppingListItem.findFirst({ where: { id, groupId }, select: { itemId: true } });
-      if (!row) throw notFound();
-      if (row.itemId !== product.itemId) throw new AppError(400, "PRODUCT_ITEM_MISMATCH", "This product is not the list item");
+  /** Check / uncheck (the DB trigger stamps checked_at; unchecking clears checked_by/at) and link a scanned product. */
+  async check(groupId: string, userId: string, id: string, body: CheckListItemBody): Promise<ShoppingListItem> {
+    const row = await shoppingListRepo.find(prisma, groupId, id);
+    if (!row) throw notFound("List item");
+    if (body.scannedProductId) {
+      const p = await prisma.product.findUnique({ where: { id: body.scannedProductId }, select: { id: true, itemId: true } });
+      if (!p) throw notFound("Product");
+      // DB-04: the database rejects a product of another catalog item (its allergens would replace this item's).
+      if (p.itemId !== row.itemId) {
+        throw conflict("The scanned product belongs to a different item than this list row", "PRODUCT_ITEM_MISMATCH");
+      }
     }
-  }
-  const data = body.checked
-    ? { checked: true, checkedBy: userId, checkedAt: new Date(), ...(body.scannedProductId !== undefined && { scannedProductId: body.scannedProductId }) }
-    : { checked: false, checkedBy: null, checkedAt: null, scannedProductId: body.scannedProductId ?? null };
-  // The scanned product changes the row's allergen flags, so that case regenerates under the group lock.
-  // A plain check-off stays a lock-free single-row update.
-  const productChanged = body.scannedProductId !== undefined || !body.checked;
-  const ok = productChanged
-    ? await inListTx(groupId, async (tx) => {
-        const row = await listRepo.update(groupId, id, data, tx);
-        if (row) await generate(groupId, tx);
-        return row;
-      })
-    : await listRepo.update(groupId, id, data);
-  if (!ok) throw notFound();
-  changed(groupId, userId);
-  const [row] = await listRepo.load(prisma, groupId, id);
-  if (!row) throw notFound(); // finished/deleted in between
-  return row;
-}
+    await withRegeneration(groupId, userId, ["shopping-list:changed"], (tx) =>
+      shoppingListRepo.setChecked(tx, groupId, id, {
+        checked: body.checked,
+        checkedBy: body.checked ? userId : null,
+        ...(body.scannedProductId !== undefined ? { scannedProductId: body.scannedProductId } : {}),
+      }),
+    );
+    return readOne(prisma, groupId, id);
+  },
 
-// Manual rows (and orphaned preference rows nobody wants anymore) can be deleted; a wanted preference row is 409.
-export async function remove(groupId: string, id: string, userId: string) {
-  await inListTx(groupId, async (tx) => {
-    const row = await listRepo.find(tx, groupId, id);
-    if (!row) throw notFound();
-    if (row.reason === "preference" && (await cabinetRepo.isWanted(groupId, row.itemId, tx))) {
-      throw new AppError(409, "LIST_ITEM_IS_PREFERENCE", "This item is on the list because someone wants it; remove the preference instead");
+  /** Only manual rows can be deleted; preference rows → 409 (remove the preference instead). */
+  async remove(groupId: string, userId: string, id: string): Promise<void> {
+    const row = await shoppingListRepo.find(prisma, groupId, id);
+    if (!row) throw notFound("List item");
+    if (row.reason !== "manual") {
+      throw conflict("This item is on the list because of a preference; remove the preference instead", "PREFERENCE_ROW");
     }
-    await tx.shoppingListItem.delete({ where: { id } });
-    await generate(groupId, tx); // a manual row for an item someone wants comes back as a preference row
-  });
-  changed(groupId, userId);
-}
+    await withRegeneration(groupId, userId, ["shopping-list:changed"], (tx) => shoppingListRepo.delete(tx, groupId, id));
+  },
 
-/** Finish trip (step 6): one transaction under the group lock, so two concurrent completes can't move an item twice. */
-export async function complete(groupId: string, userId: string): Promise<{ movedToCabinet: number }> {
-  const moved = await inListTx(groupId, async (tx) => {
-    const checked = await listRepo.lockChecked(tx, groupId);
-    if (!checked.length) return 0;
+  /**
+   * Finish trip, ONE transaction: checked rows → cabinet (in_stock, purchased now, scanned product, estimated expiry);
+   * delete one_time preferences for those items; delete the checked rows; regenerate.
+   */
+  async complete(groupId: string, userId: string): Promise<{ movedToCabinet: number }> {
     const now = new Date();
-    const cabinetIds: string[] = [];
-    for (const r of checked) {
-      const expiresAt = estimateExpiration(r.item, now);
-      const write = {
-        status: "in_stock" as const,
-        purchasedAt: now,
-        expiresAt,
-        expirationSource: expiresAt ? ("estimated" as const) : null,
-        ...(r.scannedProductId && { productId: r.scannedProductId }), // an unscanned re-buy keeps the known product
-      };
-      cabinetIds.push((await cabinetRepo.upsert(groupId, r.itemId, userId, write, write, tx)).id);
+    const { moved, cabinetIds, prefsDeleted } = await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
+      const timeZone = await groupTimeZone(tx, groupId);
+      const rows = await shoppingListRepo.checkedRows(tx, groupId);
+      const cabinetIds: string[] = [];
+      for (const r of rows) {
+        const expiresAt = estimateExpiration(r.item, now, timeZone);
+        const expiry = expiresAt
+          ? { expiresAt, expirationSource: "estimated" as const }
+          : { expiresAt: null, expirationSource: null };
+        const c = await tx.cabinetItem.upsert({
+          where: { groupId_itemId: { groupId, itemId: r.itemId } },
+          create: {
+            groupId, itemId: r.itemId, status: "in_stock", purchasedAt: now, productId: r.scannedProductId,
+            quantityText: r.quantityText, addedBy: r.checkedBy ?? userId, ...expiry,
+          },
+          update: {
+            status: "in_stock", purchasedAt: now, ...(r.scannedProductId ? { productId: r.scannedProductId } : {}),
+            ...(r.quantityText ? { quantityText: r.quantityText } : {}), ...expiry,
+          },
+          select: { id: true },
+        });
+        cabinetIds.push(c.id);
+      }
+      const itemIds = rows.map((r) => r.itemId);
+      const prefs = await tx.preference.deleteMany({ where: { groupId, itemId: { in: itemIds }, recurrence: "one_time" } });
+      await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: rows.map((r) => r.id) } } });
+      await regenerate(tx, groupId);
+      return { moved: rows.length, cabinetIds, prefsDeleted: prefs.count };
+    });
+    if (moved > 0) {
+      emitGroup(groupId, "cabinet:changed", userId);
+      emitGroup(groupId, "shopping-list:changed", userId);
+      if (prefsDeleted > 0) emitGroup(groupId, "preferences:changed", userId);
     }
-    await recallsRepo.match({ cabinetItemIds: cabinetIds }, tx); // backend/09: bought items are cabinet adds too
-    const itemIds = checked.map((r) => r.itemId);
-    await tx.preference.deleteMany({ where: { groupId, itemId: { in: itemIds }, recurrence: "one_time" } });
-    await tx.shoppingListItem.deleteMany({ where: { groupId, id: { in: checked.map((r) => r.id) } } });
-    await generate(groupId, tx);
-    return checked.length;
-  });
-  if (moved) {
-    emitGroup(groupId, "cabinet:changed", userId);
-    emitGroup(groupId, "preferences:changed", userId); // one_time preferences may be gone
-    changed(groupId, userId);
-  }
-  return { movedToCabinet: moved };
-}
+    for (const id of cabinetIds) await cabinetHooks.afterAdd(groupId, id);
+    return { movedToCabinet: moved };
+  },
+};

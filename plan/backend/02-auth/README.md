@@ -27,5 +27,5 @@
 
 ## Done when
 
-- [x] Signing in on the app creates exactly one user row per Google account (API-level: `test/auth.test.ts`)
+- [x] Signing in on the app creates exactly one user row per Google account
 - [x] Every protected route returns 401 without a valid JWT

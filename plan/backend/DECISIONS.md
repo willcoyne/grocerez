@@ -1,692 +1,242 @@
 # Backend Decisions
 
-Choices made while implementing `plan/backend` where the plan was silent or unclear.
+Choices made while implementing `plan/backend/` where the plan was unclear, outdated, or had to be adapted.
+Format: date · folder · what the plan said · what was done · why.
 
-## 01-server-setup
+## Decisions
 
-- **Prisma pinned to 6.x** (`prisma` / `@prisma/client` 6.19.3). npm's `latest` tag for `prisma` is an 8.0 release
-  candidate, and Prisma 7+ moves the datasource URL into `prisma.config.ts` and requires driver adapters. 6.x matches
-  `plan/database/01-setup-migrations` as written (`url = env("DATABASE_URL")`, `previewFeatures`, `prisma-client-js`).
-  The database builder may upgrade later.
-- **Minimum database pieces created here** because no database work existed: `server/docker-compose.yml` (exactly as in
-  `database/01` step 1) and a `server/prisma/schema.prisma` with only the generator and datasource, no models, so
-  `GET /api/health` can run `SELECT 1`. Extensions, the `init` migration, and the `db:migrate`/`db:reset`/`db:studio`
-  scripts are left to `database/01`. Only `db:up` was added, since tests need Postgres.
-- **ESM** (`"type": "module"`, NodeNext), so relative imports use `.js` suffixes.
-- **Socket.IO and cron are not attached in `index.ts` yet.** They belong to backend/07 and backend/09.
-- **`JWT_SECRET` must be at least 32 characters.** Other required variables only need to be non-empty.
-- **CORS** allows `http://localhost:8081` (Expo web dev server). Native apps send no `Origin` header, so CORS doesn't apply to them.
-- **Extra error mappings** beyond the plan's list, all using the standard error shape: malformed JSON returns
-  `400 VALIDATION_ERROR`, a body over 1 MB returns `413 PAYLOAD_TOO_LARGE`, unknown routes return `404 NOT_FOUND`, and
-  unhandled errors return `500 INTERNAL` with a generic message (details are logged only).
-- **Logging** comes from `lib/logger.ts` (pino). The `Authorization` and `Cookie` headers are redacted. It is silent when `NODE_ENV=test`.
-- **`contracts/common.ts`** holds the `ErrorResponse` and `HealthResponse` schemas.
+### 2026-10-10 · 01 · Versions and build layout
+- **Did:** Express **5.3**, zod **4.6**, vitest **4.1**, socket.io 4.8, pino 10, TypeScript 7.0.2 (already pinned by the database builder).
+  Express 5 forwards rejected promises to the error handler, so routes are plain `async` functions.
+  `npm run build` compiles `src/` **and** the generated Prisma client (`generated/prisma`, `.ts` files) with `tsconfig.build.json`,
+  so the entry point is `dist/src/index.js` (`npm start`).
+- **Why:** current stable releases; the Prisma 7 generator emits TypeScript, which must be compiled alongside the app.
 
-## 02-auth
+### 2026-10-10 · 01 · Which env variables are required
+- **Plan said:** crash at startup if anything in the list is missing (including `ANTHROPIC_API_KEY`, AWS keys).
+- **Did:** `DATABASE_URL`, `JWT_SECRET` (≥ 16 chars) and `GOOGLE_CLIENT_IDS` are always required. `ANTHROPIC_API_KEY`, `AWS_REGION`,
+  `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` are required only when `NODE_ENV=production`; in development/test the
+  routes that need them return `503 NOT_CONFIGURED`. Added optional `CORS_ORIGINS`, `CONTACT_EMAIL`, `ENABLE_JOBS`, `RESEND_FROM`,
+  `OPENFDA_API_KEY`, `DEMO_KEY`. Startup prints every missing/invalid variable and exits with code 1.
+- **Why:** the team has no Anthropic/AWS accounts yet; the M2 loop must run locally without them. Production still fails fast.
 
-- **Schema created here** (no database work existed): `prisma/migrations/*_init` (only the `pgcrypto`, `pg_trgm`,
-  `fuzzystrmatch` extensions from `database/01`) and `*_users_profile` (`users`, `allergen` enum, `user_allergens`,
-  `user_diets` with the diet CHECK list), exactly per `database/02-users`. Prisma models: `User`, `UserAllergen`,
-  `UserDiet` (`user.allergens`, `user.diets`). Added `db:migrate`, `db:reset`, `db:studio` scripts. The database builder
-  owns these from here; `database/01` and `database/02` checkboxes were left for them to verify.
-- **Name and picture are only set on first sign-in.** The plan says to update email, name, and picture on every login,
-  but `display_name` is user-editable (`PATCH /me`) and `avatar_url` may become an S3 key (backend/11), so overwriting them
-  would undo the user's edits. Email is still refreshed on every login (lower-cased; it drives invite matching).
-- **`User` response shape** (`contracts/auth.ts`): `{id, email, displayName, avatarUrl, zipCode}`. `googleSub` and
-  timestamps are never returned.
-- **`DELETE /me` returns the deleted `User` (200)**, matching the contract row literally. The owner handover from
-  `database/11` is left to backend/03, since groups don't exist yet (marked with a `ponytail:` comment in `users/service.ts`).
-- **`PATCH /me`** accepts `zipCode: null` to clear it, validates US ZIPs (`12345` or `12345-6789`), trims `displayName`
-  (1-80 chars), and rejects unknown keys with 400.
-- **Auth gate is global.** `requireAuth` runs on all of `/api` after the public routers (`/health`, `/auth/google`, and
-  `/dev/*` outside production), so new routers are protected by default and unknown `/api` paths return 401 (not 404)
-  without a token. It also returns 401 if the JWT's user no longer exists (one `count` query per request) and only accepts HS256.
-- **`/dev/login-as/:userId`** is public (it is a login) and only mounted when `NODE_ENV !== "production"`.
-- **Rate limit** on `/auth/google`: 20/min per IP via `express-rate-limit`, returning `429 RATE_LIMITED` in the standard
-  error shape. Behind a proxy (backend/12) `app.set("trust proxy", 1)` is needed or every client shares one IP.
-- **Google verification** lives in `lib/google.ts` (`verifyGoogleIdToken`), which tests replace with `vi.mock`. Any
-  verification failure or `email_verified !== true` returns `401 UNAUTHENTICATED`.
-- **Test note:** with vitest 5, a `mockRejectedValue` on the Google stub that is still queued or persistent when the test
-  ends is reported as a test failure, so the rate-limit test uses resolved tokens instead.
-## 09 (partial, parallel)
+### 2026-10-10 · 01 · Error codes beyond the plan
+- Malformed JSON → `400 VALIDATION_ERROR`; body over 1 MB → `413 PAYLOAD_TOO_LARGE`; Prisma `P2025` → `404 NOT_FOUND`; unknown route → `404 NOT_FOUND`;
+  anything else → `500 INTERNAL` (logged, no details returned). Validation errors include `details: [{path, message}]`.
 
-Built standalone while 02-07 were in progress elsewhere. No routes, models, migrations, cron, or app wiring.
+### 2026-10-10 · 01 · Tests use a separate database
+- Tests run with vitest + supertest against a real Postgres database, `grocerez_test` by default (`TEST_DATABASE_URL`).
+  `test/globalSetup.ts` runs `prisma migrate deploy` + `prisma db seed` on it before every run and refuses any URL that isn't a `*_test` database.
+  Files run serially (`fileParallelism: false`). Tests create their own users/groups with random ids, except the engine test,
+  which reads the seeded demo group.
 
-- **Done:** `src/lib/expiration.ts` (`estimateExpiration`, category shelf-life table; `household`/`other`/unknown → `null`),
-  `src/modules/recalls/openfda.ts` (`fetchRecalls` with injectable `fetch`, `skip` paging, zod-validated rows, malformed
-  rows dropped, 404 = no results, `redirect: "error"`, 15s timeout; `recallLink`), `src/modules/recalls/match.ts`
-  (pure `matchRecalls`, pg_trgm-compatible `similarity` / `strictWordSimilarity`, whole-word `brandAppears`).
-  Tests: `test/recalls.test.ts` (stubbed fetch, no network or DB).
-- **Matching uses `strict_word_similarity`, not `similarity()`.** Whole-string `similarity("baby spinach", <long recall
-  description>)` stays well under 0.35 even for an exact hit, so the plan's rule would almost never match. The score is
-  the best over item name, aliases, and `brand + ' ' + productName`, each against the best whole-word run of the
-  description. When the SQL version is written, use `strict_word_similarity(name, product_description) >= 0.35` so it
-  agrees with the JS function.
-- **Brand gate** is a case-insensitive whole-word check ("Valley" does not match "Valleyview").
-- **Alert link:** openFDA has no per-recall web page, so `recallLink` returns the API query for that `recall_number`.
-- **Remaining (done, see "09-expiration-recalls" below):** `recalls`/`recall_matches` tables (database/09), `jobs/importRecalls.ts` + `node-cron` `"0 6 * * *"`
-  wiring in `index.ts` (upsert by `external_id`, last-import tracking), per-item re-match on cabinet add, saving
-  estimates in `finishTrip`/cabinet add and `expiration_source`, `GET /groups/:groupId/alerts`, `POST .../dismiss`,
-  `cabinet:changed` emit, `OPENFDA_API_KEY` in config/.env.example, the Done-when checks.
-## 11-file-storage-s3 (avatar path done; photo/product parts wait on 05/08)
+### 2026-10-10 · 02 · Profile refresh on login
+- **Plan said:** upsert by `google_sub`, "update email, name, and picture on each login".
+- **Did:** email (trimmed + lower-cased, required by the DB CHECK) and picture refresh on every login; `displayName` is set from
+  Google only when the user is created (fallback: the part of the email before `@`).
+- **Why:** otherwise a name changed through `PATCH /me` would be overwritten at every sign-in.
 
-- **Done:** `lib/s3.ts` (`S3Client`, `presignPut` with 5-minute expiry, `presignGet` with 1-hour expiry),
-  `contracts/uploads.ts`, `modules/uploads/{service,router}.ts` for `POST /uploads/presign`, mounted in `app.ts` after
-  `requireAuth` (it reads `req.userId`). `PATCH /me {avatarKey}` and presigned `avatarUrl` in every `User` response.
-  Tests: `test/uploads.test.ts` (router in isolation) and `test/avatar.test.ts` (real app + Postgres, presigners stubbed
-  with `vi.mock`, no AWS calls).
-- **`content-type` is a signed header** (`signableHeaders`). By default the presigner leaves it out of the signature, which
-  would let a client PUT `text/html` (or anything else) to an image key. Now S3 rejects a PUT whose `Content-Type`
-  doesn't match the approved type. The app must send exactly the `contentType` it asked for.
-- **Keys are always generated by the server** (`${purpose}/${userId}/${uuid}.${ext}`). Extra body fields (`key`,
-  `filename`, ...) are stripped by zod. A `userId` that isn't `[A-Za-z0-9_-]{1,64}` is refused (401) because it ends up in the key.
-- **`avatarKey` must match exactly** `^avatar/<own userId>/<uuid>.(jpg|png|webp)$` (the shape presign issues), not just the
-  prefix, so `..` segments, other users' keys and `item-photo/` keys are `400 VALIDATION_ERROR`. `null` clears it. The
-  server does not check the object exists in S3 (no HEAD call); a key that was never uploaded just yields a broken image.
-- **Schema:** new migration `20261010230000_users_avatar_key` adds nullable `users.avatar_s3_key` (Prisma `avatarKey`).
-  Existing migrations untouched.
-- **`avatarUrl` resolution:** the stored key is never returned. `users/service.toUser()` returns a presigned GET URL when
-  `avatar_s3_key` is set, otherwise `avatar_url` (the Google picture seeded at first login). Auth responses
-  (`/auth/google`, dev login) go through the same function. Later endpoints that embed users (group members, 03) must
-  call `toUser()` too, or the member list shows the Google picture instead of the upload.
-- **No size limit.** The plan doesn't give one, and a presigned PUT can't enforce a byte range. If we need one, switch to
-  a presigned POST with a `content-length-range` condition.
-- **No uploads repo.** The presign endpoint has no DB access, so the module has only `service.ts` and `router.ts`.
-- **Frontend must update:** `PATCH /me` now also accepts `avatarKey` (string from `POST /uploads/presign` with
-  `purpose: "avatar"`, or `null` to remove). Flow: presign -> `PUT uploadUrl` with header `Content-Type` equal to the
-  requested `contentType` -> `PATCH /me {avatarKey: key}`. `avatarUrl` in `User` expires after 1 hour; refetch `/me`
-  (or the member list) rather than caching the URL long-term. The contract table row for `/me` is updated.
-- **Remaining:**
-  - Cabinet `photoKey` (`PATCH cabinet {photoKey}`, `item-photo/<userId>/` check, `photo_s3_key` column, presigned GET in
-    cabinet responses) belongs with backend/05 (cabinet doesn't exist yet).
-  - Step 5, copying Open Food Facts images to `products/{productId}.jpg`: done in backend/08 (see that section).
-  - Steps 1-2 (bucket, IAM, CORS) are manual AWS setup; instructions are in `server/README.md`.
-  - "Done when" boxes are unticked: the member list doesn't exist until 03 (and needs `toUser()`), and "bucket not
-    publicly readable" can only be checked once the real bucket exists.
-- **Shared dev DB note:** `npm run db:migrate` (`migrate dev`) asked to reset the shared DB because the main tree had
-  applied a groups migration this branch doesn't have yet. Applied this migration with `npx prisma migrate deploy`
-  instead (no reset). After merging, `migrate dev` works again.
+### 2026-10-10 · 02 · Auth details
+- An unverified Google email returns `401 EMAIL_NOT_VERIFIED` (bad/expired token: `401 UNAUTHENTICATED`). No user row is written.
+- `requireAuth` also checks the user row still exists, so tokens of a deleted account (`DELETE /me`) stop working immediately.
+  It is mounted once for every `/api` route after `/health`, `/auth/google` and `/dev/*`, so unknown `/api/*` paths answer 401 to anonymous callers.
+- `DELETE /me` runs in one transaction: delete the user (memberships + preferences cascade; the `owner_handoff` trigger promotes the
+  longest-standing member), delete groups left with no members, regenerate the remaining groups' lists; then emits
+  `group:changed` / `preferences:changed` / `shopping-list:changed` and disconnects the user's sockets.
+- `PATCH /me` accepts `zipCode: null` to clear it; ZIP must be 5 digits (the `price_estimates` CHECK uses the same rule).
+- `POST /api/dev/login-as/:userId` returns `{token, user}` like `/auth/google`. Mounted when `NODE_ENV !== "production"`; in production
+  only when `DEMO_KEY` is set, and then it requires header `x-demo-key` (backend/12 step 4). Seeded ids: `00000000-0000-4000-8000-000000000101`…`0104`.
+- Google verification lives in `src/lib/google.ts` (`google.verifyIdToken`), which tests stub with `vi.spyOn`.
 
-## 08-smartlabel-product-data
+### 2026-10-10 · 03 · Groups and invites details
+- **Response shapes:** `Group = {id, name, role (caller's), memberCount, createdAt}`; `GET /groups/:groupId` adds
+  `members[] = {id, displayName, email, avatarUrl, role, joinedAt}`. `Invite = {id, groupId, email, status, invitedBy:{id,displayName}|null,
+  createdAt, respondedAt}`; `GET /me/invites` adds `group:{id, name, memberCount}`. `POST /groups` and `POST .../invites` return **201**.
+- **Error codes:** non-member / malformed group id → `404 NOT_FOUND`; owner-only route → `403 FORBIDDEN`; invite not pending or not the
+  caller's email → `404 INVITE_NOT_FOUND`; revoking a non-pending invite → `409 INVITE_NOT_PENDING`; inviting a member → `409 ALREADY_MEMBER`;
+  removing yourself → `400 CANNOT_REMOVE_SELF` (use leave); invites over 20/hour per user → `429 RATE_LIMITED`.
+- **Status transitions are conditional** (`UPDATE ... WHERE status = 'pending'`) so two concurrent accept/decline/revoke calls can't both win.
+- **Accepting regenerates the list** (the new member's allergens change the allergen flags), as do leave and remove-member.
+- **Leave:** the explicit preference delete is kept (it's a no-op because the composite FK cascades). Owner promotion is the database
+  `owner_handoff` trigger; the backend only deletes the group when nobody is left.
+- **Remove member** revokes that person's invite row in the group whatever its status (normally `accepted`), so the old invite can't be re-used.
+- **Email (step 13, stretch) is implemented but off by default:** `src/lib/email.ts` posts to Resend when `RESEND_API_KEY` is set
+  (sender `RESEND_FROM`), fire-and-forget, sent for known and unknown emails alike so the response and timing don't differ.
 
-Client layer (`common.ts`, `smartlabel.ts`, `openFoodFacts.ts`, tests in `test/products.clients.test.ts`) was built
-first in a parallel worktree; the route, table and image copy were added on top. A separate fix pass owns the
-SmartLabel parser (break findings B-02, B-06, B-12, B-13), so this step did not touch `smartlabel.ts`/`common.ts`.
+### 2026-10-10 · 04 · Item search reuses `search_items()`
+- `GET /items/search` calls the database's `search_items(q)` (tagged `$queryRaw`) instead of re-implementing the query. Empty-after-normalize
+  or missing `q` → `400 VALIDATION_ERROR`. Zero rows → `{match:"none", results:[]}`; otherwise `match` is the function's label for the best
+  candidate and `results` are all candidates (best first), so for `suggested` the app shows `results[0]` as "Did you mean…?".
+- `Item = {id, name, normalizedName, category, defaultAllergens, shelfLifeDays}`.
+- `lib/normalize.ts` is a line-by-line port of `normalize_item_name()`; the test checks all fixture cases plus extra inputs against the SQL function.
 
-- **Schema:** new migration `20261011020000_products` (enum `product_source`, table `products` exactly per
-  database/08, `CHECK products_identifier`: `gtin` or `smartlabel_url` set unless `source = 'manual'`). Applied with
-  `npx prisma migrate deploy` on the shared DB (no reset). `item_id` is **nullable, `ON DELETE SET NULL`**: a product
-  whose name has no letters/digits can't be linked, and deleting a catalog item shouldn't delete cached scans.
-  `allergens`/`may_contain` are `NOT NULL DEFAULT '{}'` like `items.default_allergens`.
-- **Route:** `POST /api/products/scan` in `modules/products/{router,service,repo}.ts`, contract
-  `src/contracts/products.ts` (`ScanProductBody`, `Product`), mounted behind `requireAuth`. Body is strict; exactly one
-  of `qrUrl` (max 2048) / `gtin` (8-14 digits), else `400 VALIDATION_ERROR`. 30 requests/min per user
-  (`express-rate-limit`, keyed on `req.userId`, runs before validation so junk requests count) -> `429 RATE_LIMITED`.
-- **Flow:** `qrUrl` is checked against the SmartLabel allowlist first (400, nothing fetched), then the cache is read by
-  the normalized URL (`new URL().toString()`), `gtin` by digits. A row with `fetched_at` under 30 days is returned as-is.
-  Otherwise SmartLabel page -> parser; if the parser returns no product but found a GTIN -> Open Food Facts; nothing
-  usable -> `404 PRODUCT_NOT_FOUND` (new code). Upstream failures stay `502 UPSTREAM_ERROR`, **except when a stale row
-  exists: then the stale row is returned** (better than an error for a 30-day cache).
-- **One row per product:** upsert keyed by `gtin` when known, else `smartlabel_url`. A QR scan that resolves to a GTIN
-  stores both, so a later barcode scan of the same product is a cache hit. If an older GTIN-less row holds the same
-  URL, it is deleted in the same transaction (keeps `smartlabel_url` unique). A refresh never clears an existing
-  `smartlabel_url` or `item_id`.
-- **Item link (step 5):** product name (cut to 100 chars) through `items/service.search()`; `exact` or `suggested` ->
-  first result; otherwise `items/service.create()` with a category guessed from OFF `categories_tags` (keyword rules,
-  most specific tag first, `en:plant-based-foods-and-beverages` ignored, default `other`). Only done when the product
-  has no `item_id` yet. Created items have `created_by` = the scanning user.
-- **`raw`:** the OFF JSON as received; for SmartLabel `{url, html}` with the HTML cut to 100,000 chars (enough to
-  debug a parser miss without storing 2 MB per row). `raw` is never returned by the API.
-- **Product images (11 step 5):** `modules/products/image.ts`. `fetchProductImage()` allows only https, no credentials,
-  default port, no IP literals, host `openfoodfacts.org` / `*.openfoodfacts.org`; every redirect hop is re-checked and
-  must resolve only to public addresses (same `isPrivateAddress()` BlockList as SmartLabel); 5 s timeout; jpeg/png/webp
-  only; 5 MB cap. Then `lib/s3.putObject("products/{productId}.jpg", ...)` and `image_s3_key` is set. Best effort: a
-  failed copy is logged and the scan still succeeds with `imageUrl: null`. SmartLabel `og:image` URLs (brand CDNs) are
-  not on the image allowlist, so SmartLabel products have no image until a brand CDN is added. `imageUrl` in `Product` is
-  a presigned GET (1 hour), never the key.
-  - `guardedFetch()` in `image.ts` duplicates the redirect/DNS loop in `fetchSmartLabelPage` (left untouched because of
-    the parallel parser fix). Follow-up: make `fetchSmartLabelPage` call `guardedFetch` after that merges.
-- **robots.txt (step 8):** `smartlabel.org/robots.txt` is `User-agent: * / Disallow:` (crawling allowed) with
-  `Crawl-delay: 10`; one fetch per URL per 30 days is well under that. `smartlabel.labelinsight.com/robots.txt` is a 404
-  (no restrictions stated). Terms of use not reviewed; someone on the team should read them before the demo.
-- **Tests:** `test/products.test.ts` (29, real app + Postgres; global `fetch`, `node:dns/promises` and S3 stubbed):
-  validation, auth, non-SmartLabel/IP/http `qrUrl` refused without fetching, OFF path with item creation + S3 copy,
-  exact-match item link, cache hit (no fetch, one row), 30-day refresh and stale fallback, 404/502, SmartLabel page +
-  cache, SmartLabel -> OFF fallback (then barcode scan is a cache hit), SSRF redirect refused, image copy skipped for
-  off-host / redirected / private-DNS images, rate limit per user, `guessCategory`, `fetchProductImage` guard cases.
-  Also checked live once (not in the suite): `lookupOpenFoodFacts("0016000275287")` returned Cheerios with 140 kcal and
-  the image downloaded through `fetchProductImage`.
-- **Done when:** "plain UPC returns OFF data" (live OFF lookup + route tests) and "second scan is cached" are ticked.
-  "Real SmartLabel QR returns calories + allergens" is **not** ticked: no real SmartLabel page has been saved as a
-  fixture yet and brand hosts haven't been added to the allowlist; that needs a real box scanned by the team.
-- **Frontend must update:** `Product` shape is now defined in `src/contracts/products.ts` (`id, itemId, gtin,
-  smartlabelUrl, brand, name, servingSize, caloriesPerServing, nutrition, ingredients, allergens, mayContain,
-  healthScore, imageUrl, source, fetchedAt`). New error codes on `/products/scan`: `404 PRODUCT_NOT_FOUND` (show "no
-  info for this product, add it manually"), `502 UPSTREAM_ERROR` ("couldn't fetch product info, try again"),
-  `429 RATE_LIMITED`. The contract table row itself is unchanged.
-- **Needed from the team:** a contact email for the User-Agent (`GrocerEZ/0.1 (+email)`), real SmartLabel QR scans
-  (save the HTML into `server/test/fixtures/smartlabel/` and add any brand hosts to `ALLOWED_HOSTS`), and the real S3
-  bucket (see 11) for image copies to land.
+### 2026-10-10 · 04 · `POST /items` details
+- Without `aliasOf`: if the normalized name (or an alias) already exists, returns that item with **200**; otherwise creates it (**201**),
+  `category` defaults to `"other"`. `normalized_name` is computed by SQL in the insert (`ON CONFLICT DO NOTHING`), so races return the existing row.
+- With `aliasOf`: unknown item → 404; the text already normalizes to that item → 200; the text already means a **different** item
+  (its name or another alias) → `409 NAME_TAKEN`; otherwise the alias is stored (201) and the target item is returned.
 
-## 10-agentic-ai
+### 2026-10-10 · 04 · Preferences response
+- **Plan said:** "`all` adds `wantedBy` names".
+- **Did:** every `Preference` row includes `user: {id, displayName}` (for both `me` and `all`), plus the full `item`. `POST` returns 201 when
+  created and 200 when it updated the existing `(group, user, item)` row. Unknown `itemId` → 404. Rows from another group → 404; another
+  member's row → 403.
+- Every preference write and the regeneration run in **one transaction** (`withRegeneration`), then `preferences:changed` is emitted, plus
+  `shopping-list:changed` when the list actually changed.
+- `PUT /me/dietary` dedupes values, returns them sorted, and regenerates every group the user belongs to in the same transaction.
 
-**Layout**
-- `src/modules/ai/client.ts`: `callStructured()` sends one `client.beta.messages.create` call with model `claude-opus-5-5`,
-  `thinking: adaptive`, explicit `effort` (`low` for recipes, `medium` for prices), structured outputs through
-  `betaZodOutputFormat`, and `betas: ["server-side-fallback-2026-07-01"]` + `fallbacks: "default"`. It uses a 60 s timeout and
-  `maxRetries: 0`, so 60 s is the total time allowed. It checks `stop_reason` before reading content and continues
-  `pause_turn` up to 3 times. Every failure (API, rate limit, timeout, refusal, `max_tokens`, bad JSON, failed zod check)
-  becomes `503 AI_UNAVAILABLE`. The client can be injected: `AiClient` covers only `beta.messages.create`.
-- `src/modules/ai/service.ts`: `suggestRecipes()` and `estimatePrices()` take plain inputs (Claude sees only data, never
-  the DB). `buildRecipeContext()` is deterministic: items expiring within 3 days (from `cabinet_items.expires_at`
-  directly, not 09's alert code), plus the union of all members' diets and allergens. `suggestForGroup()` /
-  `pricesForGroup()` are the route handlers: read the DB through `repo.ts`, call the AI functions, write only validated rows.
-- `src/modules/ai/repo.ts`: cabinet, members' diets/allergens and list rows (all scoped by `groupId`), the user's ZIP, and
-  the `price_estimates` cache (global, keyed by item + ZIP).
-- `src/modules/ai/router.ts`: both routes. Mounted in `app.ts` after `requireGroupMember` and **before**
-  `shoppingListRouter`, so `/shopping-list/prices` can never be read as `/shopping-list/:id` (that router has no
-  `POST /:id` today, but order keeps it safe if one is added). The allergen table lives in `src/lib/allergens.ts` (shared with 08).
-- `src/contracts/ai.ts`: request schemas, model-output schemas (`strictObject`, so extra fields cause a 503), and response schemas.
-- Tests: `test/ai.test.ts` (18 unit tests) and `test/ai.routes.test.ts` (19 supertest tests against Postgres; Claude
-  stubbed with `vi.mock` of `getAiClient`, no network).
+### 2026-10-10 · 05 · Cabinet details
+- `CabinetItem = {id, groupId, itemId, item:{id,name,category}, product:{id,brand,name,imageUrl}|null, status, quantityText, location,
+  purchasedAt, expiresAt ("YYYY-MM-DD"), expirationSource, addedBy, createdAt, updatedAt}`. Dates in bodies are `YYYY-MM-DD`.
+- `POST /cabinet` upserts on `(group, item)`, always sets `status = in_stock`, returns 201 (created) / 200 (updated). Missing `expiresAt`:
+  keeps an existing date, otherwise estimates it (`lib/expiration.ts`, the 09 rule) with `expiration_source = 'estimated'`; household items get none.
+  A given `expiresAt` is `manual`. `PATCH {expiresAt: null}` clears date and source (the DB requires both or neither).
+- Every cabinet write that can change "have" runs with the regeneration in one transaction and emits `cabinet:changed` (+ `shopping-list:changed` if the list changed).
+- **`DELETE /cabinet/:id` (thrown away) does not regenerate**, as the plan says. Note: because the list is `preferences − cabinet`, the next
+  regeneration triggered by anything else will add the item back if someone still has it as a preference. That is the set rule, not a bug.
+- `cabinetHooks.afterAdd` is the hook where 09 runs recall matching for a newly added item.
 
-**Schema:** migration `20261011050200_price_estimates` adds only `price_estimates` (database/09 step 3): `UNIQUE (item_id,
-zip_code)`, `item_id` FK `ON DELETE CASCADE` (a cache row should never block deleting an item), plus hand-written CHECKs
-`zip_code ~ '^[0-9]{5}$'` and `0 <= low <= typical <= high`. The plan's single `recalls_and_prices` migration was split
-because the recalls tables were built concurrently (`20261011050100_recalls`). Note: this migration was first applied to
-the shared dev DB as `20261011050000_price_estimates`, which collided with `20261011050000_product_fks`; the folder was
-renamed and the `_prisma_migrations` row updated in place (no reset). Other dev DBs that applied the old name need the
-same one-line `UPDATE _prisma_migrations SET migration_name = '20261011050200_price_estimates' WHERE migration_name =
-'20261011050000_price_estimates'`.
+### 2026-10-10 · 06 · `generate()` reuses the SQL `generate_shopping_list()`
+- Verified the database function against backend/06 step 1: (1.1) reads preferences, in-stock cabinet, member allergens and current rows in
+  one transaction; (1.2) upserts needed rows with `reason='preference'`, `wanted_by`, combined `quantity_text` and never touches `checked`;
+  (1.3) flags = linked product `allergens ∪ may_contain` (scanned product, else the cabinet's product) else `items.default_allergens`, for
+  **all** members; (1.4) deletes unchecked `preference` rows no longer needed; (1.5) keeps manual and checked rows (only their
+  `wanted_by`/flags are refreshed). It returns a row count, not the list, so the service wraps it: `src/modules/shopping-list/engine.ts`
+  `regenerate(tx, groupId)` is the single generation step used by every write; `withRegeneration()` runs a write + regenerate in one
+  transaction and emits after commit; `shoppingListService.generate()` returns the sorted list (step 1.6).
+- **Concurrency fix:** `generate_shopping_list()` takes a per-group advisory lock, but a transaction that first updates a list row and then
+  regenerates could deadlock with another doing the same (its `INSERT … ON CONFLICT` locks conflicting rows). Every regenerating transaction
+  now takes the same advisory lock **first** (`lockGroup`, sorted order for several groups). Tested with 6 concurrent check-offs from two
+  users and two concurrent finish-trip calls (items move exactly once).
 
-**Routes**
-- Both bodies are optional (no body = defaults). `maxRecipes` 1–5 (default 3), `mustUseExpiring` default true; `zipCode`
-  must be 5 digits. Invalid → `400 VALIDATION_ERROR`. Non-members → `404 NOT_FOUND` (from `requireGroupMember`).
-- **Recipe rate limit:** 10 requests per hour per group (`express-rate-limit`, in-memory, keyed by `groupId`), counted
-  before validation and including requests that fail. Over → `429 RATE_LIMITED`. An empty cabinet returns `[]` without
-  calling Claude (still counted). No caching, per the plan.
-- **"Add missing to list":** every `missingItems` name is run through the same `search()` used by `GET /items/search`.
-  An `exact` or `suggested` match returns `results[0]`; `none` (or a name with no letters/digits) returns `item: null`.
-  The app adds a matched item with the existing `POST /groups/:groupId/shopping-list {itemId}` (manual row); unmatched
-  names can go through `POST /items` first.
-- **Prices:** ZIP = body, then `users.zip_code`, else `400 ZIP_REQUIRED` ("Set a ZIP code in your profile or send
-  zipCode"), checked before anything else. Every shopping-list row (checked or not; it's the trip cost) is priced.
-  Rows with a `price_estimates` row for (item, ZIP) under 24 h old come from cache; the rest go to Claude in **one**
-  request (none if everything is cached or the list is empty). Valid fresh rows are upserted with `model = claude-opus-5-5`
-  and `fetched_at = now()`; stale rows are overwritten. Totals = sum of `lowCents` / `highCents` over cached + fresh
-  priced items. Items in list order. Any Claude failure → `503 AI_UNAVAILABLE` and nothing is written.
-- **Frontend must update (additive):** each `Recipe` in the response also has
-  `missingItemMatches: [{name, item: Item | null}]`, and the prices response also has `unpricedItemIds: string[]`
-  (list items with no usable estimate, excluded from the totals). Both are now in the contract table in
-  `plan/backend/README.md`; nothing was removed or renamed. Label every price as an **estimate** (`estimate: true`).
+### 2026-10-10 · 06 · List response and rules
+- `ShoppingListItem = {id, groupId, itemId, item:{id,name,category}, reason, wantedBy:[{userId, displayName}], quantityText,
+  allergenFlags:[{userId, displayName, allergen}], checked, checkedBy, checkedAt, scannedProductId, addedBy, createdAt, updatedAt}`.
+  The DB stores `wanted_by` as ids; the API adds display names (a former member shows as "Former member").
+- `GET` sorts by aisle order (produce, bakery, meat, seafood, dairy, frozen, pantry, snacks, beverages, household, other; NULL = other), then name.
+- Manual add: upsert with `reason='manual'` (an existing preference row becomes manual so it survives), 201 created / 200 updated, then
+  regenerates so `wanted_by`/flags are filled. Unknown item → 404.
+- `PATCH {checked, scannedProductId?}`: the backend sets `checked`/`checked_by`; the DB trigger stamps/clears `checked_at`. Linking a product
+  regenerates (its allergens can change the flags). Unknown product → 404.
+- `DELETE` a preference row → `409 PREFERENCE_ROW`. Deleting a manual row regenerates, so if someone still wants the item it reappears as a preference row.
+- Finish trip: cabinet upsert sets `status in_stock`, `purchased_at now()`, `product_id` = scanned product (kept if none scanned),
+  the row's `quantity_text`, and an estimated expiration (household/unknown: none). One-time preferences for the bought items are deleted
+  for **all** members of the group. Then the checked rows are deleted and the list regenerated, all in one transaction under the group lock.
+- The seeded demo list is Bread, Lay's, Milk, Oreos, Peanut Butter, Tostitos (the board items Tostitos, Lay's, Oreos plus the
+  seed's staples; database/10), with Milk flagged for User 3 and Peanut Butter for User 4.
 
-**Choices**
-- **Recipe checks:** a recipe is **dropped**, not labeled, if any of its text mentions a forbidden allergen.
-  Diets add implied exclusions: vegan → milk, eggs, fish, shellfish; vegetarian → fish, shellfish; dairy_free → milk;
-  gluten_free → gluten, wheat. Other diet rules (keto, halal, kosher, low_sodium) are enforced by the prompt only.
-  Recipes with `minutes`/`servings` ≤ 0 or no steps are dropped. Names in `usesCabinetItems` that aren't in the cabinet
-  are moved to `missingItems`. With `mustUseExpiring`, recipes that use no expiring item are dropped.
-- **Price checks:** these happen per row, so one bad row does not fail the whole call. A row is dropped if it has a
-  negative price, is out of order (not `low ≤ typical ≤ high`), is over $500, has an unknown `itemId`, or is a duplicate.
-  Dropped items are returned in `unpricedItemIds`. Only http(s) `sourceUrls` are kept. The model echoes `itemId`
-  (not only `itemName`) so rows match reliably. If every web search returned an error block, the call returns 503.
-- **ZIP location:** `user_location` in the SDK has no `postal_code`, so the request sends `country: "US"` and puts the ZIP in the prompt.
-- **Response shape:** each priced item has `{itemId, itemName, lowCents, typicalCents, highCents, unit, sourceUrls, estimate: true}`.
-  This fills in the contract's `items[]` and does not change the contract table.
-- **Needs a real `ANTHROPIC_API_KEY` to verify** (all stubbed in tests): structured outputs combined with
-  `web_search_20260209` in one request; the `server-side-fallback-2026-07-01` beta + `fallbacks: "default"` being accepted;
-  the "demo list prices in under 30 seconds" Done-when item (left unticked); real recipe/price quality.
-- **Skipped:** Kroger Products API alternative (plan marks it optional). Rate-limit store is per process.
-## 03-groups-invites + 07-realtime-sync
+### 2026-10-10 · 07 · Socket.IO details
+- Connect with `io(API_URL, { auth: { token: appJwt } })`. Invalid/expired token or deleted user → connection refused with error message
+  `UNAUTHENTICATED`. Every socket joins `user:<id>`.
+- `group:join {groupId}` and `group:leave {groupId}` accept an **ack callback**: `{ok:true}` or `{ok:false, error:{code:"NOT_FOUND", message}}`
+  (non-member, unknown or malformed id; same "don't reveal" rule as REST). Clients should re-send `group:join` after reconnecting.
+- Group-room payloads are `{groupId, by}`. Personal-room events: `invites:changed {groupId}` (invited, revoked, accepted, declined, removed) and
+  `group:changed {groupId, by}` (you were removed, the group was deleted) so the app can refresh its group switcher.
+- Leaving, removal and group deletion make the affected sockets leave the group room (`fetchSockets()`); `DELETE /me` disconnects the user's sockets.
+- Single instance only (no Redis adapter), per step 7.
 
-- **Schema created here** (no database branch existed): migration `*_groups_and_invites` with `groups`, `group_members`,
-  `group_invites`, enums `group_role` / `invite_status`, the indexes and `UNIQUE (group_id, email)` from `database/03`, plus
-  `CHECK (email = lower(email))` added by hand to the SQL. `groups.created_by` is nullable with `ON DELETE SET NULL` (the plan
-  gives no delete rule; without one, deleting a user who created a group would fail). `database/03` checkboxes are left for
-  the database builder to verify.
-- **`requireGroupMember` is mounted once in `app.ts` on `/api/groups/:groupId`**, before every router, so routers added
-  later (04-06, 09, 10) are covered without remembering to add it. Non-members and malformed ids both get
-  `404 NOT_FOUND "Group not found"`. It sets `req.membership = {groupId, role}`. `requireOwner` returns `403 FORBIDDEN`.
-- **Status codes / error codes** (the contract table doesn't list them): `POST /groups` and `POST /groups/:groupId/invites`
-  return **201**. Revoking by someone who is neither owner nor inviter is `403 FORBIDDEN`; revoking a non-pending invite is
-  `409 INVITE_NOT_PENDING`; an invite id from another group is `404 INVITE_NOT_FOUND`. Removing yourself via
-  `DELETE /members/:userId` is `400 VALIDATION_ERROR` (use `/leave`); removing a non-member is `404 NOT_FOUND`.
-  Invite rate limit (20/h per user, in-memory) returns `429 RATE_LIMITED`.
-- **Response shapes** (`contracts/groups.ts`): `Group = {id, name, role, memberCount, createdAt}` (role = caller's role),
-  `GroupDetail = Group & {members: [{id, displayName, email, avatarUrl, role}]}`,
-  `Invite = {id, groupId, email, status, invitedBy: {id, displayName} | null, createdAt, respondedAt}`,
-  `/me/invites` items add `group: {id, name, memberCount}`. Nothing in `Invite` depends on whether the email has an account.
-- **Invite email is trimmed before validation**, then lower-cased (the plan validates first). No Gmail dot/`+tag` stripping.
-- **Accept / revoke / decline use conditional updates** (`WHERE status = 'pending'`), and accept, leave, remove and
-  `DELETE /me` take a `SELECT ... FOR UPDATE` lock on the group row. A revoke or member removal that commits first makes a
-  concurrent accept return 404, and two owners leaving at once can't leave the group ownerless.
-- **Removing a member** sets their invite row (any status) to `revoked`. Re-inviting resets the same row to `pending`.
-- **Leave/remove preference cleanup is deferred to backend/04**: `preferences` doesn't exist yet. 04 should give the table a
-  composite FK `(group_id, user_id) → group_members ON DELETE CASCADE`, so the existing membership delete removes them in the
-  same transaction with no extra code.
-- **`DELETE /me` owner handover** (deferred from 02) is done: in one transaction it runs the same `removeMember` as leave for
-  each of the user's groups (promote the longest-standing member if they were the last owner, delete the group if they were
-  the last member), then deletes the user.
-- **Invite email (step 13) is done** in `lib/email.ts` via Resend's HTTP API (no SDK). No-op without `RESEND_API_KEY`; errors
-  are logged, never returned. Sender is Resend's shared `onboarding@resend.dev`, which only delivers to the Resend account
-  owner; a verified sending domain is needed for real use.
-- **Realtime** (`lib/realtime.ts`): `attachRealtime(server, origins)` in `index.ts`; handshake uses the same
-  `userIdFromToken` as `requireAuth` (extracted in `middleware/auth.ts`), failing with `connect_error` `"UNAUTHENTICATED"`.
-  Helpers for later steps: `emitGroup(groupId, event, byUserId)`, `emitUser(userId, event, payload)`,
-  `kickFromGroup(groupId, userId)`, `closeGroupRoom(groupId)`. All are no-ops when Socket.IO isn't attached (REST tests).
-- **Frontend notes (additive, not contract changes):** `group:join` / `group:leave` accept an optional ack callback that
-  receives `{ok: boolean}` (`ok: false` for non-members or a bad id). Invites created/revoked and membership changes also emit
-  `group:changed` to the group room (so invite lists refresh). A removed or leaving user gets `group:changed {groupId, by}` in
-  their personal `user:<id>` room so their group list refreshes. `invites:changed` has an empty payload `{}`.
-- **Member objects go through `toUser` in `users/service.ts`** (the single DB-row to public-User mapping that backend/11 extends with presigned avatar URLs), then are narrowed to `{id, displayName, email, avatarUrl, role}`.
-- **Skipped:** redis adapter (07 step 7, single instance). The polling fallback (07 step 6) needs no API work.
+### 2026-10-10 · 08 · SmartLabel reality check (step 8) and parsers
+- **robots.txt (checked 2026-10-10):** `smartlabel.org` allows all user agents (`Disallow:` empty, `Crawl-delay: 10`).
+  `smartlabel.generalmills.com/robots.txt` returns the app's HTML page (no robots rules). `smartlabel.labelinsight.com` has no robots.txt (404).
+  We fetch one page per scan, cache for 30 days, and identify as `GrocerEZ/0.1 (+CONTACT_EMAIL)`.
+- **Real pages are JavaScript shells:** the General Mills SmartLabel page (`smartlabel.generalmills.com/<GTIN-14>`) contains no label data in
+  its HTML; nutrition is loaded by scripts. It does contain the GTIN (`#hdnGTINId` and the URL path). Saved as
+  `server/test/fixtures/smartlabel/generalmills-shell-00016000275287.html`. The parser returns `template: "gtin-only"` and the scan continues
+  with the barcode path (plan step 3.5), so scanning a General Mills cereal QR returns calories + allergens from Open Food Facts
+  (verified live: Cheerios → 140 kcal/serving, `gluten`). The product row keeps both `smartlabel_url` and `gtin`.
+- **Template parsers:** `jsonld` (schema.org `Product` + `NutritionInformation`) and `sections` (server-rendered page with a nutrition
+  table and Contains/May contain lines). No real server-rendered SmartLabel page was found, so their fixtures are **synthetic** (marked in
+  the files). Add a saved real page + parser when one is found.
+- **Host allowlist:** `smartlabel.org`, `www.smartlabel.org`, any `*.smartlabel.org`, `smartlabel.labelinsight.com`, `smartlabel.generalmills.com`
+  (`src/lib/smartlabel.ts`). QR links may be `http`; they are canonicalized to `https` (no port, credentials or fragment) and that string is the cache key.
+  Redirects are followed **manually** (max 5) and every hop must be https on an allowlisted host; anything else → `400 HOST_NOT_ALLOWED`.
+  Response bodies are capped at 2 MB, 5 s timeout.
+- **GTINs are stored as GTIN-14** (left-padded) so UPC-A, EAN-13 and SmartLabel GTIN-14 scans of the same product share one cache row.
+  Open Food Facts is queried with the EAN-13 form.
+- **Errors:** both or neither of `qrUrl`/`gtin` → 400; unknown product → `404 PRODUCT_NOT_FOUND`; Open Food Facts / SmartLabel unreachable →
+  `502 UPSTREAM_UNAVAILABLE` (a stale cached row is returned instead when there is one); more than 30 scans/min/user → 429.
+- **Response:** `Product = {id, itemId, item:{id,name,category}, gtin, smartlabelUrl, brand, name, servingSize, caloriesPerServing, nutrition, ingredients,
+  allergens, mayContain, healthScore, imageUrl, source, fetchedAt}`. `nutrition` keys: `basis` ("serving" or "100g"), `fat_g`, `sat_fat_g`, `sodium_mg`,
+  `carbs_g`, `sugar_g`, `protein_g`, `fiber_g` when known. `imageUrl` is the S3 copy when present (11), else the Open Food Facts image URL.
+- **Item linking (step 5):** exact match on the full name, then the brand (the catalog has brand items like Cheerios/Oreos), then shorter word
+  runs (longest, rightmost first), then the full name's "suggested" match; otherwise a new item is created with the category guessed from
+  `categories_tags`. Open Food Facts `en:corn` and other non-major allergens are ignored; OFF `en:nuts` → `tree_nuts`.
+- The allergen keyword table (`src/lib/allergens.ts`) excludes phrases such as "peanut butter", "coconut milk", "nutmeg", "rice flour".
 
-## M1 break fixes (test-reports/backend.md)
+### 2026-10-10 · 09 · Recall matching score
+- **Plan said:** `similarity()` of `product_description` vs item name / brand + product name, keep `≥ 0.35`.
+- **Did:** `strict_word_similarity(name, lower(description))` (best of item name and `brand + ' ' + product name`), keep **`≥ 0.6`**, plus the brand rule
+  (when the cabinet product has a brand, it must appear in the description **or in the recalling firm**).
+- **Why:** plain `similarity()` compares a 1–2 word name with a 200+ character description, so real matches score ~0.1. `word_similarity ≥ 0.35`
+  (what the seed uses for its demo score) was tried against the live openFDA feed (9 real recalls, 2026-09-30..10-10) and produced 31 false
+  matches (Milk ↔ "Powdered Sugar", Apples ↔ "Pecorino Toscano"…). `strict_word_similarity ≥ 0.6` produced none of those and keeps the true
+  ones (Cheerios 0.70, Tostitos 0.78, Spinach 1.0). Still a "possible match, check your package" suggestion, never automatic.
+- Matching runs over recalls **imported** (`created_at`) in the last 30 days, after each import and for a single cabinet item whenever it is
+  added (`POST /cabinet`) or bought (finish trip). Existing matches (including dismissed ones) are never re-created.
 
-- **Control characters (B-04):** `validate` rejects any string in the parsed body, query or params that has a C0
-  control character other than tab/LF/CR (or DEL) with `400 VALIDATION_ERROR` "Text must not contain control
-  characters". This covers every current and future text field without touching each contract.
-- **Visible names (B-09):** `visibleName(max)` in `contracts/common.ts` (trim, 1..max, must have a character outside
-  `\p{Cf}`/whitespace). Used for `PATCH /me displayName` and group names. Format characters are only rejected when
-  nothing else is there, so emoji ZWJ sequences still work. A Google `name` with no visible characters falls back to
-  the email local part on first login.
-- **P2025 (B-05):** `errorHandler` maps Prisma "record not found" to `404 NOT_FOUND` (a row deleted between the auth
-  check and the write, e.g. concurrent `DELETE /me`).
-- **Google email collision (B-08):** Google has just verified the address for this `sub`, so another row still holding
-  it is stale. In the login transaction its email is parked at `stale+<userId>@invalid`, then the upsert runs. The stale
-  account keeps its id, groups and data, and gets its real email back if its owner signs in again. Pending invites
-  keyed by email now follow the current verified owner.
-- **`/dev/login-as` (B-07):** only users whose `google_sub` starts with `seed-` (database/10). Others get
-  `404 NOT_FOUND`. The `DEMO_KEY` header from backend/12 is left for 12 (the route is still not mounted in production).
-- **Access log (B-10):** the pino-http `req` serializer drops `query` and strips the query string from `url`, so
-  `?token=` (Socket.IO handshakes) and search text never reach the logs.
-- **S3 presign (B-16):** `S3Client` uses `requestChecksumCalculation` / `responseChecksumValidation: "WHEN_REQUIRED"`, so
-  presigned PUT URLs carry no CRC32 of an empty body. Still worth one real PUT once AWS keys exist.
-- **SmartLabel parser:**
-  - B-02: allergens come from every `Contains[:] ...` statement on the page, including one at the end of the
-    ingredients paragraph, cut at the next period. "Contains 2% or less of" / "contains less than" are skipped.
-  - B-13: visible text is extracted with an iterative DOM walk (cheerio's recursive `.text()` overflowed the stack at
-    about 5,000 nested elements).
-  - B-12: JSON-LD `servingSize` must be a string and `calories` a string or number; calories must be finite and >= 0.
-    Open Food Facts numbers must also be >= 0.
-  - B-06: `safeImageUrl` in `products/common.ts` keeps only `https:` image URLs with a hostname (no IP literal,
-    credentials or port), for both SmartLabel and Open Food Facts. The backend/11 copy-to-S3 step must still fetch
-    through the DNS/private-IP guard, manual redirects, a size cap and an image host allowlist.
-  - B-11: the IPv6 blocklist also covers `::/96` (IPv4-compatible), `::ffff:0:0:0/96` (IPv4-translated),
-    `64:ff9b:1::/48` (local NAT64) and `2002::/16` (6to4).
-- **Deferred:** B-01, B-03, B-14 (allergen keyword tables and recipe diet checks) wait for the allergen consolidation
-  happening on `main`.
+### 2026-10-10 · 09 · Import job and alerts
+- `jobs/importRecalls.ts` schedules `0 6 * * *` (server time) when `ENABLE_JOBS=true` (default; tests set false). `npm run job:recalls` runs it once.
+  `since` = the latest stored openFDA `report_date` (first run: 30 days back); pages of 100 with `skip`; openFDA's `404 NOT_FOUND` = nothing new.
+  `OPENFDA_API_KEY` is optional. Upsert by `recall_number`; running twice creates no duplicates (tested).
+- `GET /alerts` → `{expiring: CabinetItem[], recalls: RecallAlert[]}`. `RecallAlert = {id (the match id), score, createdAt,
+  label: "possible match, check your package", cabinetItem:{id,itemId,name,brand}, recall:{id, source, externalId, productDescription, reason,
+  classification, firm, distribution, reportDate, status, url}}`. openFDA has no per-recall web page, so `url` is the openFDA API query for that
+  recall number (`null` for the seeded demo recall).
+- Dismiss is idempotent (204 again); a match from another group → 404. New matches and dismissals emit `cabinet:changed` (by `null` for the job).
+- Fixture `server/test/fixtures/openfda/enforcement-page.json` holds two real openFDA records plus one **synthetic** record (`SYNTH-0001`, marked in its text).
+- Expiration stretch (Claude vision for printed dates) was not built.
 
-## Allergen consolidation (B-01, B-03, B-14)
+### 2026-10-10 · 11 · Schema change: S3 key columns (migration `20261010230000_s3_keys`)
+- **Plan said:** the app sends the uploaded `key` to `PATCH /me {avatarKey}` or `PATCH cabinet {photoKey}`; the schema had no column for either
+  (`users.avatar_url` holds Google's picture URL, which is refreshed on every login).
+- **Did:** new nullable columns `users.avatar_s3_key` and `cabinet_items.photo_s3_key`, each with a CHECK on the key format
+  (`avatar/<uuid>/<uuid>.(jpg|png|webp)`, `item-photo/<uuid>/<uuid>.(jpg|png|webp)`). Hand-written migration; `prisma migrate diff` against the
+  schema reports no drift. Applied to `grocerez_test` only; run `npx prisma migrate deploy` (or `npm run db:migrate`) on the dev database.
+- **Frontend must update:** `PATCH /me` accepts `avatarKey` (string or `null`); `PATCH /groups/:groupId/cabinet/:id` accepts `photoKey`;
+  `CabinetItem` has a new `photoUrl` field. `User.avatarUrl` is now the presigned S3 avatar when one was uploaded, else the Google picture.
+  (API contract table updated.)
 
-- **One table:** `src/lib/allergens.ts` keeps the only allergen keyword table, keyed by the `allergen` enum
-  (`contracts/ai.ts`). `mapAllergens(text)` (08 scan parsing: SmartLabel `Contains:` and Open Food Facts tags) and
-  `findAllergens(texts, forbidden)` (10 recipe re-check) share one matcher. `products/common.ts` no longer has its own
-  `ALLERGENS`/`mapAllergens` (it re-exports the `Allergen` type). `modules/ai/allergens.ts` is deleted.
-- **Matching:** whole words plus an optional plural, case- and accent-insensitive. "X-free" phrases are ignored. Plant
-  milks and butters keep only the plant word ("nut butter" becomes tree nuts, "peanut butter" becomes peanuts, and
-  neither counts as dairy). Wheat words also count as gluten. Compound words (buttermilk, crabmeat, catfish, cheesecake)
-  and derived foods (custard, aioli, pesto, Nutella, hummus, teriyaki, seitan, panko, Worcestershire, Caesar, satay, ...)
-  are listed explicitly rather than matched as substrings, so "eggplant", "butternut" and "crabapple" don't match.
-  The table errs toward flagging: "pesto" as milk and tree nuts, and "soy sauce"/"teriyaki"
-  as wheat. 08's old table only flagged milk for "butter", so a `Contains:` line saying "peanut butter" is now peanuts only.
-- **Diets in code (B-14):** `findDietConflicts(texts, diets)` drops recipes for vegetarian (meat, poultry, gelatin, lard),
-  vegan (the same plus honey), halal (pork, lard, gelatin) and kosher (pork; kosher also implies the `shellfish`
-  exclusion). The implied allergens from before still apply (vegan: milk, eggs, fish, shellfish; vegetarian: fish,
-  shellfish). Keto, low_sodium, halal alcohol rules and kosher meat/dairy mixing are still prompt-only.
-- **Not done:** using the table on SmartLabel ingredient text as a fallback when there's no `Contains:` line (B-02
-  follow-up). With "flour", "cream" and similar words it would mislabel many products ("rice flour", "cream of tartar"),
-  so `allergens` stays tied to the label's declared statement. Recipes for vegan households that say "vegan butter" or
-  "vegan mayo" are still dropped; neutralizing "vegan X" phrases can be added if that shows up.
-- **False-positive exceptions (follow-up):** whole-phrase exceptions in `normalize()` now drop the wheat/milk word from
-  gluten-free flours and staples ("rice/almond/coconut/corn/chickpea/potato/tapioca/cassava/buckwheat/oat
-  flour|noodle|pasta|tortilla") and "cream of tartar", keeping the base word, so "almond flour" is tree nuts only and
-  "rice flour" is nothing. "Coconut milk" was already not milk. Oat flour is treated as not wheat (cross-contact is
-  the label's job).
+### 2026-10-10 · 11 · Uploads details
+- `POST /uploads/presign {contentType: image/jpeg|png|webp, purpose: avatar|item-photo}` → `{uploadUrl, key}`; key = `${purpose}/${userId}/${uuid}.${ext}`;
+  the PUT URL expires in 5 minutes and is signed for that `Content-Type`, so the app must send the same header. 30/min per user.
+  Without AWS settings → `503 NOT_CONFIGURED`.
+- A key sent back must match the caller's own id and the right purpose (`400 INVALID_UPLOAD_KEY`), so a user can't attach someone else's file.
+  The API doesn't check that the object exists (no `HeadObject`; the IAM policy only grants Put/Get).
+- Every image in a response (`User.avatarUrl`, `Member.avatarUrl`, `CabinetItem.photoUrl`, `CabinetItem.product.imageUrl`, `Product.imageUrl`)
+  is a presigned GET valid for 1 hour.
+- Product images: after a scan, the Open Food Facts image (https, `images.openfoodfacts.org` / `static.openfoodfacts.org` only, no redirects,
+  ≤ 5 MB, `image/*`) is copied to `products/{productId}.jpg` and stored in `products.image_s3_key`. Failures only log.
+- Not done (needs the AWS account): creating the bucket with Block Public Access, the IAM policy, and bucket CORS. Both "Done when" boxes need a real
+  bucket to verify, so they are left unticked; the code path is covered by offline presigning tests.
 
-## Single guarded fetch (08 follow-up)
+### 2026-10-10 · 10 · Claude integration (`src/lib/anthropic.ts`)
+- `@anthropic-ai/sdk` 0.133, model `claude-opus-5-5`, `client.beta.messages.parse` with `betaZodOutputFormat(schema)` (structured outputs),
+  `thinking: {type: "adaptive"}`, explicit `output_config.effort` (`low` recipes, `medium` prices), and the server-side refusal fallback
+  `betas: ["server-side-fallback-2026-07-01"]` + `fallbacks: "default"`. Client timeout 60 s, 1 retry. The output is validated again with the same zod schema.
+- `stop_reason` is checked before reading anything: `refusal` → `422 AI_REFUSED`; `max_tokens` → `503 AI_UNAVAILABLE`; `pause_turn` (long web-search
+  turns) → the assistant turn is appended and the request resumed (max 4 rounds); invalid output → `502 AI_BAD_OUTPUT`; SDK errors
+  (`RateLimitError`, `APIError`, connection/timeout) → `503 AI_UNAVAILABLE`; no `ANTHROPIC_API_KEY` → `503 NOT_CONFIGURED`.
+  Web-search error blocks (`web_search_tool_result` whose `content` is an object) are collected and logged.
+- Tests stub the single call site `ai.call`; nothing was run against the real API (no key). **Not verified live:** the "under 30 seconds" price
+  check (left unticked) and the combination of the web search tool with structured outputs in one request.
 
-- `products/guardedFetch.ts` now holds the only SSRF guard: private-address blocklist (incl. IPv6 forms), `checkUrl`,
-  and `guardedFetch(start, allowHost, accept, read, deps, label)`. `fetchSmartLabelPage` and `fetchProductImage` both
-  use it; `smartlabel.ts` re-exports `isPrivateAddress`. The body `read` callback runs inside the guard's try and
-  timeout, so a stalled or aborted image body is now a 502 like a stalled page (before, only the page read was wrapped).
-## 04-preferences
+### 2026-10-10 · 10 · Recipes
+- **Schema change vs plan:** Claude also returns `ingredients[]` (with quantities), because the deterministic allergen re-check (step 3) needs
+  the full ingredient list. The response `Recipe` adds `usesExpiring[]` (computed by the server) and `missingItems` becomes
+  `[{name, itemId|null, itemName|null, match}]` (mapped with the `/items/search` logic; no catalog items are created from AI output: an unmatched
+  name has `itemId: null` and the app can `POST /items` first). All of the plan's fields are present.
+  **Frontend must update:** use `missingItems[].itemId` for "Add missing to list" (`POST /groups/:groupId/shopping-list`).
+- Recipes conflicting with the group's combined allergens (keyword table from 08) or diets (`src/lib/diets.ts`: meat/fish words for
+  vegetarian/vegan/pescatarian, milk for dairy_free, gluten/wheat for gluten_free, pork for halal/kosher, starch words for keto) are
+  **dropped**. With `mustUseExpiring` and expiring items present, a recipe that uses none of them is dropped too.
+- Empty cabinet → `400 CABINET_EMPTY`. `maxRecipes` 1–5 (default 3). 10 requests/hour per group (`429`).
 
-- **Schema created here** (no database branch existed), two new migrations, nothing earlier touched:
-  - `20261011000000_item_catalog`: `items`, `item_aliases`, the two GIN `gin_trgm_ops` indexes and SQL
-    `normalize_item_name()` per `database/04`, plus CHECKs for the category list and non-empty normalized names.
-    `items.created_by` is `ON DELETE SET NULL`. No seed (that's `database/10`); tests create the items they need.
-  - `20261011000100_preferences`: `recurrence` enum and `preferences` per `database/05`, except the group/user FKs are one
-    **composite FK `(group_id, user_id) → group_members ON DELETE CASCADE`** instead of separate FKs to `groups`/`users`.
-    Leave, removal, `DELETE /me` and group delete all already delete the membership row in a transaction, so preferences
-    go with it and no extra backend code is needed (`database/05` step 4 asked for a backend delete). `item_id` is
-    `ON DELETE RESTRICT`. Applied with `prisma migrate deploy`; `prisma migrate diff` against the schema shows no drift.
-  - `database/04` and `database/05` checkboxes are left for the database builder (EXPLAIN / timing not checked).
-- **Normalization rules** (`lib/normalize.ts` = SQL function, checked by `test/normalize.test.ts`): lowercase, strip every
-  char that isn't a letter/digit/whitespace/`&` (so `Ice-Cream` → `icecream`, `2% Milk` → `2 milk`), collapse whitespace,
-  trim, then de-pluralize only the last word: kept if ≤ 3 chars, ending in `ss`/`us`, or in the exceptions list
-  (`hummus, asparagus, swiss, couscous, molasses, citrus, octopus, species`); `-es` is dropped after `ss|x|z|ch|sh|o`
-  (`tomatoes` → `tomato`, `peaches` → `peach`), otherwise just `-s` (`oranges` → `orange`, `cheeses` → `cheese`).
-- **Fuzzy search** uses `normalized_name % q` (same as `similarity > 0.3`, but it can use the GIN index), items only (not
-  aliases). Suggestion threshold: levenshtein ≤ 2, or ≤ 1 when the normalized query is under 5 characters. `q` is capped
-  at 100 chars (fuzzystrmatch's `levenshtein` rejects inputs over 255). A `q` that normalizes to empty is 400.
-- **`POST /items`** returns **200** (not 201), because a name that already resolves exactly (item or alias) returns the
-  existing item; creation is an `ON CONFLICT` upsert so a race returns the same row. With `aliasOf`, an unknown item is
-  `404 ITEM_NOT_FOUND`; if the typed text already resolves exactly, no alias is added. `category` must be one of the
-  `database/04` list (400 otherwise).
-- **Preferences:** `POST` is an upsert on `(group, user, item)` and returns **200**; unknown `itemId` is
-  `404 ITEM_NOT_FOUND`. `PATCH`/`DELETE` on another member's row is `403 FORBIDDEN`; an id not in this group is
-  `404 PREFERENCE_NOT_FOUND`. `quantityText`/`note` accept `null` to clear. `?userId=all` returns every member's rows,
-  each with `wantedBy: string[]` (display names of all members wanting that item); `me` (default) omits `wantedBy`.
-  `Preference = {id, groupId, userId, item: Item, quantityText, recurrence, note, createdAt, updatedAt, wantedBy?}`,
-  `Item = {id, name, category, defaultAllergens, shelfLifeDays}`. Every write emits `preferences:changed`.
-- **Dietary:** `PUT /me/dietary` requires both arrays (strict), dedupes them, and replaces both sets in one transaction.
-  Enums in `contracts/dietary.ts` (allergens taken from the Prisma enum, diets equal to the `user_diets` CHECK list).
-- **Not done: shopping-list regeneration** (step 4 and the dietary part of step 5). `generate(groupId)` belongs to backend/06,
-  which doesn't exist yet; the call sites are marked with `ponytail:` comments in `preferences/service.ts` and
-  `users/service.ts`. The second "Done when" box stays unticked until 06.
-- **Allergen keyword tables not consolidated:** 04 needed no keyword logic (items carry `default_allergens`), so the
-  duplicate tables in `products/common.ts` and `ai/allergens.ts` were left alone.
-
-## 12-deployment
-
-Everything that doesn't need a cloud account is built and verified locally. Nothing deployed; no cloud resources created.
-
-- **Image:** `server/Dockerfile` (multi-stage, `node:22-slim`, OpenSSL for Prisma, non-root `node` user) + `.dockerignore`.
-  Migrations run on container start (`npx prisma migrate deploy && exec node dist/index.js`), as step 1 says; safe because
-  the service runs as exactly 1 instance (step 3). The runtime keeps dev dependencies because the `prisma` CLI is a
-  devDependency (upgrade path: move it to `dependencies`, `npm prune --omit=dev`). Verified 2026-10-10: against an empty
-  scratch database all 12 migrations apply and `/api/health` returns `{"ok":true}`; against the local dev DB "No pending
-  migrations"; with `api.fda.gov` unreachable and no `OPENFDA_API_KEY`, the startup recall import logs `recall import failed`
-  and the server keeps serving.
-- **`TRUST_PROXY`** (optional hop count, default 0) sets `trust proxy` so rate limits see the client IP. `1` on Railway / Cloud Run.
-- **`CORS_ORIGINS`** (optional, comma-separated, default `http://localhost:8081`) replaces the hard-coded `EXPO_DEV_ORIGINS`
-  and feeds both Express CORS and Socket.IO. Only an Expo web build needs it.
-- **`DEMO_KEY`** (optional, min 32 chars, empty = unset). Step 4: in production `/api/dev/login-as` stays unmounted unless
-  `DEMO_KEY` is set; then it is mounted behind `X-Demo-Key: <DEMO_KEY>` (sha256 + `timingSafeEqual`), else
-  `401 UNAUTHENTICATED`. Outside production the route is unchanged (no header), so the frontend's `__DEV__` demo list keeps
-  working locally. Not a contract change (the dev route isn't in the contract table). **Frontend note:** a build that uses the
-  demo list against the deployed API must send `X-Demo-Key`.
-- **CI** (step 6): `.github/workflows/server-ci.yml`, on PRs to `main` touching `server/`: `npm ci`, `prisma validate`,
-  `prisma migrate deploy` against a `postgres:16` service, `npm run build` (tsc), `npx vitest run`. `npx vitest run` instead
-  of `npm test` (`vitest`) so it never depends on CI detection to skip watch mode. Not run on GitHub yet.
-- `server/DEPLOY.md`: image usage, env var table, Railway steps, Cloud Run + Cloud SQL alternative, seeding/`DEMO_KEY`, CI,
-  monitoring, and the demo checklist with exactly what each item needs.
-- **Known flake (fixed, see "Fix: recall import race, matching precision"):** `test/alerts.test.ts` "importRecalls job" failed once in a full parallel run with
-  `recall_matches_cabinet_item_id_fkey`: the import matches across all groups, and another test file deleted a cabinet
-  item between the match query and `createManyAndReturn` (`modules/recalls/repo.ts:52`). Same race exists in production
-  (a user deletes a cabinet item mid-import fails that run; it retries at the next start / 06:00). Fix: do the match +
-  insert as one `INSERT ... SELECT ... ON CONFLICT DO NOTHING`, or retry on P2003.
-
-**Remaining (needs accounts / devices)**
-- Step 2/5: the Railway (or Cloud Run) deploy, public URL into `EXPO_PUBLIC_API_URL`, host health check on `/api/health`.
-- Step 4: `npx prisma db seed` against prod. No seed exists on this branch (`plan/database/10-seed-data`, database owner).
-- Step 7 demo checklist and "Done when": all need the deployed API and phones; left unchecked in the README.
-
-## 05-cabinet
-
-- **Schema:** new migration `20261011010000_cabinet` per `database/06` (`stock_status`, `expiration_source`, `cabinet_items`,
-  `UNIQUE (group_id, item_id)`, index `(group_id, expires_at)`), plus a `location` CHECK (`fridge|freezer|pantry|other`) and
-  the backend/11 column `photo_s3_key`. `product_id` is a plain nullable uuid with **no FK yet**: `products` doesn't exist on
-  this branch. database/08 must add `FOREIGN KEY (product_id) REFERENCES products(id)` (suggest `ON DELETE SET NULL`).
-  `item_id` is `ON DELETE RESTRICT`, `added_by` is nullable `ON DELETE SET NULL`. Applied with `prisma migrate deploy`;
-  `migrate diff` DB vs schema is empty. `database/06` boxes are left for the database builder (the EXPLAIN check wasn't run).
-- **`CabinetItem`** (`contracts/cabinet.ts`) = `{id, groupId, item: Item, productId, status, quantityText, location,
-  purchasedAt, expiresAt ("YYYY-MM-DD"), expirationSource, photoUrl, addedBy, createdAt, updatedAt}`. Step 1's product join
-  (brand, image) is **left to 08**: it should add `product: {brand, imageUrl} | null` in `toCabinetItem`.
-- **POST** is an upsert returning **200** (like preferences). Unknown `itemId` is `404 ITEM_NOT_FOUND`. Re-adding an existing
-  row sets `status` back to `in_stock` and only overwrites location / quantity / expiry when they're sent, so a hand-set date
-  isn't replaced by an estimate. Without `expiresAt`, a new row gets `estimateExpiration(item, now)` with
-  `expiration_source='estimated'` (household/other → `null`/`null`). `expiresAt: null` means "no date". `purchased_at` stays
-  null for manual adds (it's set by 06's finish trip).
-- **PATCH:** `expiresAt` sets `expiration_source='manual'`; `null` clears both. `photoKey` must match exactly
-  `^item-photo/<caller's userId>/<uuid>.(jpg|png|webp)$` (else `400 VALIDATION_ERROR`); `null` removes it. Responses give a
-  presigned GET in `photoUrl` (1 h), never the key. Unknown id or one from another group is `404 CABINET_ITEM_NOT_FOUND`.
-- **Regeneration hook:** `generate()` doesn't exist yet, so `regenerate(groupId, tx)` at the top of
-  `modules/cabinet/service.ts` is a marked no-op. **06 replaces its body with `generate(groupId, tx)`.** It already runs inside
-  the write's transaction on: POST (adding changes "have"), PATCH with `status`, and ran-out when the item is wanted.
-  `shopping-list:changed` is emitted after commit in those cases, `cabinet:changed` on every write. `cabinetRepo.haveItemIds`
-  is the `database/06` step 4 "have" query for 06 to use.
-- **Ran out** deletes the row and returns `{requeued: true}` if any member of the group has a preference for the item, all in
-  one transaction. A concurrent second ran-out gets 404.
-- **DELETE `/cabinet/:id`** (step 5) returns 204 and does not regenerate. Note for 06: since the list is
-  `preferences − have`, the next regeneration triggered by anything else will still list a deleted item that someone wants.
-- **Not ticked:** the "Done when" loop (ran out → list → bought → cabinet) needs 06's list and finish trip. The cabinet half is
-  tested (`test/cabinet.test.ts`: ran out + wanted → requeued and out of "have"; re-add → back in "have"; running low → still
-  in the cabinet and out of "have").
-- **Skipped from 09:** re-running recall matching on cabinet add (09 step 3 of recalls) waits for the recalls tables.
-- **Frontend must update:** `DELETE /groups/:groupId/cabinet/:id` (204) added to the contract table (it was in 05's README
-  but missing from the table). `PATCH cabinet` accepts `photoKey` (from `POST /uploads/presign {purpose: "item-photo"}`, or
-  `null`), and `CabinetItem` has `photoUrl`, which expires after 1 hour.
-
-## 06-shopping-list-engine
-
-- **Schema:** new migration `20261011030000_shopping_list` per `database/07` (`list_reason`, `shopping_list_items`,
-  `UNIQUE (group_id, item_id)`, index `(group_id, checked)`), plus a CHECK that `checked_by`/`checked_at` are null when
-  unchecked. `checked_by`/`added_by` are `ON DELETE SET NULL`, `item_id` `RESTRICT`, `group_id` `CASCADE`.
-  **`scanned_product_id` is a plain nullable uuid with no FK** (`products` isn't on this branch). The 08 merge must add
-  `FOREIGN KEY (scanned_product_id) REFERENCES products(id) ON DELETE SET NULL` (same as `cabinet_items.product_id`) and
-  validate `scannedProductId` in PATCH (`404 PRODUCT_NOT_FOUND`). Applied with `migrate deploy`; `migrate diff` DB vs
-  schema shows only the other agent's `products` table. `database/07` boxes ticked (both covered by `test/shopping-list.test.ts`).
-- **One generator:** `generate(groupId, tx)` in `modules/shopping-list/service.ts`, called inside the caller's transaction by:
-  POST `/generate`, manual add, list DELETE, finish trip, cabinet POST / PATCH status / ran-out / DELETE, preference
-  POST / PATCH / DELETE, `PUT /me/dietary` (each of the user's groups), invite accept, leave / member removal, `DELETE /me`.
-  Callers emit `shopping-list:changed` after commit. The set math is a pure `setMath()` covered by a fast-check property test.
-  Idempotent: rows are only written when `wantedBy` / `quantityText` / `allergenFlags` actually change.
-- **Concurrency:** every list-changing transaction goes through `inListTx`, which takes the **group row lock**
-  (`groupsRepo.lock`, `SELECT … FOR UPDATE`, the lock 03 already uses for membership) **first**, so list, cabinet,
-  preference and membership writers serialize per group with one lock order. Finish trip additionally selects the checked
-  rows `FOR UPDATE`, so a racing un-check waits and then 404s if the row was moved (or wins and stays unchecked). PATCH
-  (check-off) doesn't take the group lock: it's a single-row last-write-wins update.
-- **Generation details:** `quantityText` on preference rows = distinct members' quantity notes joined with `", "`; manual rows
-  keep their own. `wantedBy` and `allergenFlags` are refreshed on **every** surviving row (manual and checked too), since
-  they're facts about the group, not in-progress state; `reason`, `checked*`, `scanned_product_id` are never touched.
-  Allergen flags use `items.default_allergens` only (no `products` table here, marked `ponytail:` in `shopping-list/repo.ts`;
-  08 merge: use the scanned product's `allergens ∪ may_contain` when `scanned_product_id` is set). Exact enum match
-  (`wheat` doesn't imply `gluten`).
-- **Manual add** (`POST /shopping-list`) is an upsert returning **200** (like preferences/cabinet). An item already listed by
-  preference becomes `reason='manual'` (so it survives losing its preference); `quantityText` is overwritten only when sent.
-  Unknown `itemId` → `404 ITEM_NOT_FOUND`.
-- **PATCH** `{checked: true}` sets `checked_by`/`checked_at` (re-checking by someone else overwrites them) and sets
-  `scanned_product_id` when sent. `{checked: false}` clears all three unless a `scannedProductId` is sent. Unknown id or a row
-  in another group → `404 LIST_ITEM_NOT_FOUND`.
-- **DELETE** `/shopping-list/:id`: manual rows → 204 (and regenerate, so a manual row for an item someone wants comes back as
-  a preference row). Preference rows → `409 LIST_ITEM_IS_PREFERENCE` **only while someone still wants the item**; an orphaned
-  checked preference row (preference removed while checked) can be deleted.
-- **Finish trip:** checked rows → cabinet upsert with `status='in_stock'`, `purchased_at=now()`,
-  `expires_at = estimateExpiration(item, now)` / `expiration_source='estimated'` (both null when there is no basis, e.g.
-  household). This overwrites an older hand-set date (it's a new purchase). `product_id` is set only when the row was
-  scanned, so an unscanned re-buy keeps the known product. `one_time` preferences for moved items are deleted (staples
-  stay, so ran out requeues them). Emits `cabinet:changed`, `preferences:changed` and `shopping-list:changed` when anything
-  moved. `{movedToCabinet: 0}` when nothing is checked.
-- **05 follow-up decided:** `DELETE /cabinet/:id` now regenerates too (and emits `shopping-list:changed`): since the list is
-  `preferences − have`, a wanted item comes back immediately instead of at some later regeneration. Ran out now always
-  regenerates (`requeued` still = someone wants it).
-- **Regeneration on membership changes** (beyond the plan): accept, leave, removal and `DELETE /me` regenerate inside the
-  existing locked transaction, so a new member's allergens are flagged and a leaver's preferences drop off the list.
-- **`ShoppingListItem`** (`contracts/shoppingList.ts`) = `{id, groupId, item: Item, reason, wantedBy: {userId, displayName}[],
-  quantityText, allergenFlags: {userId, displayName, allergen}[], checked, checkedBy: {userId, displayName} | null,
-  checkedAt, scannedProductId, addedBy: {userId, displayName} | null, createdAt, updatedAt}`. GET sorts by aisle
-  (produce, bakery, meat, seafood, dairy, frozen, pantry, snacks, beverages, household, other/none), then name.
-- **Seeded demo test:** `database/10`'s seed doesn't exist on this branch, so `test/shopping-list.test.ts` builds the same
-  4-user group (prefs, allergens, Cheerios in stock, Oreos running low) in `beforeEach` and asserts Tostitos, Lay's, Oreos.
-- **Frontend must update:** `DELETE /cabinet/:id` of an item someone wants now puts it back on the list (expect
-  `shopping-list:changed`). `ShoppingListItem` shape above (names are included, no member lookup needed). Manual add returns
-  200, not 201. List DELETE on a wanted preference row is `409 LIST_ITEM_IS_PREFERENCE` (tell the user to remove the preference).
-
-## 06x08 product wiring
-
-- **Schema:** new migration `20261011050000_product_fks` adds `cabinet_items.product_id → products ON DELETE SET NULL` and
-  `shopping_list_items.scanned_product_id → products ON DELETE SET NULL` (deferred by 05 and 06). Dangling ids written
-  before the FK existed are nulled first. Its timestamp equals the concurrent `20261011050000_price_estimates`; the names
-  differ and the two are independent, so order doesn't matter. Applied with `migrate deploy` (no reset).
-- **Check-off:** `PATCH /shopping-list/:id` with a `scannedProductId` that isn't a product → `404 PRODUCT_NOT_FOUND`, nothing
-  written. When the scanned product changes (a `scannedProductId` is sent, or un-checking clears it) the update runs in
-  `inListTx` and regenerates, so the row's allergen flags are right in the response. A plain check-off stays lock-free.
-- **Allergen flags:** a row with a scanned product is flagged by that product's `allergens ∪ may_contain` **instead of**
-  `items.default_allergens` (the label of the exact package beats the generic catalog guess); unscanned rows keep the catalog.
-- **Cabinet product join (05 step 1):** `CabinetItem.product = {brand, imageUrl} | null` (`imageUrl` is a presigned GET, 1 h).
-- **Frontend must update:** `CabinetItem` gains `product: {brand, imageUrl} | null`. Check-off can return
-  `404 PRODUCT_NOT_FOUND` (scan again / check off without the product).
-
-## 09-expiration-recalls
-
-- **Schema:** new migration `20261011050100_recalls`: `recalls` and `recall_matches` exactly per `database/09` steps 1-2
-  (GIN trigram index on `product_description`, `UNIQUE (recall_id, cabinet_item_id)`, all three FKs `ON DELETE CASCADE`),
-  plus an index on `report_date` and `(group_id, dismissed_at)`, plus `job_runs (name PK, last_success_at)` for last-import
-  tracking. `price_estimates` is the concurrent agent's separate migration, so the plan's single `recalls_and_prices`
-  name isn't used. `database/09` boxes are left for the database builder (both behaviors are covered by `test/alerts.test.ts`).
-- **Import job** (`src/jobs/importRecalls.ts`): `since` = `job_runs.last_success_at` (first run: 30 days back), `until` =
-  now; the window is inclusive, so the boundary day is fetched twice and the upsert by `external_id` absorbs it. The date
-  only advances after a successful fetch + upsert. Then matching runs for recalls with `report_date` in the last 30 days
-  against every cabinet. `node-cron` `"0 6 * * *"` (server time) is wired in `index.ts` only (tests import `app.ts`), and
-  `index.ts` also runs one import at startup if the last success is over a day old, so a fresh deploy has alerts before 6am.
-  Failures are logged, never thrown into the server. `OPENFDA_API_KEY` is optional (config + `.env.example`).
-- **Matching in SQL:** `strict_word_similarity` (per the earlier decision) on item name, aliases, and
-  `brand + ' ' + product name`, best score ≥ 0.35; the whole-word brand gate is `brandAppears()` from `match.ts` in JS.
-  The pure JS `matchRecalls` stays as the reference implementation. New matches are `createManyAndReturn(skipDuplicates)`.
-  Known ceiling: a two-word item name matches on one shared word (`Cheese Crackers` vs any recall mentioning "cheese"
-  scores 0.44). That's what the plan's threshold gives; the alerts are worded "possible match, check your package".
-  Raise the threshold or require every item word if the demo shows too much noise. (Done: all-words gate, see "Fix: recall import race,
-  matching precision".)
-- **Per-item re-match** runs inside the write's transaction on cabinet `POST` **and finish trip** (bought items are cabinet
-  adds), against **all** stored recalls (catches old ones). A dismissed match stays dismissed on re-add (same row,
-  `UNIQUE (recall_id, cabinet_item_id)`). A ran-out + re-buy creates a new cabinet row, so the alert can come back.
-- **`cabinet:changed`:** the job emits it to every group that got a new match with `by: "system"` (no user did it).
-  Cabinet add / finish trip already emit it. Dismiss emits it too (other members' badges refresh).
-- **Alerts API** (`contracts/alerts.ts`): `GET /groups/:groupId/alerts` → `{expiring: CabinetItem[], recalls: RecallAlert[]}`.
-  `expiring` = `expires_at <= today + 3` (UTC calendar days, already expired included), soonest first then name.
-  `RecallAlert = {id (matchId), cabinetItemId, item: Item, score, createdAt, recall: {externalId, productDescription,
-  reason, classification, firm, distribution, reportDate ("YYYY-MM-DD"), status, link}}`, newest match first.
-  `POST /groups/:groupId/alerts/recalls/:matchId/dismiss` → 204; scoped by `groupId` (another group's match id is
-  `404 RECALL_MATCH_NOT_FOUND`, a bad uuid 400). Re-dismissing is a 204 no-op.
-- **Expiration:** finish trip and cabinet add already save the estimate (`expiration_source='estimated'`) and PATCH sets
-  `manual` (05/06). "Every bought item has an expiration date" is ticked with the plan's exception: categories with no
-  default (household, other, none) get no date. The Claude vision stretch (step 4) is not built.
-- **Seeded fake recall:** `database/10`'s seed doesn't exist on this branch, so the test inserts it. When the seed lands,
-  it should add one recall whose `product_description` contains a seeded cabinet item's name (and brand, if scanned).
-- **Checked live once** (not in the suite): `fetchRecalls` for the last 30 days returned 62 real recalls.
-- **Frontend must update:** `RecallAlert` shape above; dismiss can return `404 RECALL_MATCH_NOT_FOUND`. Show recall alerts
-  as "possible match, check your package"; `link` is the openFDA API query for that recall number (no human page exists).
-
-## M2 break fixes (test-reports/backend-m2.md)
-
-- **M2-01, M2-08:** already fixed on `will` before this pass (central control-char rejection from M1 B-04; 06x08 returns
-  `404 PRODUCT_NOT_FOUND`). The break tests pass unchanged.
-- **M2-06 group id casing:** `requireGroupMember` lower-cases `:groupId` into `req.membership.groupId`, and every Socket.IO
-  room name goes through one `room()` helper in `lib/realtime.ts` that lower-cases (join, leave, emit, kick, close).
-  Event payloads carry the lower-case `groupId`.
-- **M2-07 aliases:** `POST /items {aliasOf}` only stores an alias if `aliasOf` is one of the fuzzy candidates for that text
-  within the same "Did you mean" distance threshold `search` uses. Otherwise `400 ALIAS_NOT_SUGGESTED`, nothing written.
-  Text that already resolves exactly still returns the `aliasOf` item without writing. Aliases stay global (GAPS #10);
-  per-group or moderated aliases weren't built.
-- **M2-02 preference races:** `preferencesRepo.update/delete` map P2025 to null (shared `orNull` in `lib/errors.ts`, which
-  cabinet and list repos now use too), and the service answers `404 PREFERENCE_NOT_FOUND`. The global P2025 to
-  `404 NOT_FOUND` mapping in `errorHandler` stays as the fallback.
-- **M2-04 `PUT /me/dietary`:** an interactive transaction takes `SELECT ... FOR UPDATE` on the user row first, so concurrent
-  PUTs serialize: last write wins, no 409.
-- **M2-05:** cabinet `photoKey` regex now escapes the `.` (`\.` in the template literal). `avatarKey` was already right.
-- **M2-03:** allergen flag `displayName` is resolved at read time from `userId` (like `wantedBy`). The stored JSON keeps
-  its snapshot name, which is used only if the user no longer exists.
-- **Check-off vs regenerate race (found while running the M2 suite, not in the report):** `generate()` deleted rows it
-  had read as unchecked, so a lock-free check-off that committed in between was deleted after returning 200. The delete
-  now also filters on `checked: false`, which Postgres re-checks at delete time.
-- **Frontend must update:** `POST /items {name, aliasOf}` can return `400 ALIAS_NOT_SUGGESTED`. Send `aliasOf` only for the
-  item the search suggested for exactly that typed text. If you get this error, fall back to the "add as new" flow.
-
-## Fix: recall import race, matching precision
-
-- **Race fixed at the root:** `recallsRepo.match` is now one `INSERT INTO recall_matches ... SELECT ... FOR KEY SHARE OF
-  c, r ON CONFLICT (recall_id, cabinet_item_id) DO NOTHING RETURNING group_id`. A single INSERT ... SELECT alone still
-  races (the FK check sees a delete that commits after the statement's snapshot); `FOR KEY SHARE` makes a concurrent
-  delete either wait or have its row skipped. Covers the daily import and the per-item re-match (cabinet add, finish
-  trip), which share this function. Brand gate moved from JS into the same SQL. Test: `alerts.test.ts` "a cabinet item
-  deleted while matching runs" (fails with `recall_matches_cabinet_item_id_fkey` without the lock).
-- **Matching precision:** a candidate name (item name, alias, `brand + product name`) qualifies only if its
-  `strict_word_similarity` >= 0.35 **and** every significant word (>= 3 chars, not `and/the/with/for`) appears as a
-  whole word in the description, allowing one trailing "s" either way. Score = best qualifying name. "Cheese Crackers"
-  no longer matches "Sliced cheese"; "Baby Spinach" still matches inside a long description. Same rule in JS
-  (`match.ts` `allWordsAppear`/`matchRecalls`) and SQL (`~ '\m<stem>s?\M'`). Known ceiling: only "s" plurals pair
-  ("berries" vs "berry" won't). A brand with no letters/digits no longer gates (was: rejected everything).
-- **Test isolation:** `importRecalls({ job })` names the `job_runs` row (default `import-recalls`); `alerts.test.ts` uses
-  `import-recalls-<tag>`. Its recall descriptions now include the test's item tag, since item names carry it and the
-  all-words gate requires it.
-- No API contract change.
-
-## Fix: M3 scan and check-off findings
-
-- **M3-10, deviation from backend/06 step 1.3:** a scanned list row is flagged by the catalog item's `default_allergens`
-  ∪ the product's `allergens` ∪ `may_contain`, not the product alone. Open Food Facts often has no allergen data, and
-  "no data" must not clear a flag. The cost is a possible extra flag (catalog says milk, this exact product has none).
-  For allergies, over-warning is the safe side. `shopping-list.test.ts` was updated to match: Oreos keep the milk flag.
-- **M3-11:** `PATCH /shopping-list/:id {scannedProductId}` with a product whose `item_id` is a different catalog item
-  returns `400 PRODUCT_ITEM_MISMATCH` and leaves the row unchanged. A product with no `item_id` is still accepted.
-- **M3-01/M3-02, product cache writes (`productsRepo.save`):** the row is found by GTIN first, then by URL. A row that
-  is still fresh (< 30 days) is only enriched: empty fields are filled, `allergens`/`may_contain` are unioned, and its
-  source is kept. A stale row is refreshed in place (id kept, so cabinet and list links survive). If the URL row and the
-  GTIN row are different rows, `cabinet_items.product_id` and `shopping_list_items.scanned_product_id` are re-pointed to
-  the GTIN row before the URL row is deleted. No migration was needed.
-- **M3-03, GTIN normalization:** lookups and stored `products.gtin` use one key. UPC-A (12), shorter codes, and GTIN-14
-  with a leading 0 become 13 digits. GTIN-8 and GTIN-14 with an indicator digit stay as they are. The Open Food Facts
-  request still uses the digits that were scanned. OFF's `code` is kept only if it normalizes to the same value.
-  Rows saved earlier under a 12-digit key aren't migrated; they are no longer hit and get refetched once.
-- **M3-04:** C0 control characters (except tab, LF, CR) and DEL are stripped from scanned product data and `raw` before
-  any write (`stripControl` in `products/common.ts`), for both OFF and SmartLabel.
-- **M3-05:** `itemsRepo.create` is `createMany({skipDuplicates})`, which is a native `INSERT ... ON CONFLICT DO NOTHING`,
-  followed by a read. Concurrent creates of one name (scan or `POST /items`) return the same row, so there is no 409.
-- **M3-19:** `parseSmartLabel` first runs `tooDeep()`, one linear pass with a tag stack (void and auto-closing tags
-  ignored, script/style bodies skipped). Pages that nest deeper than 128 elements are treated as "not a label page"
-  (404 or OFF fallback, as before), so `cheerio.load` never runs on them. Measured: a worst-case 2 MB page at depth 120
-  parses in about 0.4 s. The 20k nested-div page is rejected in under 1 ms.
-- **Frontend must update:** (1) `PATCH /groups/:groupId/shopping-list/:id` can return `400 PRODUCT_ITEM_MISMATCH` when
-  the scanned product belongs to another catalog item. Tell the user "that's not <item>" and don't check the row.
-  (2) `Product.gtin` from `POST /products/scan` can differ from the scanned digits: a 12-digit UPC-A comes back as the
-  13-digit EAN-13, with a leading 0. Compare barcodes after normalizing, or don't compare them at all.
-## M3 break fixes: recalls and AI (test-reports/backend-m3m4.md)
-
-- **Schema:** new migration `20261012010000_match_norm_item_trust` adds the `unaccent` extension, an IMMUTABLE
-  `match_norm(text)` (`unaccent` + `lower` + drop the apostrophe characters `'`, `’`, `ʼ` and the backtick), and
-  `items.user_created boolean NOT NULL DEFAULT false`, backfilled from `created_by IS NOT NULL` and set by a
-  `BEFORE INSERT` trigger. It's a column, not `created_by IS NOT NULL` at read time, because `created_by` is
-  `ON DELETE SET NULL`: deleting an account would otherwise make that user's items look like seed items.
-  `schema.prisma` has the column and the extension. The seed needs nothing extra (seed rows have no `created_by`, so
-  they're trusted).
-- **M3-07 openFDA rows:** control characters are stripped from every string in a row (keys included), and `report_date`
-  must be a real calendar day (round-trips through `Date`), otherwise the row is skipped and counted in one warn log.
-  `recallsRepo.upsert` runs row by row (was one transaction), so a row the DB still rejects is logged and skipped. The job
-  returns `{imported, failed, groupsWithNewMatches}`.
-- **M3-08 late recalls (plan-09 gap):** the plan says `since` = the last import date. openFDA publishes weekly with
-  `report_date`s days in the past, so `since = last success − 14 days` (first run is still 30 days back). Re-fetching is
-  idempotent (upsert by `recall_number`, `ON CONFLICT DO NOTHING` on matches, so dismissed stays dismissed).
-- **M3-09 brand spelling:** both sides of every recall comparison (item names, aliases, brand + product name, the
-  description) go through `matchNorm` in JS and `match_norm()` in SQL. The brand gate passes when every brand word
-  appears, or the first brand word has 4+ letters (parent/sub-brand: "Kraft Heinz" ~ "Kraft ..."), whole words with an
-  optional trailing "s" ("Kellogg's" ~ "Kellogg"). Known ceiling: a generic first word passes the gate ("Great Value" ~
-  "Great Lakes ..."), but only after the item name already matched with all its words. Measured on the break test's
-  24 items × 15 recalls (unbranded, all-words rule): 12 true, 10 false, 0 missed (precision 55%, was 44% before the
-  all-words gate, recall 100%). The remaining false alarms are one-word items inside compound products ("Butter" ~
-  "Peanut Butter", "Milk" ~ "Whole milk chocolate"), which the "possible match, check your package" wording covers.
-- **M3-12 model output:** the structured-output schema is unchanged (refinements would leak into the JSON schema). After
-  parsing, an estimate whose `unit` has control characters or is over 40 chars is rejected (goes to `unpricedItemIds`).
-  Source URLs must be http(s), at most 2048 chars, and free of control characters, and at most 10 are kept.
-- **M3-13 price cache poisoning:** the global `(item, zip)` cache is read and written only for items with
-  `user_created = false`. Those are priced in one call whose prompt holds only such names plus a validated 5-digit ZIP
-  (body regex, or the profile ZIP, which is validated on write). The group's user-created items are priced in a second
-  call that is never cached and never shares a prompt with cacheable items, so a household's own names can only steer
-  its own uncached estimates. The break test now creates its injected item with `created_by` (every API-created item has
-  one) and queues the second call. The assertion is unchanged.
-- **M3-15 price rate limit (plan gap):** 10 Claude-backed price requests per group per hour → `429 RATE_LIMITED`.
-  Counted in the service only when there's something to price: cache-only answers, `ZIP_REQUIRED`/validation 400s and
-  calls that fail with 503 don't count. It's an in-memory fixed window keyed by the lower-cased group id, like the
-  recipe limiter (`ponytail:` single instance).
-- **M3-16 recipe allergens:** `aiRepo.cabinet` returns each item's `default_allergens ∪ product.allergens ∪
-  may_contain`. Items that hit the group's forbidden set (member allergens ∪ diet exclusions, `forbiddenAllergens()`) are
-  left out of the prompt. A recipe is dropped if it names any such cabinet item (in uses or missing) or if a missing item
-  *exactly* matches a catalog item carrying a forbidden allergen.
-- **M3-17 fuzzy matches:** a "suggested" (non-exact) `missingItemMatches` entry whose item carries a forbidden allergen
-  returns `item: null`. The name stays, so the user can still search for it.
-- **M3-06, M3-14:** already fixed by M2-06 (canonical group id).
-- **Frontend must update:** `POST /groups/:groupId/shopping-list/prices` can now return `429 RATE_LIMITED` (show "try
-  again later", same as recipes). `missingItemMatches[].item` can be `null` even when a similar catalog item exists
-  (allergen-unsafe near-miss), so fall back to "add as new". Recipes come back with fewer than `maxRecipes` more often
-  (unsafe ones are dropped after the model). No path or body changes.
+### 2026-10-10 · 10 · Prices
+- ZIP: body → the caller's profile → `400 ZIP_REQUIRED`. All list rows (checked or not) are priced. Cached `price_estimates` younger than
+  24 h are reused; the rest go to one Claude request with `web_search_20260209` (`max_uses: 5`). The SDK's `user_location` has no postal-code
+  field (`city/region/country/timezone`), so it is `{type: "approximate", country: "US"}` and the ZIP is in the prompt.
+- Claude must echo our `itemId`; rows for items we didn't ask about, negative values, `low > high`, or `typical` outside `[low, high]` are discarded.
+  Only `http(s)` source URLs are kept (max 5). Upserted with `model = "claude-opus-5-5"`.
+- **Response:** `{zipCode, items:[{itemId, name, lowCents, highCents, typicalCents, unit, sources, estimate:true, cached, fetchedAt}], missingItemIds,
+  totalLowCents, totalHighCents}` (the contract's three fields plus extras). An empty list returns zeros without calling Claude.
+  20 requests/hour per group (not in the plan; caps web-search cost).

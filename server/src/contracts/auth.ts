@@ -1,30 +1,29 @@
 import { z } from "zod";
-import { visibleName } from "./common.js";
+
+export const GoogleAuthBody = z.object({ idToken: z.string().min(1).max(8192) });
+export type GoogleAuthBody = z.infer<typeof GoogleAuthBody>;
 
 export const User = z.object({
   id: z.uuid(),
   email: z.string(),
   displayName: z.string(),
+  /** Google picture URL, or a presigned S3 GET URL when the user uploaded an avatar (11). */
   avatarUrl: z.string().nullable(),
   zipCode: z.string().nullable(),
+  createdAt: z.string(),
 });
 export type User = z.infer<typeof User>;
-
-export const GoogleLoginBody = z.object({ idToken: z.string().min(1).max(4096) });
-export type GoogleLoginBody = z.infer<typeof GoogleLoginBody>;
 
 export const AuthResponse = z.object({ token: z.string(), user: User });
 export type AuthResponse = z.infer<typeof AuthResponse>;
 
 export const UpdateMeBody = z
   .object({
-    displayName: visibleName(80).optional(),
-    // US ZIP (5 digits, optional +4). null clears it.
-    zipCode: z.string().trim().regex(/^\d{5}(-\d{4})?$/, "must be a US ZIP code").nullable().optional(),
-    // Key from POST /uploads/presign; the service checks it is under avatar/<own userId>/. null clears it.
+    displayName: z.string().trim().min(1).max(80).optional(),
+    /** 5-digit US ZIP, or null to clear. */
+    zipCode: z.string().regex(/^\d{5}$/, "must be a 5-digit ZIP code").nullable().optional(),
+    /** `key` from POST /uploads/presign {purpose:"avatar"} after the PUT succeeded (11). null removes the upload. */
     avatarKey: z.string().max(200).nullable().optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof UpdateMeBody>;
-
-export const UserIdParams = z.object({ userId: z.uuid() });

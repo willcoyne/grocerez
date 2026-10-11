@@ -47,8 +47,7 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/groups/:groupId/preferences` | `{itemId, quantityText?, recurrence?, note?}` | `Preference` | 04 |
 | PATCH / DELETE | `/groups/:groupId/preferences/:id` | (own rows only) | `Preference` / 204 | 04 |
 | GET / POST | `/groups/:groupId/cabinet` | `{itemId, location?, expiresAt?, quantityText?}` | `CabinetItem[]` / `CabinetItem` | 05 |
-| PATCH | `/groups/:groupId/cabinet/:id` | `{status?, expiresAt?, location?, quantityText?, photoKey?}` | `CabinetItem` | 05 |
-| DELETE | `/groups/:groupId/cabinet/:id` | � | 204 | 05 |
+| PATCH | `/groups/:groupId/cabinet/:id` | `{status?, expiresAt?, location?, quantityText?, photoKey?}` | `CabinetItem` | 05, 11 |
 | POST | `/groups/:groupId/cabinet/:id/ran-out` | — | `{requeued: boolean}` | 05 |
 | GET | `/groups/:groupId/shopping-list` | — | `ShoppingListItem[]` | 06 |
 | POST | `/groups/:groupId/shopping-list/generate` | — | `ShoppingListItem[]` | 06 |
@@ -59,8 +58,8 @@ All routes are prefixed with `/api` and use JSON. Every route except `/auth/goog
 | POST | `/products/scan` | `{qrUrl?}` or `{gtin?}` | `Product` | 08 |
 | GET | `/groups/:groupId/alerts` | — | `{expiring[], recalls[]}` | 09 |
 | POST | `/groups/:groupId/alerts/recalls/:matchId/dismiss` | — | 204 | 09 |
-| POST | `/groups/:groupId/recipes/suggest` | `{maxRecipes?, mustUseExpiring?}` | `Recipe[]` (each with `missingItemMatches[]`) | 10 |
-| POST | `/groups/:groupId/shopping-list/prices` | `{zipCode?}` | `{items[], totalLowCents, totalHighCents, unpricedItemIds[]}` | 10 |
+| POST | `/groups/:groupId/recipes/suggest` | `{maxRecipes?, mustUseExpiring?}` | `Recipe[]` | 10 |
+| POST | `/groups/:groupId/shopping-list/prices` | `{zipCode?}` | `{items[], totalLowCents, totalHighCents}` | 10 |
 | POST | `/uploads/presign` | `{contentType, purpose}` | `{uploadUrl, key}` | 11 |
 
 **Errors** always look like `{ "error": { "code": "NOT_FOUND", "message": "..." } }`, with the matching HTTP status.

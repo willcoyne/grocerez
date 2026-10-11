@@ -1,34 +1,36 @@
 import { Router } from "express";
-import { AddListItemBody, CheckListItemBody, ListItemParams } from "../../contracts/shoppingList.js";
+import { GroupIdParams } from "../../contracts/common.js";
+import { AddListItemBody, CheckListItemBody } from "../../contracts/shoppingList.js";
+import { uid } from "../../middleware/auth.js";
+import { gid } from "../../middleware/requireGroupMember.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { shoppingListService } from "./service.js";
 
-// Membership is enforced by requireGroupMember in app.ts; req.membership is set there.
-export const shoppingListRouter = Router();
-const base = "/groups/:groupId/shopping-list";
+/** Mounted at /groups/:groupId behind requireGroupMember. */
+export const shoppingListRouter = Router({ mergeParams: true });
 
-shoppingListRouter.get(base, async (req, res) => {
-  res.json(await service.list(req.membership.groupId));
+shoppingListRouter.get("/shopping-list", async (req, res) => {
+  res.json(await shoppingListService.list(gid(req)));
 });
 
-shoppingListRouter.post(`${base}/generate`, async (req, res) => {
-  res.json(await service.regenerateNow(req.membership.groupId, req.userId));
+shoppingListRouter.post("/shopping-list/generate", async (req, res) => {
+  res.json(await shoppingListService.generate(gid(req), uid(req)));
 });
 
-shoppingListRouter.post(`${base}/complete`, async (req, res) => {
-  res.json(await service.complete(req.membership.groupId, req.userId));
+shoppingListRouter.post("/shopping-list/complete", async (req, res) => {
+  res.json(await shoppingListService.complete(gid(req), uid(req)));
 });
 
-// Manual add, upsert on (group, item); 200 either way.
-shoppingListRouter.post(base, validate({ body: AddListItemBody }), async (req, res) => {
-  res.json(await service.addManual(req.membership.groupId, req.userId, req.body));
+shoppingListRouter.post("/shopping-list", validate({ body: AddListItemBody }), async (req, res) => {
+  const { row, created } = await shoppingListService.addManual(gid(req), uid(req), req.body);
+  res.status(created ? 201 : 200).json(row);
 });
 
-shoppingListRouter.patch(`${base}/:id`, validate({ params: ListItemParams, body: CheckListItemBody }), async (req, res) => {
-  res.json(await service.check(req.membership.groupId, req.params.id as string, req.userId, req.body));
+shoppingListRouter.patch("/shopping-list/:id", validate({ params: GroupIdParams, body: CheckListItemBody }), async (req, res) => {
+  res.json(await shoppingListService.check(gid(req), uid(req), String(req.params.id), req.body));
 });
 
-shoppingListRouter.delete(`${base}/:id`, validate({ params: ListItemParams }), async (req, res) => {
-  await service.remove(req.membership.groupId, req.params.id as string, req.userId);
+shoppingListRouter.delete("/shopping-list/:id", validate({ params: GroupIdParams }), async (req, res) => {
+  await shoppingListService.remove(gid(req), uid(req), String(req.params.id));
   res.status(204).end();
 });

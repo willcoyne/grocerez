@@ -1,92 +1,59 @@
-import { Allergen } from "../contracts/ai.js";
+import type { Allergen } from "../contracts/dietary.js";
 
-// The one allergen keyword table (backend/08 scan parsing and backend/10 recipe re-check). Keys are the DB `allergen` enum.
-// Whole words with an optional plural, so "eggplant" is not egg and "butternut" is not butter. Compound words and
-// derived foods (buttermilk, crabmeat, pesto, hummus, ...) are listed explicitly.
-// ponytail: keyword match, errs toward flagging; known false positives get a whole-phrase exception in normalize().
-// Swap for ingredient-level data if false positives still annoy users.
-const WHEAT = [
-  "wheat", "flour", "bread", "breadcrumb", "pasta", "spaghetti", "noodle", "couscous", "tortilla", "semolina", "cracker",
-  "panko", "seitan", "durum", "farina", "bulgur", "farro", "spelt", "teriyaki", "soy sauce",
-];
+/**
+ * Deterministic allergen keyword table (backend/08 step 3.4; reused by recipe checks in 10).
+ * Matching is on whole words / phrases in lower-cased text.
+ */
 export const ALLERGEN_KEYWORDS: Record<Allergen, string[]> = {
-  milk: [
-    "milk", "dairy", "cheese", "butter", "cream", "yogurt", "yoghurt", "whey", "casein", "caseinate", "lactose", "ghee",
-    "parmesan", "mozzarella", "cheddar", "ricotta", "feta", "brie", "gouda", "mascarpone", "paneer", "queso", "kefir",
-    "buttermilk", "buttercream", "cheesecake", "milkshake", "custard", "pudding", "alfredo", "bechamel", "tzatziki",
-    "pesto", "nutella",
-  ],
-  eggs: ["egg", "mayonnaise", "mayo", "meringue", "aioli", "eggnog", "custard", "hollandaise", "bearnaise", "carbonara", "albumen", "albumin"],
-  fish: [
-    "fish", "catfish", "swordfish", "salmon", "tuna", "cod", "codfish", "pollock", "tilapia", "anchovy", "anchovies",
-    "sardine", "halibut", "trout", "mackerel", "haddock", "bonito", "dashi", "surimi", "worcestershire", "caesar",
-  ],
-  shellfish: [
-    "shellfish", "shrimp", "prawn", "crab", "crabmeat", "crabcake", "lobster", "langoustine", "crustacean", "mollusc",
-    "mollusk", "clam", "mussel", "oyster", "scallop", "crawfish", "crayfish", "squid", "calamari", "octopus",
-  ],
-  tree_nuts: [
-    "tree nut", "nut", "almond", "walnut", "cashew", "pecan", "pistachio", "hazelnut", "filbert", "macadamia", "pine nut",
-    "brazil nut", "pesto", "nutella", "praline", "marzipan", "frangipane", "gianduja",
-  ],
-  peanuts: ["peanut", "groundnut", "arachis", "satay"],
-  wheat: WHEAT,
-  soy: ["soy", "soya", "soybean", "tofu", "tempeh", "edamame", "miso", "teriyaki", "tamari", "shoyu", "natto"],
-  sesame: ["sesame", "tahini", "tahina", "hummus", "halva", "halvah"],
-  gluten: ["gluten", "barley", "rye", "malt", "triticale", ...WHEAT],
+  milk: ["milk", "dairy", "whey", "casein", "caseinate", "lactose", "butter", "cream", "cheese", "yogurt", "ghee", "buttermilk"],
+  eggs: ["egg", "eggs", "albumin", "mayonnaise", "meringue"],
+  fish: ["fish", "anchovy", "anchovies", "salmon", "tuna", "cod", "tilapia", "sardine", "sardines", "trout", "halibut", "pollock"],
+  shellfish: ["shellfish", "shrimp", "prawn", "prawns", "crab", "lobster", "crayfish", "crustacean", "crustaceans", "mollusc", "molluscs", "clam", "clams", "oyster", "oysters", "mussel", "mussels", "scallop", "scallops"],
+  tree_nuts: ["tree nut", "tree nuts", "almond", "almonds", "walnut", "walnuts", "cashew", "cashews", "pecan", "pecans", "pistachio", "pistachios", "hazelnut", "hazelnuts", "macadamia", "brazil nut", "brazil nuts", "nuts"],
+  peanuts: ["peanut", "peanuts", "groundnut", "groundnuts", "arachis"],
+  wheat: ["wheat", "flour", "semolina", "durum", "spelt", "farina", "couscous", "bulgur"],
+  soy: ["soy", "soya", "soybean", "soybeans", "tofu", "edamame", "miso", "tempeh", "lecithin (soy)"],
+  sesame: ["sesame", "tahini"],
+  gluten: ["gluten", "wheat", "barley", "rye", "malt", "triticale", "spelt", "seitan"],
 };
 
-const PORK = ["pork", "bacon", "ham", "prosciutto", "pancetta", "salami", "pepperoni", "chorizo", "lard", "gelatin", "gelatine"];
-const MEAT = [
-  ...PORK, "meat", "meatball", "meatloaf", "beef", "steak", "brisket", "veal", "lamb", "mutton", "venison", "bison", "sausage",
-  "hot dog", "hamburger", "jerky", "pastrami", "bologna", "chicken", "turkey", "duck", "goose", "quail", "rabbit", "bone broth",
-];
-
-// Diet rules we can check in code: implied allergens plus extra keywords. Keto and low_sodium stay prompt-only.
-export const DIET_EXCLUSIONS: Record<string, Allergen[]> = {
-  vegan: ["milk", "eggs", "fish", "shellfish"],
-  vegetarian: ["fish", "shellfish"],
-  dairy_free: ["milk"],
-  gluten_free: ["gluten", "wheat"],
-  kosher: ["shellfish"],
+/** Open Food Facts tag → allergen ("en:milk", "en:nuts", …). Unknown tags (e.g. en:corn) are ignored. */
+const OFF_TAGS: Record<string, Allergen> = {
+  milk: "milk", eggs: "eggs", fish: "fish", crustaceans: "shellfish", molluscs: "shellfish", nuts: "tree_nuts",
+  peanuts: "peanuts", soybeans: "soy", soy: "soy", "sesame-seeds": "sesame", sesame: "sesame", gluten: "gluten", wheat: "wheat",
 };
-const DIET_KEYWORDS: Record<string, string[]> = {
-  vegan: [...MEAT, "honey"],
-  vegetarian: MEAT,
-  halal: PORK,
-  kosher: PORK,
+
+/** Phrases removed before testing an allergen (they contain a keyword but aren't that allergen). */
+const EXCLUDE: Partial<Record<Allergen, RegExp>> = {
+  milk: /(?<![a-z])((peanut|almond|nut|cocoa|apple|shea|seed|sunflower|cashew) butter|(coconut|almond|oat|soy|soya|rice|cashew) milk|milk thistle|cream of tartar)(?![a-z])/g,
+  tree_nuts: /(?<![a-z])(peanuts?|groundnuts?|nutmeg|coconuts?|donuts?|doughnuts?|butternut)(?![a-z])/g,
+  wheat: /(?<![a-z])(rice|corn|almond|oat|coconut|potato|tapioca|chickpea|buckwheat) flour(?![a-z])|buckwheat/g,
 };
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const wordsRe = (words: string[]) => new RegExp(`\\b(?:${words.map(escape).join("|")})(?:s|es)?\\b`, "i");
-const allergenRe = Object.fromEntries(Object.entries(ALLERGEN_KEYWORDS).map(([a, w]) => [a, wordsRe(w)])) as Record<Allergen, RegExp>;
-const dietRe = Object.fromEntries(Object.entries(DIET_KEYWORDS).map(([d, w]) => [d, wordsRe(w)]));
+const PATTERNS = Object.entries(ALLERGEN_KEYWORDS).map(([allergen, words]) => ({
+  allergen: allergen as Allergen,
+  re: new RegExp(`(?<![a-z])(${words.map(escape).join("|")})(?![a-z])`, "i"),
+}));
 
-function normalize(texts: (string | null | undefined)[]): string {
-  return texts
-    .join("\n")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // béchamel -> bechamel
-    .replace(/\b\w+[- ]free\b/gi, " ") // "dairy-free", "nut free"
-    // Plant "milks"/nut butters are not dairy, but keep the plant word so peanut/soy/almond/nut still match.
-    .replace(/\b(peanut|almond|cashew|sunflower|nut|apple|cocoa|coconut|oat|soy|rice) (?:butter|milk|cream|yogurt)s?\b/gi, "$1")
-    // Gluten-free flours/staples are not wheat; keep the base word so "almond flour" still flags tree nuts.
-    .replace(/\b(rice|almond|coconut|corn|chickpea|potato|tapioca|cassava|buckwheat|oat) (?:flour|noodle|pasta|tortilla)s?\b/gi, "$1")
-    .replace(/\bcreams? of tartar\b/gi, "tartar"); // potassium bitartrate, not dairy
+/** Allergens mentioned in free text ("Contains: Wheat, Milk" / an ingredient list / a recipe ingredient). */
+export function allergensInText(text: string | null | undefined): Allergen[] {
+  if (!text) return [];
+  const t = text.toLowerCase();
+  const found = new Set<Allergen>();
+  for (const { allergen, re } of PATTERNS) {
+    const exclude = EXCLUDE[allergen];
+    if (re.test(exclude ? t.replace(exclude, " ") : t)) found.add(allergen);
+  }
+  return [...found].sort();
 }
 
-/** Allergens from `forbidden` that any of the texts mention, in enum order. */
-export function findAllergens(texts: (string | null | undefined)[], forbidden: Iterable<Allergen> = Allergen.options): Allergen[] {
-  const text = normalize(texts);
-  const want = new Set(forbidden);
-  return Allergen.options.filter((a) => want.has(a) && allergenRe[a].test(text));
-}
-
-/** Every allergen a label/ingredient text mentions (wheat also implies gluten). */
-export const mapAllergens = (text: string | null | undefined): Allergen[] => (text ? findAllergens([text]) : []);
-
-/** Diets from `diets` whose non-allergen rules (meat, pork, honey) the texts break. */
-export function findDietConflicts(texts: string[], diets: Iterable<string>): string[] {
-  const text = normalize(texts);
-  return [...new Set(diets)].filter((d) => dietRe[d]?.test(text));
+export function allergensFromOffTags(tags: string[] | null | undefined): Allergen[] {
+  const out = new Set<Allergen>();
+  for (const tag of tags ?? []) {
+    const key = tag.toLowerCase().replace(/^[a-z]{2}:/, "");
+    const a = OFF_TAGS[key];
+    if (a) out.add(a);
+  }
+  return [...out].sort();
 }

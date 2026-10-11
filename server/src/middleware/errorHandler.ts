@@ -1,35 +1,58 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
-import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { AppError } from "../lib/errors.js";
+import { logger } from "../lib/logger.js";
 
-export const notFound: RequestHandler = (_req, res) => {
-  res.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found" } });
+export const notFoundHandler: RequestHandler = (req, res) => {
+  res.status(404).json({ error: { code: "NOT_FOUND", message: `No route for ${req.method} ${req.path}` } });
 };
 
+function errType(err: unknown): string | undefined {
+  return err && typeof err === "object" && "type" in err ? String((err as { type: unknown }).type) : undefined;
+}
+
+function prismaCode(err: unknown): string | undefined {
+  if (err && typeof err === "object" && "code" in err && typeof (err as { code: unknown }).code === "string") {
+    const code = (err as { code: string }).code;
+    if (/^P\d{4}$/.test(code)) return code;
+  }
+  return undefined;
+}
+
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
-  const send = (status: number, code: string, message: string) =>
-    res.status(status).json({ error: { code, message } });
-
-  if (err instanceof AppError) return send(err.status, err.code, err.message);
+  if (err instanceof AppError) {
+    res.status(err.status).json({
+      error: { code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) },
+    });
+    return;
+  }
   if (err instanceof ZodError) {
-    const message = err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
-    return send(400, "VALIDATION_ERROR", message);
+    res.status(400).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Request is invalid",
+        details: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      },
+    });
+    return;
   }
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-    return send(409, "CONFLICT", "A record with these values already exists");
+  if (errType(err) === "entity.parse.failed") {
+    res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Body is not valid JSON" } });
+    return;
   }
-  // Row deleted between the auth/membership check and the write (e.g. concurrent DELETE /me).
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
-    return send(404, "NOT_FOUND", "Record not found");
+  if (errType(err) === "entity.too.large") {
+    res.status(413).json({ error: { code: "PAYLOAD_TOO_LARGE", message: "Body is too large" } });
+    return;
   }
-  // Client errors raised by express.json (malformed JSON, body too large).
-  if (err?.expose && typeof err.status === "number" && err.status < 500) {
-    if (err.type === "entity.parse.failed") return send(400, "VALIDATION_ERROR", "Malformed JSON body");
-    if (err.status === 413) return send(413, "PAYLOAD_TOO_LARGE", "Request body too large");
-    return send(err.status, "BAD_REQUEST", err.message);
+  const pc = prismaCode(err);
+  if (pc === "P2002") {
+    res.status(409).json({ error: { code: "CONFLICT", message: "That already exists" } });
+    return;
   }
-
-  req.log.error({ err }, "unhandled error");
-  return send(500, "INTERNAL", "Internal server error");
+  if (pc === "P2025") {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Not found" } });
+    return;
+  }
+  logger.error({ err, method: req.method, path: req.path }, "unhandled error");
+  res.status(500).json({ error: { code: "INTERNAL", message: "Something went wrong" } });
 };

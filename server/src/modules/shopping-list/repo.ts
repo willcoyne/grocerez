@@ -1,125 +1,42 @@
-import { Prisma } from "@prisma/client";
-import { prisma } from "../../db.js";
-import { orNull } from "../../lib/errors.js";
-import type { Item } from "../../contracts/items.js";
-import type { AllergenFlag, ShoppingListItem } from "../../contracts/shoppingList.js";
+import type { Db, Tx } from "../../db.js";
 
-type Db = Prisma.TransactionClient | typeof prisma;
-type Tx = Prisma.TransactionClient;
+export const listInclude = { item: { select: { id: true, name: true, category: true } } } as const;
 
-const itemSelect = { id: true, name: true, category: true, defaultAllergens: true, shelfLifeDays: true } as const;
-const person = { select: { id: true, displayName: true } } as const;
-const select = {
-  id: true,
-  groupId: true,
-  reason: true,
-  wantedBy: true,
-  quantityText: true,
-  allergenFlags: true,
-  checked: true,
-  checkedAt: true,
-  scannedProductId: true,
-  createdAt: true,
-  updatedAt: true,
-  item: { select: itemSelect },
-  checker: person,
-  adder: person,
-} as const;
+/** Every function takes groupId and filters by it. */
+export const shoppingListRepo = {
+  list: (db: Db, groupId: string) => db.shoppingListItem.findMany({ where: { groupId }, include: listInclude }),
 
-// Store-aisle order (backend/06 step 2); uncategorized items go last with "other".
-const AISLE = ["produce", "bakery", "meat", "seafood", "dairy", "frozen", "pantry", "snacks", "beverages", "household", "other"];
-const aisle = (c: string | null) => AISLE.indexOf(c ?? "other");
-const toPerson = (u: { id: string; displayName: string } | null) => (u ? { userId: u.id, displayName: u.displayName } : null);
+  find: (db: Db, groupId: string, id: string) =>
+    db.shoppingListItem.findFirst({ where: { id, groupId }, include: listInclude }),
 
-// Every function is scoped by groupId.
-export const listRepo = {
-  // Mapped API rows, sorted by aisle then name.
-  load: async (db: Db, groupId: string, id?: string): Promise<ShoppingListItem[]> => {
-    const rows = await db.shoppingListItem.findMany({ where: { groupId, id }, select });
-    // Names are resolved live (wantedBy and allergen flags), so a PATCH /me rename shows up without a regenerate.
-    const flagsOf = (r: (typeof rows)[number]) => r.allergenFlags as AllergenFlag[];
-    const ids = [...new Set(rows.flatMap((r) => [...r.wantedBy, ...flagsOf(r).map((f) => f.userId)]))];
-    const names = new Map(
-      (await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true } })).map((u) => [u.id, u]),
-    );
-    return rows
-      .map(({ item, checker, adder, wantedBy, allergenFlags, checkedAt, createdAt, updatedAt, ...r }) => ({
-        ...r,
-        item: item as Item,
-        wantedBy: wantedBy.flatMap((u) => (names.has(u) ? [toPerson(names.get(u)!)!] : [])),
-        allergenFlags: (allergenFlags as AllergenFlag[]).map((f) => ({ ...f, displayName: names.get(f.userId)?.displayName ?? f.displayName })),
-        checkedBy: toPerson(checker),
-        checkedAt: checkedAt?.toISOString() ?? null,
-        addedBy: toPerson(adder),
-        createdAt: createdAt.toISOString(),
-        updatedAt: updatedAt.toISOString(),
-      }))
-      .sort((a, b) => aisle(a.item.category) - aisle(b.item.category) || a.item.name.localeCompare(b.item.name));
-  },
+  findByItem: (db: Db, groupId: string, itemId: string) =>
+    db.shoppingListItem.findUnique({ where: { groupId_itemId: { groupId, itemId } } }),
 
-  // --- generate() inputs ---
-  preferences: (tx: Tx, groupId: string) =>
-    tx.preference.findMany({
+  memberNames: async (db: Db, groupId: string) => {
+    const rows = await db.groupMember.findMany({
       where: { groupId },
-      select: { userId: true, itemId: true, quantityText: true },
-      orderBy: [{ createdAt: "asc" }, { userId: "asc" }],
-    }),
-
-  members: async (tx: Tx, groupId: string) =>
-    (
-      await tx.groupMember.findMany({
-        where: { groupId },
-        orderBy: [{ joinedAt: "asc" }, { userId: "asc" }],
-        select: { user: { select: { id: true, displayName: true, allergens: { select: { allergen: true } } } } },
-      })
-    ).map(({ user }) => ({ id: user.id, displayName: user.displayName, allergens: user.allergens.map((a) => a.allergen) })),
-
-  rows: (tx: Tx, groupId: string) =>
-    tx.shoppingListItem.findMany({
-      where: { groupId },
-      select: {
-        id: true,
-        itemId: true,
-        reason: true,
-        checked: true,
-        wantedBy: true,
-        quantityText: true,
-        allergenFlags: true,
-        scannedProduct: { select: { allergens: true, mayContain: true } },
-      },
-    }),
-
-  // Catalog allergens per item; generate() uses the scanned product's allergens ∪ may_contain instead when a row has one.
-  itemAllergens: async (tx: Tx, itemIds: string[]) =>
-    new Map(
-      (await tx.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, defaultAllergens: true } })).map((i) => [
-        i.id,
-        i.defaultAllergens as string[],
-      ]),
-    ),
-
-  // --- writes ---
-  upsertManual: (tx: Tx, groupId: string, itemId: string, addedBy: string, quantityText: string | null | undefined) =>
-    tx.shoppingListItem.upsert({
-      where: { groupId_itemId: { groupId, itemId } },
-      create: { groupId, itemId, reason: "manual", addedBy, quantityText },
-      update: { reason: "manual", addedBy, quantityText },
-      select: { id: true },
-    }),
-
-  update: (groupId: string, id: string, data: Prisma.ShoppingListItemUncheckedUpdateInput, db: Db = prisma) =>
-    orNull(db.shoppingListItem.update({ where: { id, groupId }, data, select: { id: true } })),
-
-  find: (tx: Tx, groupId: string, id: string) =>
-    tx.shoppingListItem.findFirst({ where: { id, groupId }, select: { id: true, itemId: true, reason: true } }),
-
-  // Locks the checked rows, so a concurrent un-check waits for finish trip and is re-evaluated after it.
-  lockChecked: async (tx: Tx, groupId: string) => {
-    const locked = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM shopping_list_items WHERE group_id = ${groupId}::uuid AND checked FOR UPDATE`;
-    return tx.shoppingListItem.findMany({
-      where: { groupId, id: { in: locked.map((r) => r.id) } },
-      select: { id: true, itemId: true, scannedProductId: true, item: { select: itemSelect } },
+      select: { user: { select: { id: true, displayName: true } } },
     });
+    return new Map(rows.map((r) => [r.user.id, r.user.displayName]));
   },
+
+  /** Manual add ("we're out of X"): upsert with reason 'manual'. */
+  upsertManual: (db: Db, groupId: string, itemId: string, userId: string, quantityText: string | null | undefined) =>
+    db.shoppingListItem.upsert({
+      where: { groupId_itemId: { groupId, itemId } },
+      create: { groupId, itemId, reason: "manual", quantityText: quantityText ?? null, addedBy: userId },
+      update: { reason: "manual", ...(quantityText !== undefined ? { quantityText } : {}) },
+      include: listInclude,
+    }),
+
+  setChecked: (db: Db, groupId: string, id: string, data: { checked: boolean; checkedBy: string | null; scannedProductId?: string | null }) =>
+    db.shoppingListItem.update({ where: { id, groupId }, data, include: listInclude }),
+
+  delete: (db: Db, groupId: string, id: string) => db.shoppingListItem.delete({ where: { id, groupId } }),
+
+  checkedRows: (tx: Tx, groupId: string) =>
+    tx.shoppingListItem.findMany({
+      where: { groupId, checked: true },
+      include: { item: { select: { id: true, name: true, category: true, shelfLifeDays: true } } },
+    }),
 };

@@ -1,131 +1,203 @@
 import { prisma } from "../../db.js";
-import { AppError } from "../../lib/errors.js";
-import { sendInviteEmail } from "../../lib/email.js";
-import { closeGroupRoom, emitGroup, emitUser, kickFromGroup } from "../../lib/realtime.js";
-import type { GroupRole } from "@prisma/client";
 import type { Group, GroupDetail, Invite, MyInvite } from "../../contracts/groups.js";
-import { toUser } from "../users/service.js";
-import { generate } from "../shopping-list/service.js";
+import { sendInviteEmail } from "../../lib/email.js";
+import { images } from "../../lib/images.js";
+import { AppError, badRequest, conflict, forbidden, notFound } from "../../lib/errors.js";
+import { emitGroup, emitUser, evictFromGroupRoom } from "../../lib/realtime.js";
+import { lockGroup, regenerate } from "../shopping-list/engine.js";
 import { groupsRepo } from "./repo.js";
+
+type GroupRow = { id: string; name: string; timeZone: string; createdAt: Date; _count: { members: number } };
+type InviteRow = {
+  id: string; groupId: string; email: string; status: Invite["status"]; createdAt: Date; respondedAt: Date | null;
+  inviter: { id: string; displayName: string } | null;
+};
+
+const toGroup = (g: GroupRow, role: Group["role"]): Group => ({
+  id: g.id, name: g.name, role, memberCount: g._count.members, timeZone: g.timeZone, createdAt: g.createdAt.toISOString(),
+});
+
+const toInvite = (i: InviteRow): Invite => ({
+  id: i.id,
+  groupId: i.groupId,
+  email: i.email,
+  status: i.status,
+  invitedBy: i.inviter ? { id: i.inviter.id, displayName: i.inviter.displayName } : null,
+  createdAt: i.createdAt.toISOString(),
+  respondedAt: i.respondedAt?.toISOString() ?? null,
+});
 
 const inviteNotFound = () => new AppError(404, "INVITE_NOT_FOUND", "Invite not found");
 
-const userByEmail = (email: string) => prisma.user.findUnique({ where: { email }, select: { id: true } });
-const myEmail = async (userId: string) =>
-  (await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })).email;
-
-export const listGroups = (userId: string) => groupsRepo.listForUser(userId);
-
-export const createGroup = (userId: string, name: string) => groupsRepo.create(name, userId);
-
-export async function getGroup(groupId: string, role: GroupRole): Promise<GroupDetail> {
-  const [group, rows] = await Promise.all([groupsRepo.get(groupId, role), groupsRepo.members(groupId)]);
-  const members = await Promise.all(rows.map(async (r) => {
-    const { id, displayName, email, avatarUrl } = await toUser(r.user); // single User mapping (avatar URLs, backend/11)
-    return { id, displayName, email, avatarUrl, role: r.role };
-  }));
-  return { ...group, members };
+async function callerEmail(userId: string) {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!u) throw new AppError(401, "UNAUTHENTICATED", "Sign in required");
+  return u.email;
 }
 
-export async function renameGroup(groupId: string, role: GroupRole, name: string, by: string): Promise<Group> {
-  await groupsRepo.rename(groupId, name);
-  emitGroup(groupId, "group:changed", by);
-  return groupsRepo.get(groupId, role);
-}
-
-export async function deleteGroup(groupId: string, by: string) {
-  await groupsRepo.delete(groupId);
-  emitGroup(groupId, "group:changed", by);
-  closeGroupRoom(groupId);
-}
-
-// --- invites ---
-
-// Same response whether or not the email has an account (no user enumeration).
-export async function invite(groupId: string, email: string, by: string): Promise<Invite> {
-  if (await groupsRepo.isMemberByEmail(groupId, email)) throw new AppError(409, "ALREADY_MEMBER", "That person is already a member");
-  const invite = await groupsRepo.upsertInvite(groupId, email, by);
-
-  const invitee = await userByEmail(email);
-  if (invitee) emitUser(invitee.id, "invites:changed");
-  emitGroup(groupId, "group:changed", by);
-
-  const [inviter, group] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: by }, select: { displayName: true } }),
-    prisma.group.findUniqueOrThrow({ where: { id: groupId }, select: { name: true } }),
-  ]);
-  void sendInviteEmail(email, inviter.displayName, group.name);
-  return invite;
-}
-
-export const listInvites = (groupId: string, all: boolean) => groupsRepo.listInvites(groupId, all);
-
-export async function revokeInvite(groupId: string, inviteId: string, userId: string, role: GroupRole) {
-  const invite = await groupsRepo.findInvite(groupId, inviteId);
-  if (!invite) throw inviteNotFound();
-  if (role !== "owner" && invite.invitedBy !== userId) {
-    throw new AppError(403, "FORBIDDEN", "Only the owner or the person who sent the invite can revoke it");
-  }
-  if (!(await groupsRepo.setInviteStatus({ id: inviteId, groupId }, "pending", "revoked"))) {
-    throw new AppError(409, "INVITE_NOT_PENDING", "Only pending invites can be revoked");
-  }
-  const invitee = await userByEmail(invite.email);
-  if (invitee) emitUser(invitee.id, "invites:changed");
-  emitGroup(groupId, "group:changed", userId);
-}
-
-export async function myInvites(userId: string): Promise<MyInvite[]> {
-  return groupsRepo.myInvites(await myEmail(userId));
-}
-
-// users.email is Google's verified email (backend/02), so matching on it means only that Google account can accept.
-export async function acceptInvite(inviteId: string, userId: string): Promise<Group> {
-  const email = await myEmail(userId);
-  const group = await prisma.$transaction(async (tx) => {
-    const found = await groupsRepo.pendingInviteForEmail(inviteId, email, tx);
-    if (!found) throw inviteNotFound();
-    await groupsRepo.lock(tx, found.groupId);
-    // Re-checked under the lock: a concurrent revoke / member removal wins.
-    if (!(await groupsRepo.setInviteStatus({ id: inviteId, email }, "pending", "accepted", tx))) throw inviteNotFound();
-    await tx.groupMember.createMany({ data: [{ groupId: found.groupId, userId }], skipDuplicates: true });
-    await generate(found.groupId, tx); // the new member's allergens get flagged
-    return groupsRepo.get(found.groupId, (await groupsRepo.role(found.groupId, userId, tx))!, tx);
-  });
-  emitGroup(group.id, "group:changed", userId);
-  emitGroup(group.id, "shopping-list:changed", userId);
-  emitUser(userId, "invites:changed");
-  return group;
-}
-
-export async function declineInvite(inviteId: string, userId: string) {
-  if (!(await groupsRepo.setInviteStatus({ id: inviteId, email: await myEmail(userId) }, "pending", "declined"))) {
-    throw inviteNotFound();
-  }
-  emitUser(userId, "invites:changed");
-}
-
-// --- membership ---
-
-async function dropMember(groupId: string, userId: string, by: string, revokeInvite: boolean) {
-  const { groupDeleted } = await prisma.$transaction(async (tx) => {
-    await groupsRepo.lock(tx, groupId);
-    if (revokeInvite) await groupsRepo.revokeByEmail(tx, groupId, await myEmail(userId));
-    const res = await groupsRepo.removeMember(tx, groupId, userId);
-    if (!res.groupDeleted) await generate(groupId, tx); // their preferences and allergen flags are gone
-    return res;
-  });
-  await kickFromGroup(groupId, userId);
+/** After a member leaves/is removed: tell the group, refresh the removed user's group list, drop their sockets. */
+async function afterMemberGone(groupId: string, userId: string, by: string, groupDeleted: boolean) {
   if (!groupDeleted) {
     emitGroup(groupId, "group:changed", by);
+    emitGroup(groupId, "preferences:changed", by);
     emitGroup(groupId, "shopping-list:changed", by);
   }
-  emitUser(userId, "group:changed", { groupId, by }); // their own group list changed too
+  emitUser(userId, "group:changed", { groupId, by });
+  await evictFromGroupRoom(groupId, userId);
 }
 
-export const leaveGroup = (groupId: string, userId: string) => dropMember(groupId, userId, userId, false);
+export const groupsService = {
+  async create(userId: string, name: string, timeZone?: string): Promise<Group> {
+    const g = await prisma.$transaction((tx) => groupsRepo.create(tx, name, userId, timeZone));
+    return toGroup(g, "owner");
+  },
 
-export async function removeMember(groupId: string, targetId: string, ownerId: string) {
-  if (targetId === ownerId) throw new AppError(400, "VALIDATION_ERROR", "Use leave to remove yourself");
-  if (!(await groupsRepo.role(groupId, targetId))) throw new AppError(404, "NOT_FOUND", "Member not found");
-  await dropMember(groupId, targetId, ownerId, true);
-}
+  async list(userId: string): Promise<Group[]> {
+    const rows = await groupsRepo.listForUser(prisma, userId);
+    return rows.map((m) => toGroup(m.group, m.role));
+  },
+
+  async get(groupId: string, role: Group["role"]): Promise<GroupDetail> {
+    const g = await groupsRepo.getWithMembers(prisma, groupId);
+    if (!g) throw notFound("Group");
+    return {
+      ...toGroup(g, role),
+      members: await Promise.all(
+        g.members.map(async (m) => ({
+          id: m.user.id,
+          displayName: m.user.displayName,
+          email: m.user.email,
+          avatarUrl: (await images.urlFor(m.user.avatarS3Key)) ?? m.user.avatarUrl,
+          role: m.role,
+          joinedAt: m.joinedAt.toISOString(),
+        })),
+      ),
+    };
+  },
+
+  /** PATCH /groups/:groupId {name?, timeZone?} (owner only). */
+  async rename(groupId: string, data: { name?: string; timeZone?: string }, by: string): Promise<Group> {
+    const g = await groupsRepo.rename(prisma, groupId, data);
+    emitGroup(groupId, "group:changed", by);
+    return toGroup(g, "owner");
+  },
+
+  async remove(groupId: string, by: string): Promise<void> {
+    const memberIds = await groupsRepo.memberIds(prisma, groupId);
+    await groupsRepo.delete(prisma, groupId);
+    emitGroup(groupId, "group:changed", by);
+    for (const id of memberIds) emitUser(id, "group:changed", { groupId, by });
+    await evictFromGroupRoom(groupId);
+  },
+
+  // ─── Invites ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Any member can invite. The response is identical whether or not the email has an account
+   * (no account-enumeration through invites).
+   */
+  async invite(groupId: string, inviterId: string, email: string): Promise<Invite> {
+    const { invite, inviteeId, inviterName, groupName } = await prisma.$transaction(async (tx) => {
+      if (await groupsRepo.isMemberByEmail(tx, groupId, email)) {
+        throw conflict("That person is already a member of this group", "ALREADY_MEMBER");
+      }
+      const invite = await groupsRepo.upsertInvite(tx, groupId, email, inviterId);
+      const invitee = await tx.user.findUnique({ where: { email }, select: { id: true } });
+      const group = await tx.group.findUniqueOrThrow({ where: { id: groupId }, select: { name: true } });
+      return { invite, inviteeId: invitee?.id ?? null, inviterName: invite.inviter?.displayName ?? "Someone", groupName: group.name };
+    });
+    if (inviteeId) emitUser(inviteeId, "invites:changed", { groupId });
+    sendInviteEmail(email, inviterName, groupName);
+    return toInvite(invite);
+  },
+
+  async listInvites(groupId: string, all: boolean): Promise<Invite[]> {
+    return (await groupsRepo.listInvites(prisma, groupId, all)).map(toInvite);
+  },
+
+  /** Owner or the person who sent it; pending invites only. */
+  async revokeInvite(groupId: string, inviteId: string, userId: string, role: Group["role"]): Promise<void> {
+    const invite = await groupsRepo.findInviteInGroup(prisma, groupId, inviteId);
+    if (!invite) throw inviteNotFound();
+    if (role !== "owner" && invite.invitedBy !== userId) throw forbidden("Only the owner or the inviter can revoke this invite");
+    if (invite.status !== "pending") throw conflict("Only pending invites can be revoked", "INVITE_NOT_PENDING");
+    const changed = await groupsRepo.respondIfPending(prisma, inviteId, "revoked");
+    if (!changed) throw conflict("Only pending invites can be revoked", "INVITE_NOT_PENDING");
+    const invitee = await prisma.user.findUnique({ where: { email: invite.email }, select: { id: true } });
+    if (invitee) emitUser(invitee.id, "invites:changed", { groupId });
+  },
+
+  async myInvites(userId: string): Promise<MyInvite[]> {
+    const email = await callerEmail(userId);
+    const rows = await groupsRepo.myPendingInvites(prisma, email);
+    return rows.map((r) => ({
+      ...toInvite(r),
+      group: { id: r.group.id, name: r.group.name, memberCount: r.group._count.members },
+    }));
+  },
+
+  /** Only the Google-verified email the invite was sent to can accept. Anything else: 404 INVITE_NOT_FOUND. */
+  async accept(inviteId: string, userId: string): Promise<Group> {
+    const email = await callerEmail(userId);
+    const group = await prisma.$transaction(async (tx) => {
+      const invite = await groupsRepo.findInvite(tx, inviteId);
+      if (!invite || invite.status !== "pending" || invite.email !== email) throw inviteNotFound();
+      await lockGroup(tx, invite.groupId);
+      await groupsRepo.addMember(tx, invite.groupId, userId);
+      if (!(await groupsRepo.respondIfPending(tx, inviteId, "accepted"))) throw inviteNotFound();
+      // The new member's allergens change the list's allergen flags.
+      await regenerate(tx, invite.groupId);
+      const membership = await groupsRepo.findMembership(tx, invite.groupId, userId);
+      const g = await tx.group.findUniqueOrThrow({
+        where: { id: invite.groupId },
+        include: { _count: { select: { members: true } } },
+      });
+      return toGroup(g, membership?.role ?? "member");
+    });
+    emitGroup(group.id, "group:changed", userId);
+    emitGroup(group.id, "shopping-list:changed", userId);
+    emitUser(userId, "invites:changed", { groupId: group.id });
+    return group;
+  },
+
+  async decline(inviteId: string, userId: string): Promise<void> {
+    const email = await callerEmail(userId);
+    const invite = await groupsRepo.findInvite(prisma, inviteId);
+    if (!invite || invite.status !== "pending" || invite.email !== email) throw inviteNotFound();
+    if (!(await groupsRepo.respondIfPending(prisma, inviteId, "declined"))) throw inviteNotFound();
+    emitUser(userId, "invites:changed", { groupId: invite.groupId });
+  },
+
+  /**
+   * Leave: delete my preferences in the group, then my membership (one transaction). The owner_handoff trigger
+   * promotes the longest-standing member if I was the last owner; if nobody is left, the group is deleted.
+   */
+  async leave(groupId: string, userId: string): Promise<void> {
+    const deleted = await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
+      await groupsRepo.removeMember(tx, groupId, userId);
+      const gone = await groupsRepo.deleteIfEmpty(tx, groupId);
+      if (!gone) await regenerate(tx, groupId);
+      return gone;
+    });
+    await afterMemberGone(groupId, userId, userId, deleted);
+  },
+
+  /** Owner only, not yourself. Same cleanup as leave, and their invite row is revoked so it can't be re-accepted. */
+  async removeMember(groupId: string, ownerId: string, targetId: string): Promise<void> {
+    if (targetId === ownerId) throw badRequest("Use leave to remove yourself", "CANNOT_REMOVE_SELF");
+    await prisma.$transaction(async (tx) => {
+      await lockGroup(tx, groupId);
+      const target = await tx.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId: targetId } },
+        include: { user: { select: { email: true } } },
+      });
+      if (!target) throw notFound("Member");
+      await groupsRepo.removeMember(tx, groupId, targetId);
+      await groupsRepo.revokeForEmail(tx, groupId, target.user.email);
+      await regenerate(tx, groupId);
+    });
+    await afterMemberGone(groupId, targetId, ownerId, false);
+    emitUser(targetId, "invites:changed", { groupId });
+  },
+};

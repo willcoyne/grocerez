@@ -1,15 +1,23 @@
 import { z } from "zod";
 
-export const ErrorResponse = z.object({
-  error: z.object({ code: z.string(), message: z.string() }),
+export const Uuid = z.uuid();
+export const IdParams = z.object({ id: Uuid });
+export const GroupParams = z.object({ groupId: Uuid });
+export const GroupIdParams = z.object({ groupId: Uuid, id: Uuid });
+
+/** Standard error body: { error: { code, message, details? } }. */
+export const ErrorBody = z.object({
+  error: z.object({ code: z.string(), message: z.string(), details: z.unknown().optional() }),
 });
-export type ErrorResponse = z.infer<typeof ErrorResponse>;
+export type ErrorBody = z.infer<typeof ErrorBody>;
 
-// A name people see in lists (display names, group names). Must have at least one visible character: .trim() leaves
-// zero-width and bidi-control (format, \p{Cf}) characters, so a name of only those would render blank or spoofed.
-// They're rejected only when nothing else is there, so emoji ZWJ sequences still work.
-export const visibleName = (max: number) =>
-  z.string().trim().min(1).max(max).refine((s) => /[^\p{Cf}\p{Z}\s]/u.test(s), "must contain visible characters");
+/** Dates are ISO-8601 strings on the wire. Calendar dates (expiresAt) are YYYY-MM-DD. */
+export const IsoDateTime = z.string();
+export const CalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
 
-export const HealthResponse = z.object({ ok: z.literal(true) });
-export type HealthResponse = z.infer<typeof HealthResponse>;
+/** Item categories in store-aisle order (the shopping list sort order). */
+export const CATEGORIES = [
+  "produce", "bakery", "meat", "seafood", "dairy", "frozen", "pantry", "snacks", "beverages", "household", "other",
+] as const;
+export const Category = z.enum(CATEGORIES);
+export type Category = z.infer<typeof Category>;

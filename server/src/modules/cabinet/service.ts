@@ -1,95 +1,124 @@
-import type { CabinetItem, CabinetQuery, CreateCabinetBody, UpdateCabinetBody } from "../../contracts/cabinet.js";
-import { AppError } from "../../lib/errors.js";
-import { estimateExpiration } from "../../lib/expiration.js";
+import { prisma } from "../../db.js";
+import type { AddCabinetBody, CabinetItem, UpdateCabinetBody } from "../../contracts/cabinet.js";
+import { estimateExpiration, fromCalendarDate, groupTimeZone, toCalendarDate } from "../../lib/expiration.js";
+import { uploadKeyPattern } from "../../contracts/uploads.js";
+import { badRequest, notFound } from "../../lib/errors.js";
+import { images } from "../../lib/images.js";
 import { emitGroup } from "../../lib/realtime.js";
-import { presignGet } from "../../lib/s3.js";
-import { itemsRepo } from "../items/repo.js";
-import { recallsRepo } from "../recalls/repo.js";
-import { generate, inListTx } from "../shopping-list/service.js";
-import { cabinetRepo, type CabinetRow, type CabinetWrite } from "./repo.js";
+import { withRegeneration } from "../shopping-list/engine.js";
+import { cabinetRepo } from "./repo.js";
 
-const notFound = () => new AppError(404, "CABINET_ITEM_NOT_FOUND", "Cabinet item not found");
-// A date set by hand (null clears it, and its source).
-const manualExpiry = (d: string | null): CabinetWrite =>
-  d ? { expiresAt: new Date(`${d}T00:00:00Z`), expirationSource: "manual" } : { expiresAt: null, expirationSource: null };
+type Row = NonNullable<Awaited<ReturnType<typeof cabinetRepo.find>>>;
 
-export async function toCabinetItem({ photoKey, expiresAt, purchasedAt, createdAt, updatedAt, product, ...row }: CabinetRow): Promise<CabinetItem> {
+export async function toCabinetItem(c: Row): Promise<CabinetItem> {
   return {
-    ...row,
-    product: product && { brand: product.brand, imageUrl: product.imageS3Key ? await presignGet(product.imageS3Key) : null },
-    location: row.location as CabinetItem["location"], // CHECK-constrained
-    expiresAt: expiresAt ? expiresAt.toISOString().slice(0, 10) : null,
-    purchasedAt: purchasedAt?.toISOString() ?? null,
-    photoUrl: photoKey ? await presignGet(photoKey) : null,
-    createdAt: createdAt.toISOString(),
-    updatedAt: updatedAt.toISOString(),
+    id: c.id,
+    groupId: c.groupId,
+    itemId: c.itemId,
+    item: { id: c.item.id, name: c.item.name, category: c.item.category },
+    product: c.product
+      ? { id: c.product.id, brand: c.product.brand, name: c.product.name, imageUrl: await images.urlFor(c.product.imageS3Key) }
+      : null,
+    status: c.status,
+    quantityText: c.quantityText,
+    location: c.location as CabinetItem["location"],
+    purchasedAt: c.purchasedAt?.toISOString() ?? null,
+    expiresAt: toCalendarDate(c.expiresAt),
+    expirationSource: c.expirationSource,
+    photoUrl: await images.urlFor(c.photoS3Key),
+    addedBy: c.addedBy,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
   };
 }
 
-function emit(groupId: string, userId: string, regenerated: boolean) {
-  emitGroup(groupId, "cabinet:changed", userId);
-  if (regenerated) emitGroup(groupId, "shopping-list:changed", userId);
-}
+/** Hook for recall matching (09): called after an item is added to a cabinet. Set by the recalls module. */
+export const cabinetHooks = {
+  afterAdd: async (_groupId: string, _cabinetItemId: string): Promise<void> => {},
+};
 
-export const list = async (groupId: string, query: CabinetQuery) =>
-  Promise.all((await cabinetRepo.list(groupId, query)).map(toCabinetItem));
+export const cabinetService = {
+  async list(groupId: string, filter: { location?: string; status?: "in_stock" | "running_low" }): Promise<CabinetItem[]> {
+    return Promise.all((await cabinetRepo.list(prisma, groupId, filter)).map(toCabinetItem));
+  },
 
-// Manual "map out cabinet". Adding means we have it: status goes (back) to in_stock, so the list regenerates.
-export async function add(groupId: string, userId: string, { itemId, expiresAt, ...body }: CreateCabinetBody): Promise<CabinetItem> {
-  const item = await itemsRepo.find(itemId);
-  if (!item) throw new AppError(404, "ITEM_NOT_FOUND", "Item not found");
-  const est = estimateExpiration(item, new Date());
-  const expiry: CabinetWrite =
-    expiresAt === undefined ? { expiresAt: est, expirationSource: est ? "estimated" : null } : manualExpiry(expiresAt);
-  const update: CabinetWrite = { ...body, status: "in_stock", ...(expiresAt !== undefined && expiry) };
-  const row = await inListTx(groupId, async (tx) => {
-    const row = await cabinetRepo.upsert(groupId, itemId, userId, { ...body, ...expiry }, update, tx);
-    await generate(groupId, tx);
-    await recallsRepo.match({ cabinetItemIds: [row.id] }, tx); // backend/09: catches older recalls; cabinet:changed below
-    return row;
-  });
-  emit(groupId, userId, true);
-  return toCabinetItem(row);
-}
+  /**
+   * Manual "map out the cabinet": upsert on (group, item), status in_stock. Missing expiresAt → estimate
+   * (expiration_source 'estimated'), unless the existing row already has a date. Regenerates the list.
+   */
+  async add(groupId: string, userId: string, body: AddCabinetBody): Promise<{ row: CabinetItem; created: boolean }> {
+    const item = await prisma.item.findUnique({ where: { id: body.itemId } });
+    if (!item) throw notFound("Item");
+    const timeZone = await groupTimeZone(prisma, groupId);
+    const { result } = await withRegeneration(groupId, userId, ["cabinet:changed"], async (tx) => {
+      const existing = await cabinetRepo.findByItem(tx, groupId, body.itemId);
+      const expiry = body.expiresAt
+        ? { expiresAt: fromCalendarDate(body.expiresAt), expirationSource: "manual" as const }
+        : existing?.expiresAt
+          ? {}
+          : (() => {
+              const d = estimateExpiration(item, new Date(), timeZone);
+              return d ? { expiresAt: d, expirationSource: "estimated" as const } : {};
+            })();
+      const row = existing
+        ? await cabinetRepo.update(tx, groupId, existing.id, {
+            status: "in_stock",
+            ...(body.location !== undefined ? { location: body.location } : {}),
+            ...(body.quantityText !== undefined ? { quantityText: body.quantityText } : {}),
+            ...expiry,
+          })
+        : await cabinetRepo.create(tx, {
+            groupId,
+            itemId: body.itemId,
+            status: "in_stock",
+            location: body.location ?? null,
+            quantityText: body.quantityText ?? null,
+            addedBy: userId,
+            ...expiry,
+          });
+      return { row, created: !existing };
+    });
+    await cabinetHooks.afterAdd(groupId, result.row.id);
+    return { row: await toCabinetItem(result.row), created: result.created };
+  },
 
-export async function update(groupId: string, id: string, userId: string, body: UpdateCabinetBody): Promise<CabinetItem> {
-  const { expiresAt, photoKey, ...rest } = body;
-  // Exactly the shape /uploads/presign issues to this caller, so nobody can attach another user's object.
-  const ownKey = new RegExp(`^item-photo/${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`);
-  if (photoKey != null && !ownKey.test(photoKey)) {
-    throw new AppError(400, "VALIDATION_ERROR", "photoKey must be an item-photo key issued to you by /uploads/presign");
-  }
-  const data: CabinetWrite = { ...rest, photoKey, ...(expiresAt !== undefined && manualExpiry(expiresAt)) };
+  /** running_low ↔ in_stock regenerates the list; a hand-set expiresAt becomes 'manual'; null clears it. */
+  async update(groupId: string, userId: string, id: string, body: UpdateCabinetBody): Promise<CabinetItem> {
+    if (!(await cabinetRepo.find(prisma, groupId, id))) throw notFound("Cabinet item");
+    if (body.photoKey && !uploadKeyPattern("item-photo", userId).test(body.photoKey)) {
+      throw badRequest("photoKey must be a key from POST /uploads/presign (purpose item-photo)", "INVALID_UPLOAD_KEY");
+    }
+    const { result } = await withRegeneration(groupId, userId, ["cabinet:changed"], (tx) =>
+      cabinetRepo.update(tx, groupId, id, {
+        ...(body.photoKey !== undefined ? { photoS3Key: body.photoKey } : {}),
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.location !== undefined ? { location: body.location } : {}),
+        ...(body.quantityText !== undefined ? { quantityText: body.quantityText } : {}),
+        ...(body.expiresAt === null
+          ? { expiresAt: null, expirationSource: null }
+          : body.expiresAt !== undefined
+            ? { expiresAt: fromCalendarDate(body.expiresAt), expirationSource: "manual" }
+            : {}),
+      }),
+    );
+    return toCabinetItem(result);
+  },
 
-  const regenerated = body.status !== undefined; // in_stock <-> running_low changes the "have" set
-  const row = await inListTx(groupId, async (tx) => {
-    const row = await cabinetRepo.update(groupId, id, data, tx);
-    if (row && regenerated) await generate(groupId, tx);
-    return row;
-  });
-  if (!row) throw notFound();
-  emit(groupId, userId, regenerated);
-  return toCabinetItem(row);
-}
+  /** Ran out: delete the row; if anyone wants the item it comes back on the list (reason 'preference'). One transaction. */
+  async ranOut(groupId: string, userId: string, id: string): Promise<{ requeued: boolean }> {
+    const row = await cabinetRepo.find(prisma, groupId, id);
+    if (!row) throw notFound("Cabinet item");
+    const { result } = await withRegeneration(groupId, userId, ["cabinet:changed"], async (tx) => {
+      await cabinetRepo.delete(tx, groupId, id);
+      return cabinetRepo.isPreferred(tx, groupId, row.itemId);
+    });
+    return { requeued: result };
+  },
 
-// Ran out: the row goes away. If anyone in the group still wants the item, regenerating puts it back on the list.
-export async function ranOut(groupId: string, id: string, userId: string): Promise<{ requeued: boolean }> {
-  const requeued = await inListTx(groupId, async (tx) => {
-    const gone = await cabinetRepo.delete(groupId, id, tx);
-    if (!gone) throw notFound();
-    await generate(groupId, tx);
-    return cabinetRepo.isWanted(groupId, gone.itemId, tx);
-  });
-  emit(groupId, userId, requeued);
-  return { requeued };
-}
-
-// Thrown away etc. Like ran out, the list regenerates: list = preferences − have, so an item someone wants comes back
-// now rather than at some later regeneration (backend/06 DECISIONS). Nobody wants it: nothing is added.
-export async function remove(groupId: string, id: string, userId: string) {
-  await inListTx(groupId, async (tx) => {
-    if (!(await cabinetRepo.delete(groupId, id, tx))) throw notFound();
-    await generate(groupId, tx);
-  });
-  emit(groupId, userId, true);
-}
+  /** Removes the item without running it out (thrown away). Does not regenerate, so it isn't re-added right now. */
+  async remove(groupId: string, userId: string, id: string): Promise<void> {
+    if (!(await cabinetRepo.find(prisma, groupId, id))) throw notFound("Cabinet item");
+    await cabinetRepo.delete(prisma, groupId, id);
+    emitGroup(groupId, "cabinet:changed", userId);
+  },
+};

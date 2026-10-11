@@ -1,80 +1,34 @@
-import { Prisma } from "@prisma/client";
-import { prisma } from "../../db.js";
-import { orNull } from "../../lib/errors.js";
-import type { Item } from "../../contracts/items.js";
-import type { CabinetQuery } from "../../contracts/cabinet.js";
+import type { Db } from "../../db.js";
+import type { Prisma } from "../../../generated/prisma/client.js";
 
-type Db = Prisma.TransactionClient | typeof prisma;
-
-const select = {
-  id: true,
-  groupId: true,
-  productId: true,
-  status: true,
-  quantityText: true,
-  location: true,
-  purchasedAt: true,
-  expiresAt: true,
-  expirationSource: true,
-  photoKey: true,
-  addedBy: true,
-  createdAt: true,
-  updatedAt: true,
-  item: { select: { id: true, name: true, category: true, defaultAllergens: true, shelfLifeDays: true } },
-  product: { select: { brand: true, imageS3Key: true } },
+export const cabinetInclude = {
+  item: { select: { id: true, name: true, category: true, shelfLifeDays: true } },
+  product: { select: { id: true, brand: true, name: true, imageS3Key: true } },
 } as const;
-export type CabinetRow = Omit<Prisma.CabinetItemGetPayload<{ select: typeof select }>, "item"> & { item: Item };
 
-export type CabinetWrite = {
-  status?: "in_stock" | "running_low";
-  quantityText?: string | null;
-  location?: string | null;
-  expiresAt?: Date | null;
-  expirationSource?: "manual" | "estimated" | null;
-  photoKey?: string | null;
-  purchasedAt?: Date | null; // finish trip (backend/06)
-  productId?: string | null;
-};
-
-// Every function is scoped by groupId.
+/** Every function takes groupId and filters by it. */
 export const cabinetRepo = {
-  list: (groupId: string, { location, status }: CabinetQuery) =>
-    prisma.cabinetItem.findMany({
-      where: { groupId, location, status },
+  list: (db: Db, groupId: string, filter: { location?: string; status?: "in_stock" | "running_low" }) =>
+    db.cabinetItem.findMany({
+      where: { groupId, ...filter },
+      include: cabinetInclude,
       orderBy: [{ expiresAt: { sort: "asc", nulls: "last" } }, { item: { name: "asc" } }],
-      select,
-    }) as Promise<CabinetRow[]>,
+    }),
 
-  find: (groupId: string, id: string, db: Db = prisma) =>
-    db.cabinetItem.findFirst({ where: { id, groupId }, select }) as Promise<CabinetRow | null>,
+  find: (db: Db, groupId: string, id: string) =>
+    db.cabinetItem.findFirst({ where: { id, groupId }, include: cabinetInclude }),
 
-  // One row per (group, item). Re-adding updates the row; expiry fields are only overwritten when given (create sets them).
-  upsert: (groupId: string, itemId: string, addedBy: string, create: CabinetWrite, update: CabinetWrite, db: Db = prisma) =>
-    db.cabinetItem.upsert({
-      where: { groupId_itemId: { groupId, itemId } },
-      create: { groupId, itemId, addedBy, ...create },
-      update,
-      select,
-    }) as Promise<CabinetRow>,
+  findByItem: (db: Db, groupId: string, itemId: string) =>
+    db.cabinetItem.findUnique({ where: { groupId_itemId: { groupId, itemId } }, include: cabinetInclude }),
 
-  update: (groupId: string, id: string, data: CabinetWrite, db: Db = prisma) =>
-    orNull(db.cabinetItem.update({ where: { id, groupId }, data, select })) as Promise<CabinetRow | null>,
+  create: (db: Db, data: Prisma.CabinetItemUncheckedCreateInput) =>
+    db.cabinetItem.create({ data, include: cabinetInclude }),
 
-  delete: (groupId: string, id: string, db: Db = prisma) =>
-    orNull(db.cabinetItem.delete({ where: { id, groupId }, select: { itemId: true } })),
+  update: (db: Db, groupId: string, id: string, data: Prisma.CabinetItemUncheckedUpdateInput) =>
+    db.cabinetItem.update({ where: { id, groupId }, data, include: cabinetInclude }),
 
-  // database/06 step 4: the "have" set list generation subtracts from preferences. running_low is not "have".
-  haveItemIds: async (groupId: string, db: Db = prisma) =>
-    (await db.cabinetItem.findMany({ where: { groupId, status: "in_stock" }, select: { itemId: true } })).map((r) => r.itemId),
+  delete: (db: Db, groupId: string, id: string) => db.cabinetItem.delete({ where: { id, groupId } }),
 
-  // backend/09 alerts: expiring on or before `until` (already expired included), soonest first.
-  expiring: (groupId: string, until: Date) =>
-    prisma.cabinetItem.findMany({
-      where: { groupId, expiresAt: { lte: until } },
-      orderBy: [{ expiresAt: "asc" }, { item: { name: "asc" } }],
-      select,
-    }) as Promise<CabinetRow[]>,
-
-  isWanted: async (groupId: string, itemId: string, db: Db = prisma) =>
+  isPreferred: async (db: Db, groupId: string, itemId: string) =>
     (await db.preference.count({ where: { groupId, itemId } })) > 0,
 };

@@ -1,15 +1,17 @@
 import { Router } from "express";
 import { CreateItemBody, ItemSearchQuery } from "../../contracts/items.js";
+import { uid } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
-import * as service from "./service.js";
+import { itemsService } from "./service.js";
 
 export const itemsRouter = Router();
 
 itemsRouter.get("/items/search", validate({ query: ItemSearchQuery }), async (req, res) => {
-  res.json(await service.search((req.query as { q: string }).q));
+  const { q } = req.query as unknown as { q: string };
+  res.json(await itemsService.search(q));
 });
 
-// 200 whether the item is new or already existed (a duplicate name returns the existing item).
 itemsRouter.post("/items", validate({ body: CreateItemBody }), async (req, res) => {
-  res.json(await service.create(req.body, req.userId));
+  const { item, created } = await itemsService.create(uid(req), req.body);
+  res.status(created ? 201 : 200).json(item);
 });
