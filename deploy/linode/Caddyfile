@@ -1,0 +1,15 @@
+# One HTTPS origin: /api and /socket.io go to the API, everything else to the web app.
+# SITE_HOST is the instance's Linode reverse-DNS name (<ip-with-dashes>.ip.linodeusercontent.com) or your own domain;
+# Caddy gets a Let's Encrypt certificate for it automatically. Set SITE_HOST=:80 to test over plain HTTP.
+{$SITE_HOST} {
+	encode gzip
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle /socket.io/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		reverse_proxy web:80
+	}
+}
