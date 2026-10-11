@@ -26,7 +26,7 @@ import {
 import { PANTRY_DIMENSIONS as D } from "./dimensions";
 import { getActiveTheme } from "../../../theme/store";
 import type { SceneTheme } from "../../../theme/types";
-import { advanceOf, textGeometry } from "./font";
+import { textGeometry } from "./font";
 import { applyWoodUV, merge, mergeGrouped, place, prep, tint, type Vec3, woodPiece } from "./geometry";
 import { type ExteriorPalette, exteriorPalette, getMaterials } from "./materials";
 
@@ -475,76 +475,46 @@ function buildPin(P: ExteriorPalette): BufferGeometry {
 
 const LIST_MAX_W = 0.18;
 
-function fitLine(text: string, size: number, theme: SceneTheme): { text: string; scale: number } {
-  let t = text;
-  const minScale = 0.62;
-  const w = advanceOf(t, size, theme);
-  if (w <= LIST_MAX_W) return { text: t, scale: 1 };
-  if (w * minScale <= LIST_MAX_W) return { text: t, scale: LIST_MAX_W / w };
-  while (t.length > 2 && advanceOf(t + "..", size, theme) * minScale > LIST_MAX_W) t = t.slice(0, -1);
-  return { text: t.trimEnd() + "..", scale: minScale };
-}
-
-export function buildListText(lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
+/**
+ * A pinned paper's text: just its name ("List", "Me", "Week"), big enough to read from the closed-pantry view, with a
+ * pencil squiggle under it. The details live on the paper's sheet (it opens when tapped), so the 3D paper stays legible.
+ */
+function buildPaperTitle(titleText: string, theme: SceneTheme): BufferGeometry {
   const parts: BufferGeometry[] = [];
   const z = 0.0055;
-  const title = textGeometry("List", { size: 0.052, depth: 0.0015, curveSegments: 3 }, theme);
+  const size = 0.095;
+  const title = textGeometry(titleText, { size, depth: 0.002, curveSegments: 4 }, theme);
   title.computeBoundingBox();
   const tb = title.boundingBox!;
-  title.translate(-(tb.min.x + tb.max.x) / 2, 0.072, z);
+  const w = tb.max.x - tb.min.x;
+  const k = w > LIST_MAX_W ? LIST_MAX_W / w : 1; // "Week" in a wide theme font still fits the paper
+  title.scale(k, k, 1);
+  title.computeBoundingBox();
+  const sb = title.boundingBox!;
+  title.translate(-(sb.min.x + sb.max.x) / 2, -(sb.min.y + sb.max.y) / 2 + 0.03, z);
   parts.push(title);
   // squiggly underline (two short segments, slightly tilted)
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [-0.024, 0.062, z], [0, 0, 0.06]));
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [0.026, 0.062, z], [0, 0, -0.06]));
-  lines.slice(0, 3).forEach((line, i) => {
-    const size = 0.038;
-    const fitted = fitLine(line, size, theme);
-    if (!fitted.text.trim()) return;
-    const g = textGeometry(fitted.text, { size, depth: 0.0015, curveSegments: 3 }, theme);
-    g.scale(fitted.scale, fitted.scale, 1);
-    g.translate(-0.086, 0.002 - i * 0.064, z);
-    parts.push(g);
-    // little dash bullet like the drawing
-    parts.push(place(new BoxGeometry(0.012, 0.004, 0.0015).toNonIndexed(), [-0.1, 0.013 - i * 0.064, z]));
-  });
+  const uy = 0.03 - (sb.max.y - sb.min.y) / 2 - 0.022;
+  parts.push(place(new BoxGeometry(0.075, 0.006, 0.0015).toNonIndexed(), [-0.036, uy, z], [0, 0, 0.06]));
+  parts.push(place(new BoxGeometry(0.075, 0.006, 0.0015).toNonIndexed(), [0.038, uy, z], [0, 0, -0.06]));
   for (const p of parts) p.deleteAttribute("uv");
   for (const p of parts) p.setAttribute("uv", new BufferAttribute(new Float32Array(p.getAttribute("position").count * 2), 2));
   return merge(parts);
 }
 
-/** A titled note's text, laid out like the List note: the title with its squiggle, then up to 3 lines. */
-function buildTitledText(titleText: string, lines: string[], theme: SceneTheme): BufferGeometry {
-  const parts: BufferGeometry[] = [];
-  const z = 0.0055;
-  const title = textGeometry(titleText, { size: 0.052, depth: 0.0015, curveSegments: 3 }, theme);
-  title.computeBoundingBox();
-  const tb = title.boundingBox!;
-  title.translate(-(tb.min.x + tb.max.x) / 2, 0.072, z);
-  parts.push(title);
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [-0.024, 0.062, z], [0, 0, 0.06]));
-  parts.push(place(new BoxGeometry(0.05, 0.0045, 0.0015).toNonIndexed(), [0.026, 0.062, z], [0, 0, -0.06]));
-  lines.slice(0, 3).forEach((line, i) => {
-    const size = 0.038;
-    const fitted = fitLine(line, size, theme);
-    if (!fitted.text.trim()) return;
-    const g = textGeometry(fitted.text, { size, depth: 0.0015, curveSegments: 3 }, theme);
-    g.scale(fitted.scale, fitted.scale, 1);
-    g.translate(-0.092, 0.002 - i * 0.064, z);
-    parts.push(g);
-  });
-  for (const p of parts) p.deleteAttribute("uv");
-  for (const p of parts) p.setAttribute("uv", new BufferAttribute(new Float32Array(p.getAttribute("position").count * 2), 2));
-  return merge(parts);
+/** The List paper's text: "List" (the item lines were dropped so the paper reads at a glance). */
+export function buildListText(_lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
+  return buildPaperTitle("List", theme);
 }
 
-/** The Week note's text: "Week" with the squiggle, then up to 3 day lines ("Mon Chicken.."). */
-export function buildWeekText(lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
-  return buildTitledText("Week", lines, theme);
+/** The Week paper's text: "Week". */
+export function buildWeekText(_lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
+  return buildPaperTitle("Week", theme);
 }
 
-/** The Me note's text: "Me" with the squiggle, then name / allergies / ZIP. */
-export function buildMeText(lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
-  return buildTitledText("Me", lines, theme);
+/** The Me paper's text: "Me". */
+export function buildMeText(_lines: string[], theme: SceneTheme = getActiveTheme()): BufferGeometry {
+  return buildPaperTitle("Me", theme);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

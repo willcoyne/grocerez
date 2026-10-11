@@ -41,7 +41,7 @@ log = logging.getLogger("agent.tools")
 MAX_CABINET = 40
 MAX_MEALS = 3  # speed: output tokens dominate latency on the shared endpoint
 NUDGE_BEFORE_MS = 45_000  # skip the "add missing items" nudge when too little time is left
-PRICE_WAIT_S = 8.0
+PRICE_WAIT_S = 1.0  # don't hold the plan for prices: the server fills a missing estimate in afterwards
 INDEX_MAX_DISTANCE = 0.45  # cosine distance above which an index hit is not "the dish you asked for"
 SUGGEST_LIMIT = 10  # the frozen contract caps limit at 10
 MAX_TAVILY_SEARCHES = 2  # per run: web searches are the slow, costly part of find_recipe
@@ -59,6 +59,51 @@ def _j(obj: Any) -> str:
 
 def _clip(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+# Main proteins, most specific first (a recipe's protein = the first one its title, else its ingredients, mentions).
+PROTEINS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("shrimp", ("shrimp", "prawn")),
+    ("fish", ("salmon", "tuna", "cod", "tilapia", "halibut", "fish")),
+    ("chicken", ("chicken",)),
+    ("turkey", ("turkey",)),
+    ("beef", ("beef", "steak", "brisket", "meatball")),
+    ("pork", ("pork", "bacon", "ham", "sausage", "chorizo", "prosciutto")),
+    ("tofu", ("tofu", "tempeh")),
+    ("beans", ("black bean", "chickpea", "lentil", "kidney bean", "pinto", "bean")),
+    ("egg", ("frittata", "omelet", "omelette", "egg")),
+)
+
+
+def main_protein(title: str, ingredients: Iterable[str] = ()) -> str | None:
+    """The dish's main protein ("chicken", "beans", ...), or None. Title first: "Chicken Fried Rice" is chicken."""
+    for text in (title.lower(), " ".join(ingredients).lower()):
+        for name, words in PROTEINS:
+            if any(w in text for w in words):
+                return name
+    return None
+
+
+def fitting_dates(protein: str | None, dates: Iterable[str], planned: Iterable[tuple[str, str]]) -> list[str]:
+    """The requested dates a dish can go on without repeating an already-planned main protein on an adjacent day."""
+    if protein is None:
+        return list(dates)
+    taken = []
+    for d, t in planned:
+        if main_protein(t) == protein:
+            try:
+                taken.append(date.fromisoformat(d))
+            except ValueError:
+                continue
+    out = []
+    for d in dates:
+        try:
+            day = date.fromisoformat(d)
+        except ValueError:
+            continue
+        if all(abs((day - t).days) > 1 for t in taken):
+            out.append(d)
+    return out
 
 
 def _norm(s: Any) -> str:
@@ -783,8 +828,12 @@ def build_tools(
 
     # ── suggest_recipes / use_recipe (index-first ideas, spec section 12.1) ──────────────────────────────
 
+    expiry_seen: dict[str, int] = {}  # cabinet name -> days left, from suggest_recipes' own cabinet read
+
     async def _expiring_names() -> list[str]:
-        """Cabinet items to use up, soonest first (<= 6), from the shared cabinet read."""
+        """Cabinet items to use up, soonest first (<= 6), from the shared cabinet read. With requested dates, only items
+        still good on the earliest one: a recipe built around spinach that expires Monday can't go on Thursday (it
+        would be rejected as the wrong day, and the model would end up writing meals itself)."""
         hh = await _household()
         today = (hh or {}).get("today") or datetime.now(timezone.utc).date().isoformat()
         res = await _cabinet_req()
@@ -792,18 +841,62 @@ def build_tools(
             return []
         rows = _cabinet_rows(res.data, today)
         state.cabinet_names = state.cabinet_names or {_norm(r["name"]) for r in rows}
+        expiry_seen.update({_norm(r["name"]): r["days"] for r in rows if r["days"] is not None})
         usable = [r for r in rows if r["days"] is not None and r["days"] >= 0]  # expired items can't be used
+        if ctx.dates:
+            try:
+                first = (date.fromisoformat(min(ctx.dates)) - date.fromisoformat(str(today)[:10])).days
+                usable = [r for r in usable if r["days"] >= first]
+            except ValueError:
+                pass
         soon = [r["name"] for r in usable if r["days"] <= 14]
         return (soon or [r["name"] for r in usable])[:6]
+
+    def _ok_dates(r: Any) -> list[str]:
+        """Requested dates a suggestion can go on: its protein doesn't repeat a nearby planned meal, and none of the
+        cabinet items it uses has expired by then (the same deadline use_recipe enforces)."""
+        dates = fitting_dates(main_protein(r.title, r.ingredients), ctx.dates, ctx.already_planned)
+        found = meal_deadline({"ingredients": list(r.ingredients)}, state.expiry_days or expiry_seen, _today())
+        return [d for d in dates if found is None or d <= found[0]]
+
+    async def _browse_suggestions(must: list[str]) -> list[Any] | None:
+        """Index browse for the expiring items, minus dishes already planned (same title) or whose main protein would
+        repeat on an adjacent day for every requested date. When that leaves few, a second browse without the
+        already-planned proteins widens the pool, so the model rarely has to invent ideas (find_recipe) or write
+        meals itself (slow on the shared model)."""
+        planned = ctx.already_planned
+        planned_titles = {_norm(t) for _, t in planned}
+
+        def keep(rows: list[Any]) -> list[Any]:
+            out = []
+            for r in rows:
+                if _norm(r.title) in planned_titles or r.url in state.used_urls:
+                    continue
+                if ctx.dates and not _ok_dates(r):
+                    continue
+                out.append(r)
+            return out
+
+        found = await _search_index(RecipeSearchBody(query="dinner", mustUse=must, limit=SUGGEST_LIMIT, browse=True))
+        if found is None:
+            return None
+        rows = keep(found)
+        if len(rows) < SUGGEST_LIMIT // 2 and planned:
+            taken = {main_protein(t) for _, t in planned} - {None}
+            other = [m for m in must if main_protein(m) not in taken]
+            more = await _search_index(RecipeSearchBody(query="dinner", mustUse=other, limit=SUGGEST_LIMIT, browse=True))
+            seen = {r.url for r in rows}
+            rows += [r for r in keep(more or []) if r.url not in seen]
+        return rows[:SUGGEST_LIMIT]
 
     @tool
     async def suggest_recipes() -> str:
         """Browse real, household-safe dinner recipes from our index that use the expiring cabinet items. Call this
-        FIRST, together with the reads. Returns [{id, title, site, minutes, uses, missingCount}]; pick one per date
-        and pass its id to use_recipe."""
+        FIRST, together with the reads. Returns [{id, title, site, minutes, protein, okDates, uses, missingCount}],
+        already filtered against the meals planned on nearby days: pick one per date from those whose okDates include
+        that date and pass its id to use_recipe."""
         must = await _expiring_names()
-        body = RecipeSearchBody(query="dinner", mustUse=must, limit=SUGGEST_LIMIT, browse=True)
-        found = await _search_index(body)
+        found = await _browse_suggestions(must)
         if not found:
             state.done_labels["suggest_recipes"] = "No suggestions, searching by idea"
             return _j({"suggestions": [], "note": "Nothing to browse. Use find_recipe(idea) per date, or write the meal."})
@@ -814,8 +907,11 @@ def build_tools(
             p = _to_parsed(r)
             state.suggested[str(r.id)[:8]] = p
             state.suggest_order.append(str(r.id)[:8])
+            protein = main_protein(r.title, r.ingredients)
             item = {"id": str(r.id)[:8], "title": _clip(r.title, 70), "site": r.site, "minutes": r.minutes,
-                    "uses": list(r.uses)[:4], "missingCount": len(_meal_from(p)["missing"])}
+                    "protein": protein, "uses": list(r.uses)[:4], "missingCount": len(_meal_from(p)["missing"])}
+            if ctx.dates:
+                item["okDates"] = _ok_dates(r)
             soon = [u for u in r.uses if have_item(u, expiring)]
             if soon:
                 item["usesExpiring"] = soon[:4]

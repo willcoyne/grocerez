@@ -74,6 +74,7 @@ export function CameraRig({
   focus,
   noteTarget,
   reducedMotion = false,
+  speed = 1,
   station = null,
   onArrive,
 }: {
@@ -91,6 +92,8 @@ export function CameraRig({
   noteTarget?: MutableRefObject<NoteKind>;
   /** OS "reduce motion": focus changes (search fly-to, label zoom) and station moves cut instead of easing */
   reducedMotion?: boolean;
+  /** Animation speed (the user's "fast" setting = 2): glides and smoothing run this many times faster. */
+  speed?: number;
   /** closed phase only: the room station to frame (null = the closed pantry) */
   station?: RoomStationId | null;
   /** the camera finished gliding to `station` (null = back at the closed pantry framing) */
@@ -145,7 +148,7 @@ export function CameraRig({
     const d = shelfDistance(aspect);
     const cy = sy - scroll.state.current.y;
     const ft = shelfFocusTarget(focus.current, aspect);
-    const fk = reducedMotion ? 1 : 1 - Math.exp(-dt * 5);
+    const fk = reducedMotion ? 1 : 1 - Math.exp(-dt * 5 * speed);
     if (Number.isNaN(pose.focusZ)) pose.focusZ = ft.camZ;
     pose.focusX += (ft.x - pose.focusX) * fk;
     pose.focusZ += (ft.camZ - pose.focusZ) * fk;
@@ -231,7 +234,7 @@ export function CameraRig({
       }
       if (!g.arrived) {
         g.t += dt;
-        const dur = reducedMotion ? 0 : STATION_GLIDE_S;
+        const dur = reducedMotion ? 0 : STATION_GLIDE_S / speed;
         const k = dur > 0 ? THREE.MathUtils.clamp(g.t / dur, 0, 1) : 1;
         const e = easeInOutCubic(k);
         desiredPos.lerpVectors(g.from.pos, g.to.pos, e);
@@ -253,7 +256,7 @@ export function CameraRig({
       pose.lookAt.copy(desiredTarget);
       pose.initialised = true;
     } else {
-      const k = 1 - Math.exp(-dt * rate);
+      const k = 1 - Math.exp(-dt * rate * speed);
       // Scrolling must feel glued to the finger: follow y much faster than the dolly.
       const ky = phase === "shelves" ? 1 - Math.exp(-dt * 30) : k;
       camera.position.x += (desiredPos.x - camera.position.x) * k;

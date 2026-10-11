@@ -91,6 +91,15 @@ export const agentRepo = {
       })
     ).count === 1,
 
+  /** Adds the price estimate to a proposed/applied plan that has none yet. Returns false if there was nothing to set. */
+  setEstimate: async (runId: string, estimate: { lowCents: number; highCents: number; label: "AI estimate" }) =>
+    (
+      await prisma.$executeRaw`
+        UPDATE agent_runs SET plan = jsonb_set(plan, '{estimate}', ${JSON.stringify(estimate)}::jsonb)
+        WHERE id = ${runId}::uuid AND status IN ('proposed', 'applied') AND plan IS NOT NULL
+          AND (plan->'estimate' IS NULL OR plan->'estimate' = 'null'::jsonb)`
+    ) === 1,
+
   /** running → failed. Returns false if the run wasn't running. */
   fail: async (runId: string, error: string, meta?: unknown) =>
     (

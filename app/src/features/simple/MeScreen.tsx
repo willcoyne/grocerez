@@ -17,7 +17,7 @@ import { useAuth } from "@/state/AuthContext";
 import { AppearancePicker } from "@/features/stations/AppearancePicker";
 import { size, space } from "@/theme";
 
-import { InterfaceChoice, RoomModeButton } from "./InterfaceChoice";
+import { AnimationChoice, InterfaceChoice, RoomModeButton } from "./InterfaceChoice";
 
 /**
  * Simple interface Me tab (DESIGN.md §4.7): my preferences, diet and allergies, the interface (3D room / simple) and the
@@ -37,6 +37,8 @@ export default function MeScreen() {
         <DietarySection />
         <SectionLabel style={styles.gapTop}>Interface</SectionLabel>
         <InterfaceChoice />
+        <SectionLabel style={styles.gapTop}>3D animations</SectionLabel>
+        <AnimationChoice />
         <SectionLabel style={styles.gapTop}>3D room theme</SectionLabel>
         <AppearancePicker />
         <SectionLabel style={styles.gapTop}>Profile</SectionLabel>

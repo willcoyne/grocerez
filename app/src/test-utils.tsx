@@ -16,6 +16,7 @@ export const testUser: User = {
   zipCode: "64105",
   uiMode: "room",
   theme: "cozy",
+  motion: "normal",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 

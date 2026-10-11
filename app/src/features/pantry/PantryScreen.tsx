@@ -65,6 +65,7 @@ import { disposeThemeCaches } from "@/features/theme/materials";
 import { useThemeId } from "@/features/theme/ThemeProvider";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
+import { useMotion } from "@/state/uiPrefs";
 
 import { usePantry } from "./data";
 import { activeFilterCount, applyFilters } from "./filters";
@@ -91,9 +92,11 @@ export const SHELF_ORIGIN: Vec3 = [0, 2.9, -0.3];
 /** Phase timings in seconds. */
 export const DURATIONS = {
   normal: { open: 1.6, zoom: 1.2, pull: 1.1, doorDelay: 0.35, doorClose: 1.1, list: 1.4 },
+  /** The user's "fast animations" setting (state/uiPrefs.tsx): about half as long. */
+  fast: { open: 0.8, zoom: 0.6, pull: 0.55, doorDelay: 0.15, doorClose: 0.55, list: 0.7 },
   reduced: { open: 0.3, zoom: 0, pull: 0, doorDelay: 0, doorClose: 0.3, list: 0 },
 } as const;
-type Durations = (typeof DURATIONS)["normal" | "reduced"];
+type Durations = (typeof DURATIONS)["normal" | "fast" | "reduced"];
 
 const NEXT_PHASE: Partial<Record<PantryPhase, PantryPhase>> = {
   opening: "zooming",
@@ -137,7 +140,8 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
   const data = usePantry(groupId);
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
-  const durations = reducedMotion ? DURATIONS.reduced : DURATIONS.normal;
+  const motion = useMotion();
+  const durations = reducedMotion ? DURATIONS.reduced : motion === "fast" ? DURATIONS.fast : DURATIONS.normal;
 
   const [phase, setPhase] = useState<PantryPhase>("closed");
   const [leaving, setLeaving] = useState(false);
@@ -502,6 +506,7 @@ export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
               frame={PANTRY_DIMENSIONS.bounds}
               focus={focus}
               reducedMotion={reducedMotion}
+              speed={motion === "fast" ? 2 : 1}
               station={away}
               onArrive={onArrive}
               noteTarget={noteTargetRef}

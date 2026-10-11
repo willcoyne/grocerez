@@ -17,7 +17,10 @@ import { AppError, conflict, notConfigured, notFound } from "../../lib/errors.js
 import { groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
 import { signAgentRunToken } from "../../lib/jwt.js";
 import { logger } from "../../lib/logger.js";
+import { embeddingsConfigured } from "../../lib/embeddings.js";
+import { zipRegion } from "../../lib/productData.js";
 import { emitGroup } from "../../lib/realtime.js";
+import { estimatePrices } from "../ai/prices.js";
 import { mealPlanService } from "../meal-plan/service.js";
 import { withRegeneration } from "../shopping-list/engine.js";
 import { shoppingListService } from "../shopping-list/service.js";
@@ -26,13 +29,46 @@ import { agentRepo } from "./repo.js";
 import { safety } from "./safety.js";
 
 /** Mutable so tests can shorten them. */
-export const agentTimers = { runTimeoutMs: 120_000, staleAfterMs: 120_000, emitThrottleMs: 250 };
+/** The server fails a run after 180 s (the agent stops itself at 150 s; the shared Akamai model writes ~13 tokens/s). */
+export const agentTimers = { runTimeoutMs: 180_000, staleAfterMs: 180_000, emitThrottleMs: 250 };
 
 const TOO_LONG = "Took too long";
 
 type RunRow = NonNullable<Awaited<ReturnType<typeof agentRepo.find>>>;
 type SummaryRow = Awaited<ReturnType<typeof agentRepo.list>>[number];
 type Owner = { id: string; groupId: string; userId: string };
+
+const pendingEstimates = new Set<Promise<void>>();
+/** Tests: wait for background plan estimates (fillEstimate) to settle. */
+export async function waitForPlanEstimates() {
+  while (pendingEstimates.size) await Promise.allSettled([...pendingEstimates]);
+}
+
+/**
+ * The agent no longer holds a plan back for its price sub-agent (it waits ~1 s). A plan proposed without an estimate
+ * gets one here, in the background: the shared Akamai price estimator (modules/ai/prices.ts, BLS regional averages
+ * for the user's ZIP) prices the missing items, and the run's plan gains `estimate` (only if every item was priced,
+ * like the agent). The app picks it up from the usual agent:changed event.
+ */
+function fillEstimate(owner: Owner, plan: AgentPlan) {
+  if (plan.estimate || plan.missingItems.length === 0 || !embeddingsConfigured()) return;
+  const job = (async () => {
+    const user = await prisma.user.findUnique({ where: { id: owner.userId }, select: { zipCode: true } });
+    if (!user?.zipCode) return;
+    const items = plan.missingItems.map((m, i) => ({ id: String(i), name: m.name, quantityText: null }));
+    const prices = await estimatePrices(items, zipRegion(user.zipCode));
+    if (prices.length !== items.length) return; // never sum a partial set
+    const estimate = {
+      lowCents: prices.reduce((n, p) => n + p.lowCents, 0),
+      highCents: prices.reduce((n, p) => n + p.highCents, 0),
+      label: "AI estimate" as const,
+    };
+    if (await agentRepo.setEstimate(owner.id, estimate)) notifyRun(owner);
+  })()
+    .catch((err) => logger.warn({ err: String(err), runId: owner.id }, "plan estimate failed"))
+    .finally(() => pendingEstimates.delete(job));
+  pendingEstimates.add(job);
+}
 
 const notProposed = () => conflict("This plan can't be applied (it isn't waiting for approval)", "RUN_NOT_PROPOSED");
 const notRunning = () => conflict("This run is no longer running", "RUN_NOT_RUNNING");
@@ -221,6 +257,7 @@ export const agentService = {
         throw new AppError(422, "PLAN_INVALID", "Plan couldn't be saved");
       }
       if (!saved) throw notRunning();
+      fillEstimate(owner, ev.data.payload.plan);
     } else {
       const ev = AgentEvent.parse(body);
       if (ev.type === "step") {

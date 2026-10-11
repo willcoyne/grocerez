@@ -1,6 +1,6 @@
 """run(ctx): build the planner agent, execute it under a wall clock, and guarantee exactly one terminal event.
 
-Time budget (the server gives up on a run at 120 s): wall clock 95 s + flushing steps <= 3 s + terminal post
+Time budget (the server gives up on a run at 180 s): wall clock 150 s + flushing steps <= 3 s + terminal post
 (5 s timeout, one retry) <= 10.2 s, so the failed/proposed event lands before ~108 s.
 """
 from __future__ import annotations

@@ -1,12 +1,12 @@
 /**
  * Switching between the two interfaces (state/uiPrefs.tsx): the fun 3D pantry room and the simple screens (no 3D, no
- * animation). Both are saved to the user's account, as is the room's theme.
+ * animation), plus the room's animation speed. All saved to the user's account, as is the room's theme.
  */
-import { Box, LayoutList } from "lucide-react-native";
+import { Box, Gauge, LayoutList, Zap } from "lucide-react-native";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { AppText, IconButton } from "@/components/ui";
-import { useSetUiMode, useUiMode } from "@/state/uiPrefs";
+import { useMotion, useSetMotion, useSetUiMode, useUiMode } from "@/state/uiPrefs";
 import { color, radius, space } from "@/theme";
 
 const CHOICES = [
@@ -14,14 +14,36 @@ const CHOICES = [
   { mode: "simple", label: "Simple", hint: "Plain screens, no 3D or animation", Icon: LayoutList },
 ] as const;
 
-/** Two-way choice for the Me screens. */
+const SPEEDS = [
+  { mode: "normal", label: "Normal", hint: "Full door, camera and paper animations", Icon: Gauge },
+  { mode: "fast", label: "Fast", hint: "Animations take about half as long", Icon: Zap },
+] as const;
+
+/** Two-way choice for the Me screens: 3D room or simple screens. */
 export function InterfaceChoice() {
-  const mode = useUiMode();
-  const setMode = useSetUiMode();
+  return <Choice choices={CHOICES} value={useUiMode()} onChange={useSetUiMode()} testID="interface" />;
+}
+
+/** Two-way choice for the Me screens: normal or fast 3D animations. */
+export function AnimationChoice() {
+  return <Choice choices={SPEEDS} value={useMotion()} onChange={useSetMotion()} testID="motion" />;
+}
+
+function Choice<M extends string>({
+  choices,
+  value,
+  onChange,
+  testID,
+}: {
+  choices: readonly { mode: M; label: string; hint: string; Icon: typeof Box }[];
+  value: M;
+  onChange: (m: M) => void;
+  testID: string;
+}) {
   return (
-    <View style={styles.row} accessibilityRole="radiogroup" testID="interface-choice">
-      {CHOICES.map(({ mode: m, label, hint, Icon }) => {
-        const on = mode === m;
+    <View style={styles.row} accessibilityRole="radiogroup" testID={`${testID}-choice`}>
+      {choices.map(({ mode: m, label, hint, Icon }) => {
+        const on = value === m;
         return (
           <Pressable
             key={m}
@@ -29,9 +51,9 @@ export function InterfaceChoice() {
             accessibilityState={{ checked: on }}
             accessibilityLabel={label}
             accessibilityHint={hint}
-            onPress={() => setMode(m)}
+            onPress={() => onChange(m)}
             style={({ pressed }) => [styles.choice, on && styles.choiceOn, pressed && styles.pressed]}
-            testID={`interface-${m}`}
+            testID={`${testID}-${m}`}
           >
             <Icon size={20} color={on ? color.primary : color.ink2} />
             <AppText weight="bold" color={on ? "primary" : "ink2"}>

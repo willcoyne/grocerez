@@ -18,7 +18,7 @@ import { MyPreferences } from "@/components/MyPreferences";
 import { AppText, Avatar, Button, Card, ErrorState, LoadingState, TextField, useToast } from "@/components/ui";
 import { makePaperStyles, PAPER_MARGIN_X, PaperSection, PaperSheet } from "@/features/pantry/overlay/PaperSheet";
 import { useOverlayStyles } from "@/features/pantry/overlay/palette";
-import { InterfaceChoice } from "@/features/simple/InterfaceChoice";
+import { AnimationChoice, InterfaceChoice } from "@/features/simple/InterfaceChoice";
 import { AppearancePicker } from "@/features/stations/AppearancePicker";
 import { useAuth } from "@/state/AuthContext";
 import { size, space } from "@/theme";
@@ -51,6 +51,10 @@ function MeNote({ groupId, onClose }: Omit<MeSheetProps, "visible">) {
         <PaperSection title="Interface" />
         <View style={styles.block}>
           <InterfaceChoice />
+        </View>
+        <PaperSection title="Animations" />
+        <View style={styles.block}>
+          <AnimationChoice />
         </View>
         <PaperSection title="Appearance" />
         <View style={styles.block}>

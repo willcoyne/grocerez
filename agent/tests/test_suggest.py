@@ -164,10 +164,11 @@ async def test_suggest_recipes_browses_with_expiring_items_and_returns_a_compact
     body = json.loads(search.calls[0].request.content)
     assert body["browse"] is True and body["query"] == "dinner" and body["limit"] == 10
     # expiring items, soonest first, at most 6
-    assert body["mustUse"] == ["Milk", "Tomatoes", "Spinach", "Chicken Breast", "Beans", "Peppers"]
+    # Milk expires before the first requested date, so it can't anchor any of these dinners (it would be the wrong day).
+    assert body["mustUse"] == ["Tomatoes", "Spinach", "Chicken Breast", "Beans", "Peppers", "Pasta"]
     assert search.calls[0].request.headers["authorization"].startswith("Bearer ")
     assert [s["id"] for s in out] == ["00000001", "00000002", "00000003"]
-    assert set(out[0]) == {"id", "title", "site", "minutes", "uses", "missingCount", "usesExpiring"}
+    assert set(out[0]) >= {"id", "title", "site", "minutes", "protein", "uses", "missingCount", "usesExpiring"}
     assert out[0]["usesExpiring"] == ["Spinach", "Chicken Breast"]
     assert "usesExpiring" not in out[2]  # nothing expiring in the saffron stew
     assert out[0]["uses"] == ["Spinach", "Chicken Breast"] and out[0]["missingCount"] == 1  # lemon
@@ -425,3 +426,20 @@ def test_prompt_variants_have_the_new_order_and_only_what_is_registered():
     assert not any(w in own for w in ("find_recipe", "suggest_recipes", "use_recipe")) and "<!--" not in own
     for text in (p, web, own):
         assert "propose_plan" in text and "Then:" in text
+
+
+def test_main_protein_prefers_the_title_then_the_ingredients():
+    from app.tools import main_protein
+    assert main_protein("Chicken Fried Rice", ["rice", "egg"]) == "chicken"
+    assert main_protein("Sticky soy & ginger fried rice", ["rice", "eggs", "soy sauce"]) == "egg"
+    assert main_protein("Southwestern Black Bean Salad", ["quinoa"]) == "beans"
+    assert main_protein("Garden salad", ["lettuce", "tomato"]) is None
+
+
+def test_fitting_dates_keeps_a_planned_protein_off_adjacent_days_only():
+    from app.tools import fitting_dates
+    planned = [("2026-10-12", "Teriyaki Chicken Kabobs")]
+    dates = ["2026-10-13", "2026-10-14", "2026-10-15"]
+    assert fitting_dates("chicken", dates, planned) == ["2026-10-14", "2026-10-15"]
+    assert fitting_dates("beans", dates, planned) == dates
+    assert fitting_dates(None, dates, planned) == dates

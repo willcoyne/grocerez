@@ -42,6 +42,8 @@ model User {
   uiMode      String   @default("room") @map("ui_mode")
   /// The room's theme id (app features/theme registry); CHECK enforced.
   theme       String   @default("cozy")
+  /// 3D room animation speed: "normal" or "fast"; CHECK enforced.
+  motion      String   @default("normal")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

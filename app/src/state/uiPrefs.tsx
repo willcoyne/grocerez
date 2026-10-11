@@ -1,11 +1,12 @@
 /**
  * Per-user interface preferences, saved on the account (PATCH /me) so they follow the user to every device:
  * - uiMode: "room" = the fun 3D pantry room (features/pantry), "simple" = plain screens with no 3D or animation;
+ * - motion: the 3D room's animation speed ("fast" ≈ half as long);
  * - theme: the room's look (features/theme). The theme store stays the source of truth while the app runs;
  *   <ThemeUserSync/> loads the signed-in user's theme into it and saves every change back to their account.
  * Both switch instantly (optimistic) and roll back with a toast if the save fails.
  */
-import type { ThemeId, UiMode, User } from "@contracts/auth";
+import type { Motion, ThemeId, UiMode, User } from "@contracts/auth";
 import { useCallback, useEffect, useRef } from "react";
 
 import { api, errorMessage } from "@/api/client";
@@ -18,23 +19,38 @@ export function useUiMode(): UiMode {
   return useAuth().user?.uiMode ?? "room";
 }
 
-/** Switch between the 3D room and the simple screens; saved to the account. */
-export function useSetUiMode(): (mode: UiMode) => void {
+/** The signed-in user's 3D room animation speed. */
+export function useMotion(): Motion {
+  return useAuth().user?.motion ?? "normal";
+}
+
+/** Set one account preference: instantly (optimistic), saved with PATCH /me, rolled back with a toast on failure. */
+function useSetPref<K extends "uiMode" | "motion">(key: K): (value: User[K]) => void {
   const { user, setUser } = useAuth();
   const { show: toast } = useToast();
   return useCallback(
-    (mode: UiMode) => {
-      if (!user || user.uiMode === mode) return;
-      setUser({ ...user, uiMode: mode });
-      api<User>("/me", { method: "PATCH", body: { uiMode: mode } })
+    (value: User[K]) => {
+      if (!user || user[key] === value) return;
+      setUser({ ...user, [key]: value });
+      api<User>("/me", { method: "PATCH", body: { [key]: value } })
         .then(setUser)
         .catch((e: unknown) => {
           setUser(user);
           toast(errorMessage(e), { tone: "error" });
         });
     },
-    [user, setUser, toast],
+    [key, user, setUser, toast],
   );
+}
+
+/** Switch between the 3D room and the simple screens; saved to the account. */
+export function useSetUiMode(): (mode: UiMode) => void {
+  return useSetPref("uiMode");
+}
+
+/** Normal or fast 3D animations; saved to the account. */
+export function useSetMotion(): (motion: Motion) => void {
+  return useSetPref("motion");
 }
 
 /**

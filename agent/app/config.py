@@ -58,8 +58,8 @@ class Settings(BaseSettings):
 
     agent_shared_secret: str = Field(default="", repr=False)
     agent_max_tool_calls: int = 25
-    # Wall clock 95 s + step flush 3 s + terminal post <= 10.2 s keeps the terminal event under ~108 s (server: 120 s).
-    agent_run_timeout_s: float = 95.0
+    # Wall clock 150 s + step flush 3 s + terminal post <= 10.2 s keeps the terminal event under ~163 s (server: 180 s).
+    agent_run_timeout_s: float = 150.0
     step_timeout_s: float = 2.5
     terminal_timeout_s: float = 5.0
     max_concurrent_runs: int = 4

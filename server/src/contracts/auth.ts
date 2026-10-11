@@ -10,6 +10,10 @@ export type UiMode = z.infer<typeof UiMode>;
 export const ThemeId = z.enum(["cozy", "pixel", "sketch", "neon", "diner"]);
 export type ThemeId = z.infer<typeof ThemeId>;
 
+/** 3D room animation speed: "fast" roughly halves the door, camera and paper animations. Saved per user. */
+export const Motion = z.enum(["normal", "fast"]);
+export type Motion = z.infer<typeof Motion>;
+
 export const User = z.object({
   id: z.uuid(),
   email: z.string(),
@@ -19,6 +23,7 @@ export const User = z.object({
   zipCode: z.string().nullable(),
   uiMode: UiMode,
   theme: ThemeId,
+  motion: Motion,
   createdAt: z.string(),
 });
 export type User = z.infer<typeof User>;
@@ -35,6 +40,7 @@ export const UpdateMeBody = z
     avatarKey: z.string().max(200).nullable().optional(),
     uiMode: UiMode.optional(),
     theme: ThemeId.optional(),
+    motion: Motion.optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof UpdateMeBody>;
