@@ -1,7 +1,8 @@
 import type { AgentPlan, AgentRun, AgentStep } from "@contracts/agent";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ApiError, errorMessage } from "@/api/client";
 import {
@@ -12,23 +13,22 @@ import {
   useRecentAgentRuns,
   useStartAgentRun,
 } from "@/api/hooks/agent";
+import { AgentChoiceChips, AgentPromptInput } from "@/components/AgentControls";
 import { AgentMealCard } from "@/components/AgentMealCard";
 import { AgentStepList } from "@/components/AgentStepList";
-import { EmptyState, ErrorState, LoadingState } from "@/components/States";
-import { useToast } from "@/components/Toast";
-import { AiLabel, Button, Card, Chip, Input } from "@/components/ui";
+import { AiLabel, AppText, Button, Card, DashedEmpty, ErrorState, LoadingState, SectionLabel, useToast } from "@/components/ui";
 import { formatCentsRange } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
+import { color, space } from "@/theme";
 
 export const DEFAULT_PROMPT =
   "Plan 3 dinners for this week. Use what's expiring first, keep it under $60, and make sure everyone can eat it.";
-const BUDGETS: { label: string; cents: number | null }[] = [
-  { label: "$40", cents: 4000 },
-  { label: "$60", cents: 6000 },
-  { label: "$80", cents: 8000 },
-  { label: "No limit", cents: null },
+const BUDGETS: { label: string; value: number | null }[] = [
+  { label: "$40", value: 4000 },
+  { label: "$60", value: 6000 },
+  { label: "$80", value: 8000 },
+  { label: "No limit", value: null },
 ];
 /** Recorded-run replay: each gap between steps is replayed as it happened, capped at 3 s. */
 export const REPLAY_GAP_CAP_MS = 3000;
@@ -57,7 +57,7 @@ export function displaySteps(steps: AgentStep[], runStatus: AgentRun["status"]):
   return sorted.map((s) => (s.status === "running" ? { ...s, status: settled } : s));
 }
 
-/** The safety line for meal i: perMeal[i] when it is that meal's entry (titles may repeat), else the first title match. */
+/** The safety entry for meal i: perMeal[i] when it is that meal's entry (titles may repeat), else the first title match. */
 function mealSafety(plan: AgentPlan, i: number) {
   const byIndex = plan.safety.perMeal[i];
   if (byIndex && byIndex.title === plan.meals[i].title) return byIndex;
@@ -69,7 +69,11 @@ export default function AgentScreen() {
   const groupId = useRequiredGroupId();
   const { replay } = useLocalSearchParams<{ replay?: string }>();
   // Keyed by group: switching households mid-run starts clean and never asks group B for group A's run.
-  return replay === "1" ? <ReplayFlow key={groupId} groupId={groupId} /> : <LiveFlow key={groupId} groupId={groupId} />;
+  return (
+    <View style={styles.screen} testID="screen-agent">
+      {replay === "1" ? <ReplayFlow key={groupId} groupId={groupId} /> : <LiveFlow key={groupId} groupId={groupId} />}
+    </View>
+  );
 }
 
 function LiveFlow({ groupId }: { groupId: string }) {
@@ -112,51 +116,51 @@ function LiveFlow({ groupId }: { groupId: string }) {
     start.reset();
   }
 
-  const failed = (message: string) => (
-    <Failed message={message} onRetry={startRun} onClose={() => router.back()} retrying={start.isPending} />
-  );
+  const close = () => router.back();
+  const failed = (message: string) => <Failed message={message} onRetry={startRun} onClose={close} retrying={start.isPending} />;
 
   if (!runId) {
     // No agent on this server (AGENT_URL unset): say so plainly; retrying won't help.
-    if (start.error instanceof ApiError && start.error.code === "NOT_CONFIGURED") return <NotSetUp onClose={() => router.back()} />;
+    if (start.error instanceof ApiError && start.error.code === "NOT_CONFIGURED") return <NotSetUp onClose={close} />;
     if (start.isError) return failed(startError(start.error));
     return (
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <AiLabel text="AI agent" />
-        <Input
-          label="What should we plan?"
-          value={prompt}
-          onChangeText={setPrompt}
-          multiline
-          maxLength={500}
-          style={styles.prompt}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <AiLabel text="Pantry Agent" />
+        <AppText variant="bodyS" color="ink2">
+          The agent reads your cabinet, list and everyone&apos;s allergies, finds real recipes, and proposes dinners. Nothing
+          is added to the list until you say so.
+        </AppText>
+        <AgentPromptInput label="What should we plan?" value={prompt} onChangeText={setPrompt} />
+        <AgentChoiceChips label="Budget" options={BUDGETS} value={budget} onChange={setBudget} />
+        <Button
+          label="Run"
+          size="lg"
+          fullWidth
+          loading={start.isPending}
+          disabled={!prompt.trim()}
+          onPress={startRun}
+          accessibilityLabel="Run the planning agent"
         />
-        <Text style={styles.label}>Budget</Text>
-        <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Budget">
-          {BUDGETS.map((b) => (
-            <Chip
-              key={b.label}
-              label={b.label}
-              role="radio"
-              selected={budget === b.cents}
-              accessibilityLabel={`Budget ${b.label}`}
-              onPress={() => setBudget(b.cents)}
-            />
-          ))}
-        </View>
-        <Button title="Run" loading={start.isPending} disabled={!prompt.trim()} onPress={startRun} accessibilityLabel="Run the planning agent" />
-        <Text style={styles.muted}>The agent reads your cabinet, list and allergies, then proposes meals. Nothing is added until you say so.</Text>
       </ScrollView>
     );
   }
 
-  if (run.isPending) return <Running steps={[]} onCancel={() => router.back()} />;
+  if (run.isPending) return <Running steps={[]} onCancel={close} />;
   // Full-screen error only when there's nothing to show; one failed poll keeps the steps on screen.
-  if (run.isError && !run.data) return <ErrorState error={run.error} onRetry={() => void run.refetch()} title="Couldn't load the plan" />;
+  if (run.isError && !run.data) {
+    return (
+      <View style={styles.content}>
+        <AppText variant="bodyL" weight="heavy">
+          Couldn&apos;t load the plan
+        </AppText>
+        <ErrorState message={errorMessage(run.error)} onRetry={() => void run.refetch()} />
+      </View>
+    );
+  }
   const data = run.data;
   if (data.status === "running") {
     if (agentRunTimedOut(data)) return failed("The agent took too long.");
-    return <Running steps={displaySteps(data.steps, data.status)} onCancel={() => router.back()} reconnecting={run.isError} />;
+    return <Running steps={displaySteps(data.steps, data.status)} onCancel={close} reconnecting={run.isError} />;
   }
   if (data.status === "failed") return failed(data.error ?? "The agent couldn't finish this plan.");
   return <PlanResult groupId={groupId} run={data} steps={displaySteps(data.steps, data.status)} onNewPlan={newPlan} />;
@@ -164,12 +168,17 @@ function LiveFlow({ groupId }: { groupId: string }) {
 
 function Running({ steps, onCancel, reconnecting }: { steps: AgentStep[]; onCancel: () => void; reconnecting?: boolean }) {
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <AiLabel text="AI agent" />
-      <Text style={styles.heading} accessibilityRole="header">
-        Planning your week…
-      </Text>
-      <Card>
+    <ScrollView contentContainerStyle={styles.content}>
+      <AiLabel text="Pantry Agent" />
+      <View style={styles.titleBlock}>
+        <AppText variant="tabTitle" accessibilityRole="header">
+          Planning your week…
+        </AppText>
+        <AppText variant="caption" color="muted">
+          Usually 15–30 seconds. You can close this; the agent keeps working.
+        </AppText>
+      </View>
+      <Card style={styles.steps}>
         {steps.length ? (
           <AgentStepList steps={steps} announce />
         ) : (
@@ -177,28 +186,27 @@ function Running({ steps, onCancel, reconnecting }: { steps: AgentStep[]; onCanc
         )}
       </Card>
       {reconnecting ? (
-        <Text style={styles.muted} accessibilityLiveRegion="polite">
+        <AppText variant="caption" weight="semi" color="warnFg" accessibilityLiveRegion="polite">
           Connection hiccup, reconnecting…
-        </Text>
+        </AppText>
       ) : null}
-      <Text style={styles.muted}>This usually takes 15–30 seconds. You can close this; the agent keeps working.</Text>
-      <Button title="Cancel" variant="secondary" onPress={onCancel} accessibilityLabel="Close; the agent keeps working" />
+      <Button label="Close" variant="secondary" fullWidth onPress={onCancel} accessibilityLabel="Close; the agent keeps working" />
     </ScrollView>
   );
 }
 
 function Failed({ message, onRetry, onClose, retrying }: { message: string; onRetry: () => void; onClose: () => void; retrying?: boolean }) {
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Card>
-        <Text style={styles.heading} accessibilityRole="header">
+    <ScrollView contentContainerStyle={styles.content}>
+      <Card style={styles.failed}>
+        <AppText variant="bodyL" weight="heavy" accessibilityRole="header">
           The agent couldn&apos;t finish
-        </Text>
-        <Text style={styles.error} accessibilityRole="alert">
+        </AppText>
+        <AppText weight="semi" color="dangerFg" accessibilityRole="alert">
           {message}
-        </Text>
-        <Button title="Try again" loading={retrying} onPress={onRetry} />
-        <Button title="Close" variant="secondary" onPress={onClose} />
+        </AppText>
+        <Button label="Try again" fullWidth loading={retrying} onPress={onRetry} />
+        <Button label="Close" variant="secondary" fullWidth onPress={onClose} />
       </Card>
     </ScrollView>
   );
@@ -207,13 +215,23 @@ function Failed({ message, onRetry, onClose, retrying }: { message: string; onRe
 /** 503 NOT_CONFIGURED: this server has no meal-planning agent. */
 function NotSetUp({ onClose }: { onClose: () => void }) {
   return (
-    <EmptyState title="The meal planner isn't set up on this server" message="Everything else in GrocerEZ keeps working. Ask whoever runs your server to turn on the planning agent.">
-      <Button title="Close" variant="secondary" onPress={onClose} />
-    </EmptyState>
+    <View style={styles.content}>
+      <DashedEmpty>
+        <View style={styles.empty}>
+          <AppText variant="bodyL" weight="heavy" center>
+            The meal planner isn&apos;t set up on this server
+          </AppText>
+          <AppText color="ink2" center>
+            Everything else in GrocerEZ keeps working. Ask whoever runs your server to turn on the planning agent.
+          </AppText>
+          <Button label="Close" variant="secondary" onPress={onClose} />
+        </View>
+      </DashedEmpty>
+    </View>
   );
 }
 
-/** Proposed (or already applied) plan: steps recap, meal cards, AI estimate, and the one write button. */
+/** Proposed (or already applied) plan: meal cards, AI estimate, the steps recap, and one pinned primary action. */
 function PlanResult({
   groupId,
   run,
@@ -228,12 +246,13 @@ function PlanResult({
   onNewPlan?: () => void;
 }) {
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
+  const insets = useSafeAreaInsets();
   const apply = useApplyAgentRun(groupId);
   /** Set on the first tap and kept after success: a second tap in the same frame (or before the refetch) is ignored. */
   const applying = useRef(false);
   const plan = run.plan;
-  if (!plan) return <ErrorState error={new Error("This run has no plan.")} title="No plan" />;
+  if (!plan) return <ErrorState message="This run has no plan." />;
 
   const n = plan.missingItems.length;
   const applied = run.status === "applied";
@@ -256,30 +275,53 @@ function PlanResult({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <AiLabel text={replayed ? "AI agent · recorded run" : "AI agent"} />
-      {steps.length ? (
-        <Card>
-          <AgentStepList steps={steps} />
-        </Card>
-      ) : null}
-      <Text style={styles.heading} accessibilityRole="header">
-        {plural(plan.meals.length, "dinner")} for this week
-      </Text>
-      {plan.summary ? <Text style={styles.body}>{plan.summary}</Text> : null}
-      {plan.estimate ? (
-        <Text style={styles.estimate} accessibilityLabel={`${formatCentsRange(plan.estimate.lowCents, plan.estimate.highCents, true)} to buy, AI estimate`}>
-          ✨ {formatCentsRange(plan.estimate.lowCents, plan.estimate.highCents, true)} to buy · {plan.estimate.label}
-        </Text>
-      ) : null}
-      {plan.meals.map((m, i) => (
-        // Index keys: the model may repeat a title, and each card must keep its own safety line.
-        <AgentMealCard key={i} meal={m} safety={mealSafety(plan, i)} />
-      ))}
-      <Button title={title} loading={apply.isPending} disabled={applied || n === 0 || apply.isPending} onPress={onApply} />
-      {onNewPlan ? <Button title="Plan something else" variant="secondary" onPress={onNewPlan} /> : null}
-      <Button title="Close" variant="ghost" onPress={() => router.back()} />
-    </ScrollView>
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <AiLabel text={replayed ? "Recorded run" : "Pantry Agent"} />
+        <View style={styles.titleBlock}>
+          <AppText variant="tabTitle" accessibilityRole="header">
+            {`${plural(plan.meals.length, "dinner")} for this week`}
+          </AppText>
+          {plan.summary ? (
+            <AppText variant="bodyS" color="ink2">
+              {plan.summary}
+            </AppText>
+          ) : null}
+        </View>
+        {plan.estimate ? (
+          <View style={styles.estimate}>
+            <AppText variant="bodyL" weight="heavy">
+              {`${formatCentsRange(plan.estimate.lowCents, plan.estimate.highCents, true)} to buy`}
+            </AppText>
+            <AiLabel text={plan.estimate.label} />
+          </View>
+        ) : null}
+        {plan.meals.map((m, i) => (
+          // Index keys: the model may repeat a title, and each card must keep its own safety line.
+          <AgentMealCard key={i} meal={m} safety={mealSafety(plan, i)} />
+        ))}
+        {steps.length ? (
+          <>
+            <SectionLabel style={styles.gapTop}>How the agent got here</SectionLabel>
+            <Card style={styles.steps}>
+              <AgentStepList steps={steps} />
+            </Card>
+          </>
+        ) : null}
+        {onNewPlan ? <Button label="Plan something else" variant="secondary" fullWidth onPress={onNewPlan} /> : null}
+        <Button label="Close" variant="ghost" fullWidth onPress={() => router.back()} />
+      </ScrollView>
+      <View style={[styles.footer, { paddingBottom: space.md + insets.bottom }]}>
+        <Button
+          label={title}
+          size="lg"
+          fullWidth
+          loading={apply.isPending}
+          disabled={applied || n === 0 || apply.isPending}
+          onPress={onApply}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -296,17 +338,50 @@ function ReplayFlow({ groupId }: { groupId: string }) {
   const run = useAgentRun(groupId, runId);
 
   if (!runId) {
-    if (recent.isPending) return <LoadingState message="Finding the last run…" />;
-    if (recent.isError) return <ErrorState error={recent.error} onRetry={() => void recent.refetch()} />;
+    if (recent.isPending) return <Loading message="Finding the last run…" />;
+    if (recent.isError) {
+      return (
+        <View style={styles.content}>
+          <ErrorState message={errorMessage(recent.error)} onRetry={() => void recent.refetch()} />
+        </View>
+      );
+    }
     return (
-      <EmptyState title="No recorded runs yet" message="Run “Plan our week” once, then long-press to replay it.">
-        <Button title="Plan our week" onPress={() => router.replace("/agent")} />
-      </EmptyState>
+      <View style={styles.content}>
+        <DashedEmpty>
+          <View style={styles.empty}>
+            <AppText variant="bodyL" weight="heavy" center>
+              No recorded runs yet
+            </AppText>
+            <AppText color="ink2" center>
+              Run “Plan our week” once, then long-press to replay it.
+            </AppText>
+            <Button label="Plan our week" onPress={() => router.replace("/agent")} />
+          </View>
+        </DashedEmpty>
+      </View>
     );
   }
-  if (run.isPending) return <LoadingState message="Loading the recorded run…" />;
-  if (run.isError && !run.data) return <ErrorState error={run.error} onRetry={() => void run.refetch()} />;
+  if (run.isPending) return <Loading message="Loading the recorded run…" />;
+  if (run.isError && !run.data) {
+    return (
+      <View style={styles.content}>
+        <ErrorState message={errorMessage(run.error)} onRetry={() => void run.refetch()} />
+      </View>
+    );
+  }
   return <Replayer key={run.data.id} groupId={groupId} run={run.data} />;
+}
+
+function Loading({ message }: { message: string }) {
+  return (
+    <View style={styles.content} accessibilityLabel={message}>
+      <LoadingState />
+      <AppText variant="caption" color="muted" center>
+        {message}
+      </AppText>
+    </View>
+  );
 }
 
 /** Gaps between consecutive steps (from the run's start), each capped at 3 s. */
@@ -351,13 +426,19 @@ function Replayer({ groupId, run }: { groupId: string; run: AgentRun }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  prompt: { minHeight: 110, textAlignVertical: "top" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  heading: { fontSize: fontSize.lg, fontWeight: "800", color: colors.text },
-  label: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: "600" },
-  body: { fontSize: fontSize.md, color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  estimate: { fontSize: fontSize.md, fontWeight: "700", color: colors.ai },
-  error: { fontSize: fontSize.md, color: colors.danger },
+  screen: { flex: 1, backgroundColor: color.bg },
+  content: { padding: space.screenX, gap: space.lg, paddingBottom: space.xxl * 2 },
+  titleBlock: { gap: space.xs },
+  steps: { paddingVertical: space.md, paddingHorizontal: space.md },
+  failed: { gap: space.md },
+  empty: { alignItems: "center", gap: space.md },
+  estimate: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space.sm },
+  gapTop: { marginTop: space.sm },
+  footer: {
+    paddingTop: 10,
+    paddingHorizontal: space.screenX,
+    borderTopWidth: 1,
+    borderTopColor: color.border,
+    backgroundColor: color.bg,
+  },
 });
