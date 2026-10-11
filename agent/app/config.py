@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-5-5"
     bedrock_model: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
+    # Cited web recipes (Tavily search + allowlisted recipe sites). Without a key the model writes the meals.
+    tavily_api_key: str = Field(default="", repr=False)
+    tavily_url: str = "https://api.tavily.com/search"
+    recipe_candidates: int = 4
+    recipe_domains: list[str] = [
+        "allrecipes.com", "seriouseats.com", "bbcgoodfood.com", "simplyrecipes.com", "budgetbytes.com",
+        "foodnetwork.com", "bonappetit.com", "epicurious.com", "eatingwell.com", "delish.com", "tasteofhome.com",
+        "cookieandkate.com", "minimalistbaker.com", "loveandlemons.com",
+    ]
+
     agent_shared_secret: str = Field(default="", repr=False)
     agent_max_tool_calls: int = 25
     # Wall clock 95 s + step flush 3 s + terminal post <= 10.2 s keeps the terminal event under ~108 s (server: 120 s).

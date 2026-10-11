@@ -19,6 +19,7 @@ from strands import tool
 from .config import Settings
 from .models import model_id_for
 from .pricing import PriceService
+from .recipes import ParsedRecipe, RecipeService, _sing, have_item, singular_set, step_key
 from .schemas import (
     AgentPlan,
     PlanDraft,
@@ -110,14 +111,19 @@ def _unique(items: Iterable[str]) -> list[str]:
     return _strs(list(items))
 
 
-def safety_payload(meals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _lines(m: dict[str, Any]) -> list[str]:
+    """A sourced meal's ingredient lines (<= 40, <= 200 chars each), sent so the agent checks what apply checks."""
+    return [str(x)[:200] for x in m.get("ingredientLines") or [] if str(x).strip()][:40]
+
+
+def safety_payload(meals: list[dict[str, Any]], *, to_buy: bool = True) -> list[dict[str, Any]]:
     """Meals as the server's apply step checks them, plus "To buy" pseudo-meals for the missingItems names."""
     out = [
-        {"title": m["title"], "steps": m["steps"][:6],
+        {"title": m["title"], "steps": m["steps"][:6], "ingredientLines": _lines(m),
          "ingredients": _unique([*m["ingredients"], *m["missing"], *m["uses"]])[:25]}
         for m in meals
     ]
-    names = _unique(n for m in meals for n in m["missing"])
+    names = _unique(n for m in meals for n in m["missing"]) if to_buy else []
     for i in range(0, len(names), 25):
         if len(out) >= 7:
             break
@@ -147,6 +153,7 @@ def build_tools(
     settings: Settings,
     *,
     pricer: PriceService,
+    recipes: RecipeService | None = None,
 ) -> list[Any]:
     """Return the run's tool list. Everything closes over ctx/client/sink/state/pricer."""
     gid = ctx.group_id
@@ -260,6 +267,7 @@ def build_tools(
             if not it.get("checked")
         ]
         names = [_clip(n, 60) for n in names if n][:60]
+        state.list_names = singular_set(names)
         state.done_labels["get_shopping_list"] = (
             f"{len(names)} already on the list" if names else "Nothing on the list yet"
         )
@@ -309,8 +317,8 @@ def build_tools(
 
     def _maybe_price() -> None:
         """Start background pricing once every drafted meal (and To buy) is safe."""
-        if not state.draft_meals or not state.to_buy_ok:
-            return
+        if not state.draft_meals or state.pending_finds > 0:
+            return  # wait until every parallel find_recipe has landed so the final name set is priced once
         if all((r := state.safety_by_title.get(t)) is not None and r.passes for t in state.draft_meals):
             pricer.start(_unique(n for m in state.draft_meals.values() for n in m["missing"]))
 
@@ -324,7 +332,10 @@ def build_tools(
         """Deterministic allergy/diet safety check. Pass ALL meals once as FULL meals:
         {"title","ingredients":[...],"day","minutes","servings","missing":[...],"steps":[...]}.
         Your last call defines the plan that propose_plan submits. Returns all_pass or the failed meals."""
-        norm = [normalize_meal(m) for m in strip_nul(meals) if isinstance(m, dict)]
+        new = [normalize_meal(m) for m in strip_nul(meals) if isinstance(m, dict)]
+        # Meals already found with find_recipe (cited) stay in the plan; the model only adds its own fallback meals.
+        kept = [m for t, m in state.draft_meals.items() if m.get("source") and t not in {n["title"] for n in new}]
+        norm = [*kept, *new]
         real, extra, err = await _check(norm) if norm else ([], [], "error: no meals given")
         if err:
             _invalidate()  # unknown state: propose_plan must be preceded by a fresh check
@@ -380,12 +391,14 @@ def build_tools(
         })
         if not new["ingredients"]:
             return "error: a meal needs at least one ingredient"
+        if new.get("source") and (rm or add):
+            new = {**new, "source": None, "ingredientLines": []}  # edited: it no longer matches the cited recipe
         drafts = {(new["title"] if t == key else t): (new if t == key else d) for t, d in state.draft_meals.items()}
         # Re-check only this meal; the To buy entry is recomputed over every drafted meal.
         names = _unique(n for d in drafts.values() for n in d["missing"])
         try:
             body = SafetyCheckBody.model_validate({"meals": [
-                {"title": new["title"], "steps": new["steps"][:6],
+                {"title": new["title"], "steps": new["steps"][:6], "ingredientLines": _lines(new),
                  "ingredients": _unique([*new["ingredients"], *new["missing"], *new["uses"]])[:25]},
                 *([{"title": TO_BUY, "ingredients": names[:25]}] if names else []),
             ]})
@@ -418,6 +431,94 @@ def build_tools(
                        "failed": [{"title": r.title, "problems": [p.model_dump() for p in r.problems]} for r in bad]})
         all_ok = all(r.passes for r in state.safety_by_title.values()) and len(state.safety_by_title) == len(drafts)
         return _j({"passes": True, "title": new["title"], "all_meals_pass": all_ok})
+
+    # ── find_recipe (cited web recipes) ──────────────────────────────────────
+
+    ASSUMED = {"water", "salt", "pepper", "black pepper", "ice", "cooking spray"}  # never added to the list
+    NOTE = ("No cited recipe available for this idea. Write the meal yourself (ingredients, missing, steps) and "
+            "include it in check_meal_safety; it will be labeled AI-created.")
+
+    def _owned() -> set[str]:
+        return singular_set(state.cabinet_names) | state.list_names
+
+    def _join(names: list[str]) -> str:
+        return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+    def _meal_from(r: ParsedRecipe) -> dict[str, Any]:
+        owned = _owned()
+        ings = r.ingredients[:25]
+        missing = [i for i in ings if not have_item(i, owned) and _norm(i) not in ASSUMED][:15]
+        core = [i for i in ings if i not in missing][:3] or ings[:3]
+        # Our own generic steps: the site's method text is never copied (full method is one tap away at the source).
+        steps = [f"Prep {_join(core)}.", "Cook everything as directed in the linked recipe.", "Season to taste and serve."]
+        return normalize_meal({
+            "title": _clip(r.title, 120), "day": None, "minutes": r.minutes, "servings": r.servings,
+            "ingredients": ings, "missing": missing, "steps": steps,
+            "source": {"url": r.url, "site": r.site, "title": r.title, "imageUrl": r.image},
+            "ingredientLines": r.lines,
+        })
+
+    def _score(r: ParsedRecipe, must_use: list[str]) -> int:
+        owned = _owned()
+        have = sum(1 for g in r.ingredients if have_item(g, owned))
+        wanted = sum(1 for mu in must_use if any(_sing(mu) in _sing(g) or _sing(g) in _sing(mu) for g in r.ingredients))
+        return have + 3 * wanted  # prefer recipes that use the expiring items, then ones the cabinet mostly covers
+
+    async def _batch(payload: list[dict[str, Any]]) -> list[SafetyMealOut] | None:
+        try:
+            body = SafetyCheckBody.model_validate({"meals": payload})
+        except ValidationError:
+            return None
+        res = await client.post("safety check", f"/groups/{gid}/agent/safety-check", body.model_dump())
+        if not res.ok:
+            return None
+        try:
+            parsed = SafetyCheckResponse.model_validate(res.data)
+        except ValidationError:
+            return None
+        return parsed.meals if len(parsed.meals) == len(payload) else None
+
+    async def _find(idea: str, key: str, must_use: list[str], avoid: list[str]) -> str:
+        if recipes is None or not recipes.enabled:
+            state.done_labels[key] = "Writing this one myself"
+            return _j({"found": False, "note": NOTE})
+        cands = await recipes.candidates(idea, must_use, avoid, state.used_urls)
+        cands = [c for c in cands if _clip(c.title, 120) not in state.draft_meals]
+        ranked = sorted(enumerate(cands), key=lambda t: (-_score(t[1], must_use), t[0]))
+        meals = [_meal_from(c) for _, c in ranked]
+        recs = [c for _, c in ranked]
+        # One batched check, exactly what apply checks: title, steps, ingredients, and the source's raw lines.
+        results = await _batch(safety_payload(meals, to_buy=False)) if meals else None
+        winner = None
+        for i, res in enumerate(results or []):
+            if res.passes:
+                winner = (meals[i], recs[i], res)
+                break
+        if winner is None:
+            state.done_labels[key] = "No safe recipe found, writing it myself"
+            return _j({"found": False, "note": NOTE})
+        meal, rec, res = winner
+        state.draft_meals[meal["title"]] = meal
+        state.safety_by_title[meal["title"]] = SafetyMealOut(title=meal["title"], passes=True, problems=[], unknown=res.unknown)
+        state.used_urls.add(rec.url)
+        state.done_labels[key] = _clip(f"Found: {rec.title} ({rec.site})", 200)
+        return _j({"found": True, "title": meal["title"], "site": rec.site, "minutes": meal["minutes"],
+                   "uses": meal["uses"], "missing": meal["missing"],
+                   "note": "Stored for propose_plan; do not re-send this meal."})
+
+    @tool
+    async def find_recipe(idea: str, must_use: list[str] | None = None, avoid: list[str] | None = None) -> str:
+        """Find a real, cited web recipe for one meal idea (prefers recipes using the must_use cabinet items, skips
+        ones with avoid items). A safe match is stored for propose_plan; do not re-send it. Call once per idea,
+        all ideas in the same turn."""
+        idea = " ".join(str(strip_nul(idea)).split())[:120] or "dinner"
+        state.pending_finds += 1
+        try:
+            return await _find(idea, step_key(idea), _strs(strip_nul(must_use or []))[:5],
+                               _strs(strip_nul(avoid or []))[:10])
+        finally:
+            state.pending_finds -= 1
+            _maybe_price()
 
     # ── propose_plan ─────────────────────────────────────────────────────────
 
@@ -533,4 +634,5 @@ def build_tools(
             return "error: the server closed this run"
         return await _reject("error: couldn't submit the plan (server unavailable).")
 
-    return [get_household, get_cabinet, get_shopping_list, get_wants, check_meal_safety, revise_meal, propose_plan]
+    return [get_household, get_cabinet, get_shopping_list, get_wants, find_recipe, check_meal_safety, revise_meal,
+            propose_plan]

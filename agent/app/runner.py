@@ -17,6 +17,7 @@ from .config import Settings, get_settings
 from .hooks import Budget, StepReporter
 from .models import build_model, model_id_for
 from .pricing import PriceService
+from .recipes import RecipeService
 from .schemas import RunContext, RunState
 from .server_client import EventSink, ServerClient
 from .tools import build_tools
@@ -60,6 +61,7 @@ async def run(
     price_agent_factory: Any = None,
     price_cache: Any = None,
     retry_delay_s: float = 0.2,
+    recipe_transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
     """Posts exactly one of proposed/failed (unless the server closed the run). Only re-raises cancellation."""
     settings = settings or get_settings()
@@ -68,6 +70,7 @@ async def run(
     sink = EventSink(client, ctx.run_id, step_timeout=settings.step_timeout_s,
                      terminal_timeout=settings.terminal_timeout_s)
     pricer = PriceService(ctx, state, settings, sink, agent_factory=price_agent_factory, cache=price_cache)
+    recipes = RecipeService(settings, transport=recipe_transport)
     agent: Agent | None = None
 
     def meta() -> dict[str, Any]:
@@ -84,7 +87,7 @@ async def run(
 
     client.on_fatal = on_fatal
     try:
-        tools = build_tools(ctx, client, sink, state, settings, pricer=pricer)
+        tools = build_tools(ctx, client, sink, state, settings, pricer=pricer, recipes=recipes)
         agent = Agent(
             model=model if model is not None else build_model(settings.agent_provider, settings),
             tools=tools,
@@ -119,6 +122,7 @@ async def run(
         try:
             await sink.flush(1.0)  # let queued steps finish before the HTTP client closes
             await client.aclose()
+            await recipes.aclose()
         except Exception:
             log.exception("closing client failed")
         log.info("run %s finished: toolCalls=%d ms=%d toolSeconds=%.1f modelSeconds~%.1f terminal=%s", ctx.run_id,
