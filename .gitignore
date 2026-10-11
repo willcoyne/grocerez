@@ -8,3 +8,4 @@ server/.env.prod
 deploy/linode/.env.storage
 deploy/linode/.env.tmp
 deploy/linode/.env.test
+deploy/linode/.token

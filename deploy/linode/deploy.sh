@@ -3,7 +3,8 @@
 # behind Caddy (HTTPS on the instance's free *.ip.linodeusercontent.com name), and optionally a Linode Object Storage
 # bucket for photos. Safe to re-run: it finds the existing instance/bucket and just ships the new code.
 #
-#   export LINODE_TOKEN=...        # cloud.linode.com → Profile → API Tokens (Linodes + Object Storage read/write)
+#   export LINODE_TOKEN=...        # or put it in deploy/linode/.token (git-ignored); cloud.linode.com → Profile →
+#                                  # API Tokens with read/write on Linodes, Firewalls and Object Storage
 #   deploy/linode/deploy.sh                 # create or update the instance
 #   deploy/linode/deploy.sh --with-storage  # also create the Object Storage bucket + keys and wire them into the API
 #
@@ -21,7 +22,9 @@ LABEL="grocerez"
 KEY="$HOME/.ssh/grocerez_linode"
 WITH_STORAGE=false
 [[ "${1:-}" == "--with-storage" ]] && WITH_STORAGE=true
-: "${LINODE_TOKEN:?export LINODE_TOKEN first (cloud.linode.com → Profile → API Tokens)}"
+# Token: $LINODE_TOKEN, else the git-ignored file deploy/linode/.token (one line).
+[[ -z "${LINODE_TOKEN:-}" && -f "$HERE/.token" ]] && LINODE_TOKEN="$(tr -d '[:space:]' < "$HERE/.token")"
+: "${LINODE_TOKEN:?export LINODE_TOKEN or put it in deploy/linode/.token (cloud.linode.com → Profile → API Tokens)}"
 
 api() { # api METHOD PATH [JSON]
   curl -sS --fail-with-body -X "$1" "https://api.linode.com/v4$2" \
