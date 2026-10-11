@@ -227,3 +227,55 @@ export const AgentEvent = z.discriminatedUnion("type", [
   }),
 ]);
 export type AgentEvent = z.infer<typeof AgentEvent>;
+
+// ─── Recipe index (spec §12): crawled once, embedded with Akamai, searched by find_recipe before Tavily ─────
+
+const httpsUrl = () => text().max(2000).regex(/^https:\/\//, "must be an https URL");
+
+/** One crawled recipe as the crawler sends it (parsed from the page's schema.org Recipe JSON-LD). */
+export const IndexedRecipe = z.object({
+  url: httpsUrl(),
+  site: text().trim().min(1).max(80),
+  title: text().trim().min(1).max(200),
+  imageUrl: httpsUrl().nullable(),
+  minutes: z.number().int().min(1).max(1440).nullable(),
+  servings: z.number().int().min(1).max(50).nullable(),
+  /** Source lines with quantities, as published. */
+  ingredientLines: z.array(text().trim().min(1).max(200)).min(1).max(40),
+  /** Cleaned generic names ("Mozzarella"), from the agent's deterministic cleaner. */
+  ingredients: z.array(text().trim().min(1).max(120)).min(1).max(40),
+});
+export type IndexedRecipe = z.infer<typeof IndexedRecipe>;
+
+/** Crawler → server: POST /api/internal/recipes (X-Agent-Secret). Upsert by url; the server computes allergens and embeddings. */
+export const RecipeIngestBody = z.object({ recipes: z.array(IndexedRecipe).min(1).max(100) });
+export const RecipeIngestResponse = z.object({ upserted: z.number().int(), embedded: z.number().int() });
+
+/** Agent (run token) → server: POST /groups/:gid/agent/recipes/search. */
+export const RecipeSearchBody = z.object({
+  /** Free-text idea, e.g. "lemon chicken with spinach rice". Embedded server-side with Akamai. */
+  query: text().trim().min(1).max(200),
+  /** Cabinet items to prefer (expiring first); boosts recipes that use them. */
+  mustUse: z.array(text().trim().min(1).max(120)).max(10).default([]),
+  limit: z.number().int().min(1).max(10).default(6),
+});
+export type RecipeSearchBody = z.infer<typeof RecipeSearchBody>;
+
+export const RecipeSearchResponse = z.object({
+  /**
+   * Best matches first. Recipes whose precomputed allergens hit ANY member's allergens, or whose lines conflict with
+   * a member's diet, are already excluded; the agent still runs the full safety check before using one.
+   */
+  recipes: z.array(
+    IndexedRecipe.extend({
+      id: z.uuid(),
+      /** Cosine distance to the query (0 = identical). */
+      distance: z.number(),
+      /** Which mustUse items it uses. */
+      uses: z.array(z.string()),
+    }),
+  ),
+  /** false when embeddings aren't configured or the index is empty → the agent falls back to Tavily. */
+  available: z.boolean(),
+});
+export type RecipeSearchResponse = z.infer<typeof RecipeSearchResponse>;

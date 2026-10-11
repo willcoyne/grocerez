@@ -499,3 +499,24 @@ The agent finds real recipes on the web and cites them. It replaces the old one-
 **Safety:** the server keyword-scans `ingredientLines` as well, as a belt-and-braces check. This scan never marks anything `unknown`. The generic `ingredients` get the full check, including the allergy-household rule that unverifiable ingredients fail.
 
 **Fallback:** no Tavily key, a search error, or no safe recipe → the model-written meal, clearly labeled.
+
+## 12. Own recipe index on Akamai (decided 2026-10-11): Tavily becomes the fallback
+
+The goal: faster lookups, a higher hit rate, and more of the run on Akamai. Contract: `IndexedRecipe`, `RecipeIngestBody`, `RecipeSearchBody` and `RecipeSearchResponse` in `contracts/agent.ts`.
+
+1. **Crawl, offline** (`agent/scripts/build_recipe_index.py`):
+   - Read the sitemaps of the allowlisted sites (§11) and pick recipe URLs.
+   - Fetch them politely: robots.txt respected, ≤ 1 request/s per host, the same fetch limits as `find_recipe`.
+   - Parse the JSON-LD with the existing parser, and clean ingredients with the existing cleaner.
+   - POST batches to `/api/internal/recipes` (X-Agent-Secret).
+   - Target: a few thousand recipes, resumable, with a per-domain cap.
+2. **Store and embed (server):**
+   - A `recipes` table: url unique, site, title, image_url, minutes, servings, ingredient_lines[], ingredients[], allergens allergen[], embedding vector, embedding_model, embedded_at, crawled_at.
+   - Allergens are computed at ingest with `allergensInText` over the lines plus the catalog matches of the ingredients.
+   - The embedding is built from "title: ingredients" with will's `lib/embeddings.ts` (Akamai `hackathon-embedding`, 1024-d), and a backfill job embeds anything still missing.
+3. **Search (server):** `POST /groups/:gid/agent/recipes/search`. The run token may call it.
+   - Embed the query with `embedQuery`.
+   - Exclude recipes whose allergens hit any member, and recipes whose lines conflict with any member's diet.
+   - Rank by cosine distance, minus a boost for each `mustUse` item used.
+   - Return the top `limit`.
+4. **Agent:** `find_recipe` queries the index first, then runs the same per-candidate meal build and safety check. If there's no index hit, no safe candidate, or the index isn't available, it falls back to the Tavily path from §11, unchanged.
