@@ -1,5 +1,6 @@
 import type { AgentStep } from "@contracts/agent";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useEffect } from "react";
+import { AccessibilityInfo, ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { colors, fontSize, spacing } from "@/theme";
 
@@ -7,9 +8,22 @@ const STATUS_WORD: Record<AgentStep["status"], string> = { running: "in progress
 
 /**
  * The agent's steps as they happen: spinner while running, ✓ when done, ✕ when failed. Each row also says its
- * status in words for screen readers (never color alone).
+ * status in words for screen readers (never color alone). With `announce`, the latest step is spoken when it changes
+ * (accessibilityLiveRegion only works on Android).
  */
-export function AgentStepList({ steps }: { steps: Pick<AgentStep, "id" | "seq" | "label" | "status" | "detail">[] }) {
+export function AgentStepList({
+  steps,
+  announce,
+}: {
+  steps: Pick<AgentStep, "id" | "seq" | "label" | "status" | "detail">[];
+  announce?: boolean;
+}) {
+  const latest = steps[steps.length - 1];
+  const message = announce && latest ? `${latest.label}, ${STATUS_WORD[latest.status]}` : null;
+  useEffect(() => {
+    if (message) AccessibilityInfo.announceForAccessibility(message);
+  }, [message]);
+
   return (
     <View style={styles.list} accessibilityLiveRegion="polite" accessibilityLabel="Agent steps">
       {steps.map((s) => (

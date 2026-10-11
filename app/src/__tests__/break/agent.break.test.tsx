@@ -12,7 +12,7 @@ import demoRunJson from "../../../../server/test/fixtures/agent/demo-run.json";
 import { api, ApiError } from "@/api/client";
 import AgentScreen from "@/app/agent";
 import { ActiveGroupContextForTests } from "@/state/ActiveGroupContext";
-import { apiRoutes, groupValue, renderWithProviders, testGroup } from "@/test-utils";
+import { apiRoutes, groupValue, renderWithProviders, testGroup, testUser } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
 jest.mock("@/lib/confirm", () => ({ confirm: jest.fn(async () => true) }));
@@ -45,6 +45,8 @@ afterEach(() => jest.useRealTimers());
 
 async function settle(qc: QueryClient) {
   await waitFor(() => expect(qc.isFetching() + qc.isMutating()).toBe(0));
+  // TanStack batches observer notifications on setTimeout(0): flush that inside act too.
+  await act(() => new Promise<void>((r) => setTimeout(r, 0)));
 }
 
 /** Lets a test switch the active household while the agent screen stays mounted (the modal sits above the tabs). */
@@ -117,8 +119,14 @@ describe("finished plan with a step still `running`", () => {
 // ─── 2. Closing the sheet orphans the run ────────────────────────────────────
 
 describe("closing the sheet mid-run ('You can close this; the agent keeps working')", () => {
+  /** The fixture run, made "mine" (the signed-in test user) and "just now" so the test doesn't depend on the calendar. */
+  const mine = (over: Partial<AgentRun> = {}): AgentRun => {
+    const now = new Date().toISOString();
+    return { ...clone(), userId: testUser.id, createdAt: now, updatedAt: now, ...over };
+  };
+
   it("reopening 'Plan our week' resumes my in-flight/proposed run instead of a blank compose form", async () => {
-    const proposed = clone();
+    const proposed = mine();
     apiMock.mockImplementation(
       apiRoutes({
         [`GET /groups/${g}/agent/runs`]: () => [summaryOf(proposed)],
@@ -129,6 +137,32 @@ describe("closing the sheet mid-run ('You can close this; the agent keeps workin
     // The run the user was told would keep working finished while the sheet was closed: its plan must be reachable.
     expect(await screen.findByText("Add 6 items to the list", {}, { timeout: 1000 })).toBeTruthy();
     await settle(queryClient);
+  });
+
+  it("resumes my run that is still in progress (live steps, no compose form)", async () => {
+    const running = mine({ status: "running", plan: null, meta: null, steps: clone().steps.slice(0, 2) });
+    apiMock.mockImplementation(
+      apiRoutes({
+        [`GET /groups/${g}/agent/runs`]: () => [summaryOf(running)],
+        [`GET ${runPath}`]: () => running,
+      }),
+    );
+    const { queryClient } = await renderWithProviders(<AgentScreen />);
+    expect(await screen.findByText("Planning your week…")).toBeTruthy();
+    expect(screen.queryByLabelText("Run the planning agent")).toBeNull();
+    await settle(queryClient);
+  });
+
+  it.each([
+    ["another member's run", { userId: "44444444-4444-4444-8444-444444444444" }],
+    ["a stale proposed plan (2 h old)", { updatedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }],
+  ])("does not hijack the sheet with %s", async (_name, over) => {
+    const r = mine(over);
+    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/agent/runs`]: () => [summaryOf(r)], [`GET ${runPath}`]: () => r }));
+    const { queryClient } = await renderWithProviders(<AgentScreen />);
+    await settle(queryClient);
+    expect(screen.getByLabelText("Run the planning agent")).toBeTruthy();
+    expect(gets(runPath)).toBe(0);
   });
 });
 
@@ -364,6 +398,7 @@ describe("accessibility", () => {
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: ["group", g, "agent-runs", demoRun.id] });
     });
+    await settle(queryClient);
   });
 
   it("budget choices are exposed as radio buttons (one of four), not independent checkboxes", async () => {

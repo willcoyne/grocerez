@@ -98,12 +98,15 @@ export function Chip({
   onPress,
   tone = "neutral",
   accessibilityLabel,
+  role = "checkbox",
 }: {
   label: string;
   selected?: boolean;
   onPress?: () => void;
   tone?: "neutral" | "danger" | "warning" | "success" | "ai";
   accessibilityLabel?: string;
+  /** "radio" for one-of-many choices (wrap the chips in a View with accessibilityRole="radiogroup"). */
+  role?: "checkbox" | "radio";
 }) {
   const toneStyle = chipTones[tone];
   const content = (
@@ -121,9 +124,9 @@ export function Chip({
   }
   return (
     <Pressable
-      accessibilityRole="checkbox"
+      accessibilityRole={role}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ checked: !!selected }}
+      accessibilityState={role === "radio" ? { checked: !!selected, selected: !!selected } : { checked: !!selected }}
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,

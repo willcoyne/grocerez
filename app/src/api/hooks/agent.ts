@@ -13,6 +13,33 @@ import { keys } from "../keys";
 
 /** How often a running run is polled. The socket ("agent:changed") usually beats it; polling covers a dropped socket. */
 export const AGENT_POLL_MS = 1500;
+/** The server fails a run after 120 s; past this (+10 s slack) a still-`running` run is treated as stuck. */
+export const AGENT_RUN_TIMEOUT_MS = 130_000;
+/** A proposed plan the user walked away from is reopened for this long. */
+export const RESUME_PROPOSED_MS = 30 * 60_000;
+
+type RunTimes = Pick<AgentRunSummary, "status" | "createdAt">;
+
+/** True when a run still says `running` long after the server should have finished or failed it. */
+export function agentRunTimedOut(run: RunTimes, now = Date.now()): boolean {
+  return run.status === "running" && now - Date.parse(run.createdAt) > AGENT_RUN_TIMEOUT_MS;
+}
+
+/**
+ * The run to reopen when "Plan our week" is opened again: the group's newest run, if it's mine and either still
+ * running (within the timeout) or a recently proposed plan. Otherwise the compose form.
+ */
+export function pickResumableRun(
+  runs: AgentRunSummary[] | undefined,
+  userId: string | undefined,
+  now = Date.now(),
+): AgentRunSummary | null {
+  const newest = runs?.[0];
+  if (!newest || !userId || newest.userId !== userId) return null;
+  if (newest.status === "running") return agentRunTimedOut(newest, now) ? null : newest;
+  if (newest.status === "proposed") return now - Date.parse(newest.updatedAt) <= RESUME_PROPOSED_MS ? newest : null;
+  return null;
+}
 
 /**
  * Start a Pantry Agent run → 202 {runId}. Never retried automatically (rate-limited 10/hour/group).
@@ -26,13 +53,16 @@ export function useStartAgentRun(groupId: string) {
   });
 }
 
-/** One run with its steps. Polls every 1.5 s while the agent is still working, then stops. */
+/** One run with its steps. Polls every 1.5 s while the agent is still working, then stops (also once it's stuck). */
 export function useAgentRun(groupId: string, runId: string | null) {
   return useQuery({
     queryKey: keys.agentRun(groupId, runId ?? ""),
     queryFn: () => api<AgentRun>(`/groups/${groupId}/agent/runs/${runId}`),
     enabled: !!groupId && !!runId,
-    refetchInterval: (q) => (q.state.data?.status === "running" ? AGENT_POLL_MS : false),
+    refetchInterval: (q) => {
+      const run = q.state.data;
+      return run?.status === "running" && !agentRunTimedOut(run) ? AGENT_POLL_MS : false;
+    },
   });
 }
 

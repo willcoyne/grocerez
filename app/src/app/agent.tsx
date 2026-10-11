@@ -1,10 +1,17 @@
-import type { AgentRun, AgentStep } from "@contracts/agent";
+import type { AgentPlan, AgentRun, AgentStep } from "@contracts/agent";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { ApiError, errorMessage } from "@/api/client";
-import { useAgentRun, useApplyAgentRun, useRecentAgentRuns, useStartAgentRun } from "@/api/hooks/agent";
+import {
+  agentRunTimedOut,
+  pickResumableRun,
+  useAgentRun,
+  useApplyAgentRun,
+  useRecentAgentRuns,
+  useStartAgentRun,
+} from "@/api/hooks/agent";
 import { AgentMealCard } from "@/components/AgentMealCard";
 import { AgentStepList } from "@/components/AgentStepList";
 import { EmptyState, ErrorState, LoadingState } from "@/components/States";
@@ -12,6 +19,7 @@ import { useToast } from "@/components/Toast";
 import { AiLabel, Button, Card, Chip, Input } from "@/components/ui";
 import { formatCentsRange } from "@/lib/format";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
+import { useAuth } from "@/state/AuthContext";
 import { colors, fontSize, spacing } from "@/theme";
 
 export const DEFAULT_PROMPT =
@@ -38,33 +46,74 @@ function applyError(e: unknown): string {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/**
+ * Steps in display order. Once the run is over, a step left `running` (e.g. the agent's last "done" event arrived
+ * after the plan and was rejected) is shown as finished, never as an endless spinner.
+ */
+export function displaySteps(steps: AgentStep[], runStatus: AgentRun["status"]): AgentStep[] {
+  const sorted = [...steps].sort((a, b) => a.seq - b.seq);
+  if (runStatus === "running") return sorted;
+  const settled = runStatus === "failed" ? "failed" : "done";
+  return sorted.map((s) => (s.status === "running" ? { ...s, status: settled } : s));
+}
+
+/** The safety line for meal i: perMeal[i] when it is that meal's entry (titles may repeat), else the first title match. */
+function mealSafety(plan: AgentPlan, i: number) {
+  const byIndex = plan.safety.perMeal[i];
+  if (byIndex && byIndex.title === plan.meals[i].title) return byIndex;
+  return plan.safety.perMeal.find((s) => s.title === plan.meals[i].title);
+}
+
 /** Pantry Agent: compose → running (live steps) → proposed (meal cards) → applied, or failed. `?replay=1` replays the last run. */
 export default function AgentScreen() {
   const groupId = useRequiredGroupId();
   const { replay } = useLocalSearchParams<{ replay?: string }>();
-  return replay === "1" ? <ReplayFlow groupId={groupId} /> : <LiveFlow groupId={groupId} />;
+  // Keyed by group: switching households mid-run starts clean and never asks group B for group A's run.
+  return replay === "1" ? <ReplayFlow key={groupId} groupId={groupId} /> : <LiveFlow key={groupId} groupId={groupId} />;
 }
 
 function LiveFlow({ groupId }: { groupId: string }) {
   const router = useRouter();
+  const { user } = useAuth();
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [budget, setBudget] = useState<number | null>(6000);
-  const [runId, setRunId] = useState<string | null>(null);
+  /** The run this sheet started, tagged with its group so a late answer can never attach to another household. */
+  const [started, setStarted] = useState<{ groupId: string; runId: string } | null>(null);
+  /** Once the user starts (or dismisses) something here, don't auto-resume an older run. */
+  const [touched, setTouched] = useState(false);
+  const starting = useRef(false);
+  const recent = useRecentAgentRuns(groupId);
   const start = useStartAgentRun(groupId);
+
+  // Reopening the sheet picks up my in-flight or just-proposed run ("You can close this; the agent keeps working").
+  const resumable = touched ? null : pickResumableRun(recent.data, user?.id);
+  const runId = (started?.groupId === groupId ? started.runId : null) ?? resumable?.id ?? null;
   const run = useAgentRun(groupId, runId);
 
   function startRun() {
-    setRunId(null);
+    if (starting.current) return; // a double tap in one frame must not start two runs
+    starting.current = true;
+    setTouched(true);
+    setStarted(null);
     start.mutate(
       { prompt: prompt.trim(), budgetCents: budget },
       {
-        onSuccess: (res) => setRunId(res.runId),
+        onSuccess: (res) => setStarted({ groupId, runId: res.runId }),
         // No agent on this server: the quick recipe screen is the fallback.
         onError: (e) => {
           if (e instanceof ApiError && e.code === "NOT_CONFIGURED") router.replace("/recipes");
         },
+        onSettled: () => {
+          starting.current = false;
+        },
       },
     );
+  }
+
+  function newPlan() {
+    setTouched(true);
+    setStarted(null);
+    start.reset();
   }
 
   const failed = (message: string) => (
@@ -87,11 +136,12 @@ function LiveFlow({ groupId }: { groupId: string }) {
           style={styles.prompt}
         />
         <Text style={styles.label}>Budget</Text>
-        <View style={styles.chips}>
+        <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Budget">
           {BUDGETS.map((b) => (
             <Chip
               key={b.label}
               label={b.label}
+              role="radio"
               selected={budget === b.cents}
               accessibilityLabel={`Budget ${b.label}`}
               onPress={() => setBudget(b.cents)}
@@ -105,16 +155,18 @@ function LiveFlow({ groupId }: { groupId: string }) {
   }
 
   if (run.isPending) return <Running steps={[]} onCancel={() => router.back()} />;
-  if (run.isError) return <ErrorState error={run.error} onRetry={() => void run.refetch()} title="Couldn't load the plan" />;
+  // Full-screen error only when there's nothing to show; one failed poll keeps the steps on screen.
+  if (run.isError && !run.data) return <ErrorState error={run.error} onRetry={() => void run.refetch()} title="Couldn't load the plan" />;
   const data = run.data;
-  if (data.status === "running") return <Running steps={sortSteps(data.steps)} onCancel={() => router.back()} />;
+  if (data.status === "running") {
+    if (agentRunTimedOut(data)) return failed("The agent took too long.");
+    return <Running steps={displaySteps(data.steps, data.status)} onCancel={() => router.back()} reconnecting={run.isError} />;
+  }
   if (data.status === "failed") return failed(data.error ?? "The agent couldn't finish this plan.");
-  return <PlanResult groupId={groupId} run={data} steps={sortSteps(data.steps)} />;
+  return <PlanResult groupId={groupId} run={data} steps={displaySteps(data.steps, data.status)} onNewPlan={newPlan} />;
 }
 
-const sortSteps = (steps: AgentStep[]) => [...steps].sort((a, b) => a.seq - b.seq);
-
-function Running({ steps, onCancel }: { steps: AgentStep[]; onCancel: () => void }) {
+function Running({ steps, onCancel, reconnecting }: { steps: AgentStep[]; onCancel: () => void; reconnecting?: boolean }) {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <AiLabel text="AI agent" />
@@ -123,11 +175,16 @@ function Running({ steps, onCancel }: { steps: AgentStep[]; onCancel: () => void
       </Text>
       <Card>
         {steps.length ? (
-          <AgentStepList steps={steps} />
+          <AgentStepList steps={steps} announce />
         ) : (
           <AgentStepList steps={[{ seq: 0, id: "starting", label: "Starting the agent…", status: "running" }]} />
         )}
       </Card>
+      {reconnecting ? (
+        <Text style={styles.muted} accessibilityLiveRegion="polite">
+          Connection hiccup, reconnecting…
+        </Text>
+      ) : null}
       <Text style={styles.muted}>This usually takes 15–30 seconds. You can close this; the agent keeps working.</Text>
       <Button title="Cancel" variant="secondary" onPress={onCancel} accessibilityLabel="Close; the agent keeps working" />
     </ScrollView>
@@ -152,10 +209,24 @@ function Failed({ message, onRetry, onRecipes, retrying }: { message: string; on
 }
 
 /** Proposed (or already applied) plan: steps recap, meal cards, AI estimate, and the one write button. */
-function PlanResult({ groupId, run, steps, replayed }: { groupId: string; run: AgentRun; steps: AgentStep[]; replayed?: boolean }) {
+function PlanResult({
+  groupId,
+  run,
+  steps,
+  replayed,
+  onNewPlan,
+}: {
+  groupId: string;
+  run: AgentRun;
+  steps: AgentStep[];
+  replayed?: boolean;
+  onNewPlan?: () => void;
+}) {
   const router = useRouter();
   const toast = useToast();
   const apply = useApplyAgentRun(groupId);
+  /** Set on the first tap and kept after success: a second tap in the same frame (or before the refetch) is ignored. */
+  const applying = useRef(false);
   const plan = run.plan;
   if (!plan) return <ErrorState error={new Error("This run has no plan.")} title="No plan" />;
 
@@ -164,13 +235,18 @@ function PlanResult({ groupId, run, steps, replayed }: { groupId: string; run: A
   const title = applied ? "Already added" : n === 0 ? "Nothing to buy" : `Add ${plural(n, "item")} to the list`;
 
   function onApply() {
+    if (applying.current) return;
+    applying.current = true;
     apply.mutate(run.id, {
       onSuccess: (res) => {
         const skipped = res.skipped.length ? ` · ${res.skipped.length} skipped (already have)` : "";
         toast(`Added ${plural(res.added, "item")}${skipped}`);
         router.dismissTo("/");
       },
-      onError: (e) => toast(applyError(e), { tone: "error" }),
+      onError: (e) => {
+        applying.current = false;
+        toast(applyError(e), { tone: "error" });
+      },
     });
   }
 
@@ -191,10 +267,12 @@ function PlanResult({ groupId, run, steps, replayed }: { groupId: string; run: A
           ✨ {formatCentsRange(plan.estimate.lowCents, plan.estimate.highCents, true)} to buy · {plan.estimate.label}
         </Text>
       ) : null}
-      {plan.meals.map((m) => (
-        <AgentMealCard key={m.title} meal={m} safety={plan.safety.perMeal.find((s) => s.title === m.title)} />
+      {plan.meals.map((m, i) => (
+        // Index keys: the model may repeat a title, and each card must keep its own safety line.
+        <AgentMealCard key={i} meal={m} safety={mealSafety(plan, i)} />
       ))}
       <Button title={title} loading={apply.isPending} disabled={applied || n === 0 || apply.isPending} onPress={onApply} />
+      {onNewPlan ? <Button title="Plan something else" variant="secondary" onPress={onNewPlan} /> : null}
       <Button title="Close" variant="ghost" onPress={() => router.back()} />
     </ScrollView>
   );
@@ -205,12 +283,16 @@ function PlanResult({ groupId, run, steps, replayed }: { groupId: string; run: A
 function ReplayFlow({ groupId }: { groupId: string }) {
   const router = useRouter();
   const recent = useRecentAgentRuns(groupId);
-  const last = recent.data?.find((r) => r.status === "proposed" || r.status === "applied") ?? null;
-  const run = useAgentRun(groupId, last?.id ?? null);
+  const picked = recent.data?.find((r) => r.status === "proposed" || r.status === "applied")?.id ?? null;
+  // Snapshot the choice once: a newer run landing in the list mid-replay must not restart it.
+  const [lockedId, setLockedId] = useState<string | null>(null);
+  if (lockedId === null && picked !== null) setLockedId(picked);
+  const runId = lockedId ?? picked;
+  const run = useAgentRun(groupId, runId);
 
-  if (recent.isPending) return <LoadingState message="Finding the last run…" />;
-  if (recent.isError) return <ErrorState error={recent.error} onRetry={() => void recent.refetch()} />;
-  if (!last) {
+  if (!runId) {
+    if (recent.isPending) return <LoadingState message="Finding the last run…" />;
+    if (recent.isError) return <ErrorState error={recent.error} onRetry={() => void recent.refetch()} />;
     return (
       <EmptyState title="No recorded runs yet" message="Run “Plan our week” once, then long-press to replay it.">
         <Button title="Plan our week" onPress={() => router.replace("/agent")} />
@@ -218,7 +300,7 @@ function ReplayFlow({ groupId }: { groupId: string }) {
     );
   }
   if (run.isPending) return <LoadingState message="Loading the recorded run…" />;
-  if (run.isError) return <ErrorState error={run.error} onRetry={() => void run.refetch()} />;
+  if (run.isError && !run.data) return <ErrorState error={run.error} onRetry={() => void run.refetch()} />;
   return <Replayer key={run.data.id} groupId={groupId} run={run.data} />;
 }
 
@@ -236,7 +318,7 @@ export function replayDelays(steps: Pick<AgentStep, "at">[], startedAt: string, 
 function Replayer({ groupId, run }: { groupId: string; run: AgentRun }) {
   const router = useRouter();
   // Snapshot once: socket refetches of this run must not restart the replay.
-  const [steps] = useState(() => sortSteps(run.steps));
+  const [steps] = useState(() => displaySteps(run.steps, run.status));
   const [delays] = useState(() => replayDelays(steps, run.createdAt));
   const [shown, setShown] = useState(0);
 
@@ -256,7 +338,7 @@ function Replayer({ groupId, run }: { groupId: string; run: AgentRun }) {
   }, [delays]);
 
   if (shown < steps.length) {
-    // Steps already "arrived" keep their recorded status; the next one spins until its time comes.
+    // Steps already "arrived" keep their (settled) status; the next one spins until its time comes.
     const visible = [...steps.slice(0, shown), { ...steps[shown], status: "running" as const }];
     return <Running steps={visible} onCancel={() => router.back()} />;
   }

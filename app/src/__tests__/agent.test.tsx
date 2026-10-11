@@ -39,6 +39,8 @@ afterEach(() => jest.useRealTimers());
 /** Wait for trailing refetches (apply's onSettled, retries) so no update lands after the test ends. */
 async function settle(qc: QueryClient) {
   await waitFor(() => expect(qc.isFetching() + qc.isMutating()).toBe(0));
+  // TanStack batches observer notifications on setTimeout(0): flush that inside act too.
+  await act(() => new Promise<void>((r) => setTimeout(r, 0)));
 }
 
 describe("Pantry Agent sheet", () => {
