@@ -3,6 +3,7 @@ import { prisma } from "../src/db.js";
 import { config } from "../src/config.js";
 import { conflicts } from "../src/lib/diets.js";
 import { agent } from "../src/modules/products/lookup.js";
+import { startPriceWarming, warmTimers } from "../src/modules/ai/warm.js";
 import { api, itemId, makeGroup, makeUser } from "./helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,13 +44,15 @@ describe("10 price estimates", () => {
     const chat = vi.spyOn(agent, "chat").mockImplementation(async (body) => {
       const user = (body.messages as { role: string; content: string }[])[1].content;
       prompts.push(user);
-      const prices = [
-        { itemId: milk, blsId: "B1", lowCents: 299, highCents: 459, typicalCents: 349, unit: "1 gal" }, // cited BLS candidate
-        { itemId: bread, blsId: "B9", lowCents: 250, highCents: 199, typicalCents: null, unit: "loaf" }, // low > high → dropped
-        { itemId: "00000000-0000-4000-8000-00000000beef", blsId: null, lowCents: 1, highCents: 2, unit: null }, // not asked
-        { itemId: pasta, blsId: null, lowCents: 100, highCents: 250, typicalCents: 150, unit: "1 lb box" }, // AI estimate
-      ].filter((p) => user.includes(p.itemId));
-      return { choices: [{ message: { content: JSON.stringify({ prices }) } }] };
+      // Items are numbered in the prompt (`1. "Milk"`); the answer is compact rows [n, blsId, low, high, typical, unit].
+      const n = Object.fromEntries([...user.matchAll(/^(\d+)\. "([^"]+)"/gm)].map((m) => [m[2], Number(m[1])]));
+      const rows = [
+        n.Milk && [n.Milk, "B1", 299, 459, 349, "1 gal"], // cited BLS candidate
+        n.Bread && [n.Bread, "B9", 250, 199, null, "loaf"], // low > high → dropped
+        [99, null, 1, 2], // not asked
+        n.Pasta && [n.Pasta, null, 100, 250, 150, "1 lb box"], // AI estimate
+      ].filter(Boolean);
+      return { choices: [{ message: { content: JSON.stringify({ p: rows }) } }] };
     });
     try {
       const res = await api().post(`/api/groups/${g.id}/shopping-list/prices`).set(u.auth).send({});
@@ -67,13 +70,53 @@ describe("10 price estimates", () => {
       // Second call: Milk and Pasta come from the cache; only Bread is asked again.
       const again = await api().post(`/api/groups/${g.id}/shopping-list/prices`).set(u.auth).send({ zipCode: "64105" });
       expect(again.body.items.every((i: { cached: boolean }) => i.cached)).toBe(true);
-      expect(prompts[1]).not.toContain(milk);
-      expect(prompts[1]).toContain(bread);
+      expect(prompts[1]).not.toContain("Milk");
+      expect(prompts[1]).toContain('"Bread"');
+      expect(prompts[0]).not.toContain(milk); // numbered items, no UUIDs for the model to copy
       expect(chat).toHaveBeenCalledTimes(2);
+
+      // A neighbour in the same census region (64111, also Midwest) reuses those prices without asking the model.
+      const neighbour = await api().post(`/api/groups/${g.id}/shopping-list/prices`).set(u.auth).send({ zipCode: "64111" });
+      const reused = neighbour.body.items.map((i: { itemId: string }) => i.itemId).sort();
+      expect(reused).toEqual([milk, pasta].sort());
+      expect(chat).toHaveBeenCalledTimes(3); // only Bread (never priced) is asked again
     } finally {
       chat.mockRestore();
       config.AKAMAI_API_KEY = saved.key;
       config.AKAMAI_BASE_URL = saved.url;
+    }
+  });
+
+  it("prices a list in the background after it changes, so the Prices screen is served from the cache", async () => {
+    const u = await makeUser();
+    const g = await makeGroup(u);
+    await api().patch("/api/me").set(u.auth).send({ zipCode: "64105" }).expect(200);
+    const olive = await itemId("Olive Oil");
+    await prisma.priceEstimate.deleteMany({ where: { itemId: olive } });
+    const saved = { key: config.AKAMAI_API_KEY, url: config.AKAMAI_BASE_URL, delay: warmTimers.delayMs };
+    config.AKAMAI_API_KEY = "test-akamai-key";
+    config.AKAMAI_BASE_URL = "https://akamai.test/v1";
+    warmTimers.delayMs = 20;
+    const chat = vi.spyOn(agent, "chat").mockImplementation(async (body) => {
+      const user = (body.messages as { content: string }[])[1].content;
+      const rows = [...user.matchAll(/^(\d+)\. "/gm)].map((m) => [Number(m[1]), null, 700, 1100, 899, "16.9 oz"]);
+      return { choices: [{ message: { content: JSON.stringify({ p: rows }) } }] } as never;
+    });
+    const stop = startPriceWarming();
+    try {
+      await api().post(`/api/groups/${g.id}/shopping-list`).set(u.auth).send({ itemId: olive }).expect(201);
+      await vi.waitFor(async () => expect(await prisma.priceEstimate.count({ where: { itemId: olive, zipCode: "64105" } })).toBe(1), {
+        timeout: 3000,
+      });
+      const calls = chat.mock.calls.length;
+      const res = await api().post(`/api/groups/${g.id}/shopping-list/prices`).set(u.auth).send({});
+      expect(res.body.items.find((i: { itemId: string }) => i.itemId === olive)).toMatchObject({ cached: true, typicalCents: 899 });
+      expect(chat.mock.calls.length).toBe(calls);
+    } finally {
+      stop();
+      chat.mockRestore();
+      Object.assign(config, { AKAMAI_API_KEY: saved.key, AKAMAI_BASE_URL: saved.url });
+      warmTimers.delayMs = saved.delay;
     }
   });
 

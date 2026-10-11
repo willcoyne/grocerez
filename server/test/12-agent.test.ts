@@ -219,9 +219,8 @@ describe("12 agent: internal events", () => {
     config.AKAMAI_BASE_URL = "https://akamai.test/v1";
     const chat = vi.spyOn(akamai, "chat").mockImplementation(async (b) => {
       const prompt = (b.messages as { content: string }[])[1].content;
-      const ids = [...prompt.matchAll(/itemId (\S+): /g)].map((m) => m[1]);
-      const prices = ids.map((itemId) => ({ itemId, blsId: null, lowCents: 100, highCents: 300, typicalCents: 200, unit: "1" }));
-      return { choices: [{ message: { content: JSON.stringify({ prices }) } }] } as never;
+      const rows = [...prompt.matchAll(/^(\d+)\. "/gm)].map((m) => [Number(m[1]), null, 100, 300, 200, "1"]);
+      return { choices: [{ message: { content: JSON.stringify({ p: rows }) } }] } as never;
     });
     try {
       const p = { ...plan(), estimate: null };

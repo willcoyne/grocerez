@@ -8,6 +8,7 @@ import { backfillRecipeEmbeddings } from "./jobs/embedRecipes.js";
 import { backfillRecipeVerification } from "./jobs/verifyRecipes.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
 import { sweepStaleRuns } from "./modules/agent/service.js";
+import { startPriceWarming } from "./modules/ai/warm.js";
 import { createSocketServer } from "./realtime/socket.js";
 
 const app = createApp();
@@ -17,6 +18,8 @@ const jobs = config.ENABLE_JOBS ? [scheduleRecallImport()] : [];
 
 httpServer.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
+  // Price the shopping list in the background whenever it changes, so the Prices screen is usually instant.
+  startPriceWarming();
   // Pantry Agent runs left `running` by a dead agent or a previous process are failed (their timers are gone).
   sweepStaleRuns().catch((err) => logger.error({ err }, "agent run sweep failed"));
   // Fill in embeddings for seeded/older items in the background; search works without them meanwhile.

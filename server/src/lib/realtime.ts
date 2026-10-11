@@ -28,6 +28,24 @@ export const userRoom = (userId: string) => `user:${userId}`;
  */
 export function emitGroup(groupId: string, event: GroupEvent, by: string | null, extra: Record<string, string> = {}) {
   io?.to(groupRoom(groupId)).emit(event, { ...extra, groupId, by });
+  for (const l of groupListeners) {
+    try {
+      l(groupId, event);
+    } catch {
+      // a listener's failure never breaks the request that changed something
+    }
+  }
+}
+
+type GroupListener = (groupId: string, event: GroupEvent) => void;
+const groupListeners = new Set<GroupListener>();
+
+/** In-process hook on every group event (e.g. warm the price cache when a list changes). Returns an unsubscribe. */
+export function onGroupEvent(listener: GroupListener): () => void {
+  groupListeners.add(listener);
+  return () => {
+    groupListeners.delete(listener);
+  };
 }
 
 export function emitUser(userId: string, event: UserEvent, payload: Record<string, unknown> = {}) {

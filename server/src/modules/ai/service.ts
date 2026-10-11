@@ -17,6 +17,11 @@ export const aiService = {
   async prices(groupId: string, userId: string, zipBody?: string): Promise<PricesResponse> {
     const zipCode = zipBody ?? (await prisma.user.findUnique({ where: { id: userId }, select: { zipCode: true } }))?.zipCode;
     if (!zipCode) throw badRequest("Set a ZIP code in your profile (or send zipCode) to estimate prices", "ZIP_REQUIRED");
+    return this.pricesFor(groupId, zipCode);
+  },
+
+  /** The list priced for one ZIP (cache first). Also used to warm the cache in the background (./warm.ts). */
+  async pricesFor(groupId: string, zipCode: string): Promise<PricesResponse> {
 
     const listItems = await aiRepo.listItems(groupId);
     if (listItems.length === 0) return { zipCode, items: [], missingItemIds: [], totalLowCents: 0, totalHighCents: 0 };
