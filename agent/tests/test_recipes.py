@@ -359,12 +359,28 @@ async def test_all_candidates_unsafe_falls_back_to_model_written_meal(
 
 @respx.mock
 async def test_no_tavily_key_falls_back_without_any_network(ctx, client, sink, state, settings, make_pricer):
+    from app.runner import load_planner_prompt
+
     route = respx.post(TAVILY).mock(return_value=httpx.Response(500))
-    t = find_tools(ctx, client, sink, state, settings, make_pricer, RecipeService(settings))  # no key configured
-    out = json.loads(await t["find_recipe"]("anything"))
-    assert out["found"] is False and not route.called
-    t2 = find_tools(ctx, client, sink, state, settings, make_pricer, None)
-    assert json.loads(await t2["find_recipe"]("anything"))["found"] is False
+    # No key: the tool is not even registered, so the model never wastes a turn on it.
+    t = find_tools(ctx, client, sink, state, settings, make_pricer, RecipeService(settings))
+    assert "find_recipe" not in t and {"check_meal_safety", "revise_meal", "propose_plan"} <= set(t)
+    assert "find_recipe" not in find_tools(ctx, client, sink, state, settings, make_pricer, None)
+    assert not route.called
+    # ...and the prompt takes the draft-all-meals-in-one-turn path
+    own = load_planner_prompt(False)
+    assert "find_recipe" not in own and "ALL 3 meals as FULL meals" in own
+    assert "<!--" not in own and "Then:" in own and "propose_plan" in own
+
+
+def test_key_set_registers_find_recipe_and_uses_the_recipe_prompt(ctx, client, sink, state, tavily_settings, make_pricer):
+    from app.runner import load_planner_prompt
+
+    t = find_tools(ctx, client, sink, state, tavily_settings, make_pricer, RecipeService(tavily_settings))
+    assert "find_recipe" in t
+    rec = load_planner_prompt(True)
+    assert "find_recipe(idea" in rec and "ALL 3 meals as FULL meals" not in rec and "<!--" not in rec
+    assert "propose_plan" in rec and "Then:" in rec
 
 
 @respx.mock

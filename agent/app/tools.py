@@ -634,5 +634,7 @@ def build_tools(
             return "error: the server closed this run"
         return await _reject("error: couldn't submit the plan (server unavailable).")
 
-    return [get_household, get_cabinet, get_shopping_list, get_wants, find_recipe, check_meal_safety, revise_meal,
-            propose_plan]
+    tools = [get_household, get_cabinet, get_shopping_list, get_wants, check_meal_safety, revise_meal, propose_plan]
+    if recipes is not None and recipes.enabled:  # without a Tavily key the model never sees find_recipe
+        tools.insert(4, find_recipe)
+    return tools

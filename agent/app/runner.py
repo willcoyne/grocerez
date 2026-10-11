@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +33,15 @@ MSG_BUDGET = "The planner needed too many steps. Please try a simpler request."
 MSG_NO_PLAN = "The planner didn't finish a plan. Please try again."
 MSG_AUTH = "I couldn't access your household data. Please try again."
 MSG_CANCELLED = "Planning was interrupted. Please try again."
+
+
+def load_planner_prompt(recipes_enabled: bool) -> str:
+    """One template, two variants: the find_recipe process only when web recipes are configured (TAVILY_API_KEY).
+    Without a key the model drafts all meals in one turn (no wasted find_recipe round trip)."""
+    text = PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
+    drop, keep = ("OWN", "RECIPES") if recipes_enabled else ("RECIPES", "OWN")
+    text = re.sub(rf"<!-- {drop} -->.*?<!-- /{drop} -->\n?", "", text, flags=re.S)
+    return text.replace(f"<!-- {keep} -->\n", "").replace(f"<!-- /{keep} -->\n", "")
 
 
 def build_user_message(ctx: RunContext) -> str:
@@ -91,7 +101,7 @@ async def run(
         agent = Agent(
             model=model if model is not None else build_model(settings.agent_provider, settings),
             tools=tools,
-            system_prompt=PLANNER_PROMPT_PATH.read_text(encoding="utf-8"),
+            system_prompt=load_planner_prompt(recipes.enabled),
             callback_handler=None,
             hooks=[Budget(state, settings.agent_max_tool_calls), StepReporter(sink, state)],
         )
