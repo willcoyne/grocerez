@@ -8,6 +8,11 @@ it does work that shows up live on every phone.
 **Depends on:** the backend from `plan/backend/01–07` (the agent's tools call it). Builds on `backend/10` (agentic AI),
 which this replaces for recipes. Hosting is shared with [Akamai deployment](#5-akamai-cloud-deployment) below.
 
+**Already on main (2026-10-10):** `server/src/modules/ai` calls Claude directly (`server/src/lib/anthropic.ts`) for
+`POST /groups/:gid/recipes/suggest` and `/shopping-list/prices`; the app has `app/src/app/recipes.tsx`, `prices.tsx`, and
+`app/src/api/hooks/ai.ts` (`useSuggestRecipes`, `usePrices`). The agent replaces the single-call recipe flow; keep the existing
+routes working as the fallback when `AGENT_URL` isn't set.
+
 ---
 
 ## 1. How this scores
@@ -114,7 +119,9 @@ Steps:
 1. Create the instance (Ubuntu LTS, region near KC), add teammates' SSH keys, open 80/443.
 2. Point a hostname at it (any free DNS or the instance's rDNS) so Caddy gets HTTPS. The phones need HTTPS for a clean demo.
 3. `deploy/docker-compose.yml` with the four services; secrets in `deploy/.env` on the box only.
-4. Create an Object Storage bucket + access key; set `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` (the AWS SDK works with a custom endpoint).
+4. Create an Object Storage bucket + access key. `server/src/lib/s3.ts` currently builds the client from `AWS_REGION` only; add an optional
+   `S3_ENDPOINT` to `server/src/config.ts` and pass `endpoint` (plus `forcePathStyle: true` if needed) to the S3 client, then set the bucket and
+   keys in `deploy/.env`. The AWS SDK works with Akamai's S3-compatible endpoint.
 5. Set `EXPO_PUBLIC_API_URL=https://<host>/api` in the app build used for the demo.
 6. Put a small "Runs on Akamai Cloud" line in the app's About and in the pitch.
 
@@ -139,13 +146,14 @@ Steps:
 6. `agent/Dockerfile`; add to compose.
 
 ### 6.3 Frontend (app/)
-1. Household tab: a **"Plan our week" ✨** card (primary button) under "Everyone's wants".
-2. `features/agent/AgentSheet.tsx`: prompt field (pre-filled), budget chip ($40 / $60 / $80 / none), **Run** → live step list
-   (spinner on the current step, check on done) → result: meal cards + safety line + estimate + **"Add {n} items to the list"**.
-3. Hooks: `useStartAgentRun()`, `useAgentRun(runId)` (query + socket `agent:step`/`agent:done` → `setQueryData`), `useApplyAgentRun()`.
+1. Group tab (`app/src/app/(tabs)/group.tsx`): a **"Plan our week" ✨** card (primary button) under `EveryonesWants`.
+2. New modal route `app/src/app/agent.tsx` (same pattern as `recipes.tsx`): prompt field (pre-filled), budget chips ($40 / $60 / $80 / none),
+   **Run** → live step list (spinner on the current step, check on done) → result: meal cards + safety line + estimate +
+   **"Add {n} items to the list"**. Use `app/src/components/ui.tsx` and `app/src/theme.ts` (`colors`).
+3. Hooks in `app/src/api/hooks/ai.ts`: `useStartAgentRun(groupId)`, `useAgentRun(groupId, runId)` (query + socket `agent:step`/`agent:done`
+   → `setQueryData`, wired through `app/src/realtime/SocketProvider.tsx`), `useApplyAgentRun(groupId)`.
 4. List rows with a "✨ for {meal}" note show a small ✨ chip (AI-generated content is marked, per `frontend/09` step 3).
-5. **Mock mode:** add a scripted mock run to `src/api/mock/` (emits the steps above on timers via the realtime bus, then a fixed plan),
-   so the UI is buildable and demoable before the agent exists.
+5. Tests: follow `app/src/__tests__/ai.test.tsx` and `app/src/test-utils.tsx` (fetch mocked) — scripted steps + a fixed plan.
 
 ### 6.4 Recorded-run fallback
 - Every run's steps and plan are stored. A hidden long-press on the ✨ card in `__DEV__` replays the last successful run with original timing.

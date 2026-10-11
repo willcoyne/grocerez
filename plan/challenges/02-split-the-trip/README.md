@@ -5,7 +5,8 @@ the bill fairly: you pay for what *you* asked for, shared staples are split, and
 
 **Targets:** Flex "Best FinTech App" ($2,500) · Akamai Cloud AI (receipt reading on Akamai inference) · overall judging.
 **Depends on:** finish trip (`frontend/06`, `backend/06`), the item catalog + fuzzy matching (`database/04`), file uploads
-(`backend/11`, on Akamai Object Storage — see challenge 01 §5).
+(`backend/11`, on Akamai Object Storage — see challenge 01 §5). All of these are built on main; this doc adds the trip/ledger layer.
+The completion logic to change is in `server/src/modules/shopping-list/` (`service.ts`).
 
 ---
 
@@ -79,7 +80,8 @@ For each confirmed line with amount `a`:
 3. **Validate:** lines sum ≈ subtotal (±2 cents per line); subtotal + tax == total. If not, flag "Check the total" instead of guessing.
 4. **Match** each line to the trip's snapshot rows: normalize the receipt text (strip sizes/brands/units: `8OZ`, `CLASSIC`, `SCOOPS`),
    then the catalog fuzzy matcher, then restrict to items in the trip. Store `confidence`; below 0.6 → unmatched for review.
-5. Mock mode: a fixed parsed receipt for the demo trip so the UI is buildable before the model exists.
+5. Tests: stub the model through the server's existing `ai.call` seam (see `server/README.md`, "External services … are stubbed")
+   with a fixed parsed receipt for the demo trip.
 
 ### 5.2 API (add to `plan/backend/README.md` + `contracts/trips.ts`)
 | Method | Path | Body | Returns |
@@ -106,13 +108,15 @@ Socket: new `ledger:changed` event → invalidate `balances`.
 3. Never store card data. Stripe handles it; we only keep `external_id`.
 
 ### 5.4 Frontend (app/)
-1. After Finish trip: sheet **"Add the receipt?"** with [Take photo] [Skip] (skip keeps the trip with no split).
-2. `features/trips/ReceiptReview.tsx`: receipt thumbnail, line list (raw text, amount, → matched item + "Carson, Maya" chips),
-   unmatched lines highlighted with a picker (uses `useResolveItem`), totals check, **Confirm split**.
-3. Household tab: **Balances** section ("You're owed $10.64" / "You owe $2.33"), settle-up rows with **Pay** (Stripe / Venmo / Cash App)
-   and **Mark as paid**, and a "Trips" history list.
+1. Finish trip lives in `app/src/app/(tabs)/index.tsx` (`useCompleteTrip`), which then opens `expiration-check.tsx`. Add a
+   **"Add the receipt?"** step to that flow ([Take photo] [Skip]; skip keeps the trip with no split). Photo upload uses the existing
+   `app/src/api/hooks/uploads.ts` (`/uploads/presign`).
+2. New route `app/src/app/receipt.tsx`: receipt thumbnail, line list (raw text, amount, → matched item + "Carson, Maya" chips),
+   unmatched lines highlighted with `app/src/components/ItemPicker.tsx` to pick the item, totals check, **Confirm split**.
+3. Group tab (`app/src/app/(tabs)/group.tsx`): **Balances** section ("You're owed $10.64" / "You owe $2.33"), settle-up rows with **Pay**
+   (Stripe / Venmo / Cash App) and **Mark as paid**, and a "Trips" history list.
 4. Optional **Budget** card: monthly budget, month-to-date spend, and "this trip vs your average". Gives the FinTech judges a second hook.
-5. Tokens and components from `DESIGN.md`; money uses `Intl.NumberFormat('en-US', {style:'currency', currency:'USD'})`.
+5. Components from `app/src/components/ui.tsx`, colors from `app/src/theme.ts`; money uses `Intl.NumberFormat('en-US', {style:'currency', currency:'USD'})`.
 
 ## 6. Privacy & safety
 - Receipts can show card last-4 and store location. Show the photo only to group members; delete originals after 30 days (keep parsed lines).
