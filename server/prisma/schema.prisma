@@ -540,6 +540,10 @@ model Recipe {
   course          String[]   @default([])
   /// Computed at ingest: keyword table over the lines ∪ catalog defaultAllergens of the ingredients.
   allergens       Allergen[] @default([])
+  /// Ingredients still unverifiable against the catalog (exact / whole-word / semantic); allergy households skip these recipes.
+  unverified      String[]   @default([])
+  /// When `unverified` was last computed; null = not yet (the verifyRecipes backfill fills it).
+  verifiedAt      DateTime?  @map("verified_at") @db.Timestamptz(6)
   /// Akamai embedding of "title: ingredients". Read/written with raw SQL only.
   embedding       Unsupported("vector")?
   embeddingModel  String?    @map("embedding_model")

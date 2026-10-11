@@ -89,6 +89,11 @@ const schema = z.object({
   SEMANTIC_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.35),
   /** For a matched item: other-type items must be at least this close (same product type always qualifies). */
   SEMANTIC_ITEM_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.24),
+  /** Ingredient verification fallback: the nearest catalog item within this cosine distance counts as what the ingredient is. */
+  // Tuned with the real Akamai model + the grocery-item query instruction: true matches landed at 0.23-0.39
+  // (Herbs→Parsley 0.235, Shiitake→Mushrooms 0.345, Coconut Aminos→Coconut Milk 0.354, Grape Tomatoes in Half→Tomatoes 0.391);
+  // junk at 0.46+ (Gravel 0.463, Unobtainium Dust 0.552).
+  SEMANTIC_INGREDIENT_MAX_DISTANCE: z.coerce.number().positive().max(2).default(0.4),
   /** For a typed query: related items must be within this distance of the closest one (drops the noisy tail). */
   SEMANTIC_RELATIVE_GAP: z.coerce.number().positive().max(2).default(0.08),
   CONTACT_EMAIL: z.string().default("team@grocerez.app"),

@@ -5,6 +5,7 @@ import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
 import { backfillItemEmbeddings } from "./jobs/embedItems.js";
 import { backfillRecipeEmbeddings } from "./jobs/embedRecipes.js";
+import { backfillRecipeVerification } from "./jobs/verifyRecipes.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
 import { sweepStaleRuns } from "./modules/agent/service.js";
 import { createSocketServer } from "./realtime/socket.js";

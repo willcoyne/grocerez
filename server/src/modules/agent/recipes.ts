@@ -10,7 +10,7 @@ import { normalize } from "../../lib/normalize.js";
 import { agentRepo } from "./repo.js";
 import { BROWSE_MIN_COVERAGE, rankByKitchenFit, rankForBrowse, termsRegex, type Ranked } from "./recipeRanking.js";
 import { recipeRepo, type DinnerFilter, type EmbedTodo, type RecipeRow } from "./recipeRepo.js";
-import { catalogMatch } from "./safety.js";
+import { catalogMatch, isUnverified } from "./safety.js";
 
 const dinnerFilter = (): DinnerFilter => ({
   mainCourse: config.RECIPE_MAIN_COURSE,
@@ -77,6 +77,32 @@ async function embedRows(rows: EmbedTodo[], progress: { done: number }): Promise
   }
 }
 
+type Facts = { allergens: Allergen[]; unverified: string[] };
+
+/**
+ * Per recipe: allergens = keyword table over the title, lines and ingredient names ∪ defaultAllergens of each
+ * ingredient's VERIFIED catalog match (exact, whole-word or semantic, as in safety.ts); unverified = the ingredient
+ * names no catalog match (and no keyword) vouches for. One lookup per distinct ingredient name.
+ */
+async function recipeFacts(recipes: IndexedRecipe[]): Promise<Map<string, Facts>> {
+  const names = [...new Set(recipes.flatMap((r) => r.ingredients.map(normalize)).filter(Boolean))];
+  const catalog = new Map<string, { allergens: Allergen[]; verified: boolean }>();
+  await mapLimit(names, LOOKUP_CONCURRENCY, async (n) => {
+    const v = (await catalogMatch(n)).verified;
+    catalog.set(n, { allergens: v?.defaultAllergens ?? [], verified: !isUnverified(n, v) });
+  });
+  const out = new Map<string, Facts>();
+  for (const r of recipes) {
+    const found = new Set<Allergen>([
+      ...[r.title, ...r.ingredientLines, ...r.ingredients].flatMap((t) => allergensInText(t)),
+      ...r.ingredients.flatMap((i) => catalog.get(normalize(i))?.allergens ?? []),
+    ]);
+    const unverified = [...new Set(r.ingredients.filter((i) => normalize(i) && catalog.get(normalize(i))?.verified === false))];
+    out.set(r.url, { allergens: [...found].sort(), unverified });
+  }
+  return out;
+}
+
 export const recipeIndex = {
   /**
    * POST /internal/recipes. Upsert by url; allergens = keyword table over the title, lines and ingredient names
@@ -85,20 +111,13 @@ export const recipeIndex = {
    */
   async ingest(recipes: IndexedRecipe[]): Promise<{ upserted: number; embedded: number }> {
     const byUrl = new Map(recipes.map((r) => [r.url, r])); // a repeated url in one batch: last wins
-    const names = [...new Set([...byUrl.values()].flatMap((r) => r.ingredients.map(normalize)).filter(Boolean))];
-    const catalog = new Map<string, Allergen[]>();
-    await mapLimit(names, LOOKUP_CONCURRENCY, async (n) => {
-      catalog.set(n, (await catalogMatch(n)).verified?.defaultAllergens ?? []);
-    });
+    const facts = await recipeFacts([...byUrl.values()]);
 
     const model = embeddingModel();
     const todo: EmbedTodo[] = [];
     for (const r of byUrl.values()) {
-      const found = new Set<Allergen>([
-        ...[r.title, ...r.ingredientLines, ...r.ingredients].flatMap((t) => allergensInText(t)),
-        ...r.ingredients.flatMap((i) => catalog.get(normalize(i)) ?? []),
-      ]);
-      const row = await recipeRepo.upsert(r, cleanCourse(r.course), [...found].sort(), model);
+      const f = facts.get(r.url)!;
+      const row = await recipeRepo.upsert(r, cleanCourse(r.course), f.allergens, f.unverified, model);
       if (row.needsEmbedding) todo.push(row);
     }
 
@@ -109,6 +128,24 @@ export const recipeIndex = {
       );
     }
     return { upserted: byUrl.size, embedded: progress.done };
+  },
+
+  /**
+   * Backfill: computes allergens + unverified for rows never verified (verified_at IS NULL). `all` redoes every row
+   * (after a catalog or threshold change). Safe to run repeatedly.
+   */
+  async verifyMissing(all = false): Promise<{ done: number; unverified: number }> {
+    const progress = { done: 0, unverified: 0 };
+    let after = "00000000-0000-0000-0000-000000000000";
+    for (;;) {
+      const batch = await recipeRepo.verifyBatch(all, after, 100);
+      if (batch.length === 0) return progress;
+      after = batch[batch.length - 1].id;
+      const facts = await recipeFacts(batch);
+      await recipeRepo.setFacts(batch.map((b) => ({ id: b.id, ...facts.get(b.url)! })));
+      progress.done += batch.length;
+      progress.unverified += batch.filter((b) => facts.get(b.url)!.unverified.length > 0).length;
+    }
   },
 
   /** Backfill: embeds every recipe with no embedding for the current model. Safe to run repeatedly. */

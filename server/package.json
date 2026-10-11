@@ -22,6 +22,7 @@
     "job:recalls": "tsx src/jobs/runImportRecalls.ts",
     "embeddings:backfill": "tsx src/jobs/embedItems.ts",
     "embeddings:recipes": "tsx src/jobs/embedRecipes.ts",
+    "verify:recipes": "tsx src/jobs/verifyRecipes.ts",
     "test:db-break": "vitest run --config test/db-break/vitest.config.ts",
     "test:break": "vitest run --config test/break/vitest.config.ts"
   },
