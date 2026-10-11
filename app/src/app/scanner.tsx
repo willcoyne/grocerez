@@ -2,7 +2,7 @@ import type { Product, ScanBody } from "@contracts/products";
 import { type BarcodeScanningResult, CameraView, useCameraPermissions } from "expo-camera";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useRef, useState } from "react";
-import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { useAddCabinetItem } from "@/api/hooks/cabinet";
@@ -10,13 +10,12 @@ import { useHouseholdAllergens, useScanProduct } from "@/api/hooks/products";
 import { useAddListItem, useCheckItem } from "@/api/hooks/shoppingList";
 import { ItemPicker } from "@/components/ItemPicker";
 import { conflicts, ProductCard } from "@/components/ProductCard";
-import { useToast } from "@/components/Toast";
-import { Button, Card, Input } from "@/components/ui";
+import { AppText, Button, InlineAdd, useToast } from "@/components/ui";
 import { confirm } from "@/lib/confirm";
 import { labelize } from "@/lib/format";
-import { NOT_FOUND, scanErrorMessage, scanRequestFor } from "@/lib/scan";
+import { BAD_BARCODE, NOT_FOUND, scanErrorMessage, scanRequestFor } from "@/lib/scan";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
-import { colors, fontSize, radius, spacing } from "@/theme";
+import { color, radius, space } from "@/theme";
 
 type Mode = "lookup" | "match-list-item" | "add-to-cabinet";
 
@@ -26,7 +25,7 @@ export default function ScannerScreen() {
   const mode: Mode = params.mode === "match-list-item" || params.mode === "add-to-cabinet" ? params.mode : "lookup";
   const groupId = useRequiredGroupId();
   const router = useRouter();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [permission, requestPermission] = useCameraPermissions();
   const scan = useScanProduct();
   const household = useHouseholdAllergens(groupId);
@@ -95,9 +94,14 @@ export default function ScannerScreen() {
   }
 
   const granted = permission?.granted;
+  const reset = () => {
+    setProduct(null);
+    setMessage(null);
+    setNotFound(false);
+  };
 
   return (
-    <View style={styles.flex}>
+    <View style={styles.flex} testID="screen-scanner">
       {granted ? (
         <CameraView
           style={StyleSheet.absoluteFill}
@@ -110,34 +114,38 @@ export default function ScannerScreen() {
       {granted ? (
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.frame} />
-          <Text style={styles.hint}>
-            {scan.isPending ? "Looking it up…" : "Scan the SmartLabel QR or the barcode"}
-          </Text>
-          {mode === "add-to-cabinet" && addedCount > 0 ? <Text style={styles.hint}>{addedCount} added</Text> : null}
+          <View style={styles.hint}>
+            <AppText variant="bodyS" weight="bold" color="onPrimary" center>
+              {scan.isPending ? "Looking it up…" : "Scan the SmartLabel QR or the barcode"}
+            </AppText>
+          </View>
+          {mode === "add-to-cabinet" && addedCount > 0 ? (
+            <View style={styles.hint}>
+              <AppText variant="bodyS" weight="bold" color="onPrimary">{`${addedCount} added`}</AppText>
+            </View>
+          ) : null}
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.permission}>
-          <Text style={styles.title}>Camera access</Text>
-          <Text style={styles.body}>GrocerEZ uses the camera to scan SmartLabel QR codes and barcodes.</Text>
+          <AppText variant="h1" accessibilityRole="header">
+            Camera access
+          </AppText>
+          <AppText color="ink2">GrocerEZ uses the camera to scan SmartLabel QR codes and barcodes.</AppText>
           {permission && !permission.canAskAgain ? (
-            <Button title="Open Settings" onPress={() => void Linking.openSettings()} />
+            <Button label="Open Settings" size="lg" fullWidth onPress={() => void Linking.openSettings()} />
           ) : (
-            <Button title="Allow camera" onPress={() => void requestPermission()} />
+            <Button label="Allow camera" size="lg" fullWidth onPress={() => void requestPermission()} />
           )}
-          <Text style={styles.body}>Or type the barcode digits:</Text>
-          <Input
-            label="Barcode"
+          <InlineAdd
+            label="Or type the barcode digits"
             value={manual}
             onChangeText={(t) => setManual(t.replace(/\D/g, ""))}
             keyboardType="number-pad"
-            maxLength={14}
-          />
-          <Button
-            title="Look up"
-            variant="secondary"
-            loading={scan.isPending}
-            disabled={manual.length < 8}
-            onPress={() => {
+            placeholder="e.g. 016000275287"
+            buttonLabel="Look up"
+            busy={scan.isPending}
+            onSubmit={() => {
+              if (manual.length < 8) return setMessage(BAD_BARCODE);
               const req = scanRequestFor("ean13", manual);
               if ("error" in req) setMessage(req.error);
               else lookup(req.body);
@@ -147,50 +155,56 @@ export default function ScannerScreen() {
       )}
 
       {message || product ? (
-        <View style={styles.sheetWrap}>
-          <Card style={styles.sheet}>
-            <ScrollView contentContainerStyle={styles.sheetContent}>
-              {message ? <Text style={styles.message} accessibilityRole="alert">{message}</Text> : null}
-              {notFound ? <Button title="Add manually" variant="secondary" onPress={() => setPicking(true)} /> : null}
-              {product ? (
-                <>
-                  <ProductCard product={product} household={household} />
-                  {mode === "match-list-item" ? (
-                    <Button title="Check off with this product" loading={check.isPending} onPress={() => void checkOff(product)} />
-                  ) : (
-                    <View style={styles.row}>
-                      <Button
-                        title="Add to cabinet"
-                        style={styles.flex}
-                        loading={addCabinet.isPending}
-                        onPress={() =>
-                          addCabinet.mutate({ itemId: product.itemId }, { onSuccess: () => toast(`${product.item.name} added to cabinet`), onError })
-                        }
-                      />
-                      <Button
-                        title="Add to list"
-                        variant="secondary"
-                        style={styles.flex}
-                        loading={addList.isPending}
-                        onPress={() =>
-                          addList.mutate({ itemId: product.itemId }, { onSuccess: () => toast(`${product.item.name} added to list`), onError })
-                        }
-                      />
-                    </View>
-                  )}
-                </>
-              ) : null}
-              <Button
-                title="Scan again"
-                variant="ghost"
-                onPress={() => {
-                  setProduct(null);
-                  setMessage(null);
-                  setNotFound(false);
-                }}
-              />
-            </ScrollView>
-          </Card>
+        <View style={styles.sheet}>
+          <ScrollView contentContainerStyle={styles.sheetContent}>
+            {message ? (
+              <AppText weight="bold" color="dangerFg" accessibilityRole="alert">
+                {message}
+              </AppText>
+            ) : null}
+            {notFound ? <Button label="Add manually" variant="secondary" fullWidth onPress={() => setPicking(true)} /> : null}
+            {product ? (
+              <>
+                <ProductCard product={product} household={household} />
+                {mode === "match-list-item" ? (
+                  <Button
+                    label="Check off with this product"
+                    size="lg"
+                    fullWidth
+                    loading={check.isPending}
+                    onPress={() => void checkOff(product)}
+                  />
+                ) : (
+                  <View style={styles.row}>
+                    <Button
+                      label="Add to cabinet"
+                      flex
+                      loading={addCabinet.isPending}
+                      onPress={() =>
+                        addCabinet.mutate(
+                          { itemId: product.itemId },
+                          { onSuccess: () => toast(`${product.item.name} is in the cabinet`), onError },
+                        )
+                      }
+                    />
+                    <Button
+                      label="Add to list"
+                      variant="secondary"
+                      flex
+                      loading={addList.isPending}
+                      onPress={() =>
+                        addList.mutate(
+                          { itemId: product.itemId },
+                          { onSuccess: () => toast(`Added ${product.item.name} to the shopping list`), onError },
+                        )
+                      }
+                    />
+                  </View>
+                )}
+              </>
+            ) : null}
+            <Button label="Scan again" variant="ghost" fullWidth onPress={reset} />
+          </ScrollView>
         </View>
       ) : null}
 
@@ -202,7 +216,7 @@ export default function ScannerScreen() {
           if (mode === "match-list-item" && params.listItemId) {
             check.mutate({ id: params.listItemId, checked: true }, { onSuccess: () => router.back(), onError });
           } else if (mode === "add-to-cabinet" || mode === "lookup") {
-            addCabinet.mutate({ itemId: item.id }, { onSuccess: () => toast(`${item.name} added to cabinet`), onError });
+            addCabinet.mutate({ itemId: item.id }, { onSuccess: () => toast(`${item.name} is in the cabinet`), onError });
           }
           setMessage(null);
           setNotFound(false);
@@ -214,15 +228,22 @@ export default function ScannerScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: spacing.lg },
-  frame: { width: 260, height: 180, borderWidth: 3, borderColor: "#FFFFFF", borderRadius: radius.lg },
-  hint: { color: "#FFFFFF", fontSize: fontSize.md, fontWeight: "700", backgroundColor: colors.overlay, padding: spacing.sm, borderRadius: radius.sm },
-  permission: { padding: spacing.xl, gap: spacing.md },
-  title: { fontSize: fontSize.xl, fontWeight: "800", color: colors.text },
-  body: { fontSize: fontSize.md, color: colors.textMuted },
-  sheetWrap: { position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "75%" },
-  sheet: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
-  sheetContent: { gap: spacing.md, paddingBottom: spacing.xl },
-  message: { fontSize: fontSize.md, color: colors.danger, fontWeight: "600" },
-  row: { flexDirection: "row", gap: spacing.sm },
+  overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: space.lg },
+  frame: { width: 260, height: 180, borderWidth: 3, borderColor: color.onPrimary, borderRadius: radius.cardLg },
+  hint: { backgroundColor: color.overlay, paddingVertical: space.sm, paddingHorizontal: space.md, borderRadius: radius.control },
+  permission: { padding: space.screenX, paddingTop: 40, gap: space.lg },
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    maxHeight: "75%",
+    backgroundColor: color.surface,
+    borderTopLeftRadius: radius.cardLg,
+    borderTopRightRadius: radius.cardLg,
+    borderWidth: 1,
+    borderColor: color.border,
+  },
+  sheetContent: { padding: space.screenX, gap: space.md, paddingBottom: 40 },
+  row: { flexDirection: "row", gap: space.sm },
 });

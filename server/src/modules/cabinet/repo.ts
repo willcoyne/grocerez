@@ -2,8 +2,14 @@ import type { Db } from "../../db.js";
 import type { Prisma } from "../../../generated/prisma/client.js";
 
 export const cabinetInclude = {
-  item: { select: { id: true, name: true, category: true, shelfLifeDays: true } },
-  product: { select: { id: true, brand: true, name: true, imageS3Key: true } },
+  item: { select: { id: true, name: true, category: true, shelfLifeDays: true, defaultAllergens: true } },
+  product: {
+    select: {
+      id: true, brand: true, name: true, imageS3Key: true,
+      caloriesPerServing: true, healthScore: true, allergens: true, mayContain: true,
+      ingredients: true, servingSize: true,
+    },
+  },
 } as const;
 
 /** Every function takes groupId and filters by it. */

@@ -1,0 +1,61 @@
+# Full GrocerEZ stack for local demos: Postgres + API + web app.
+#   docker compose up --build        → website http://localhost:8080, API http://localhost:3100/api
+#   docker compose down               (add -v to wipe the database)
+# Sign in from the "Demo users" list (Google sign-in needs real client IDs).
+# The API runs with NODE_ENV=development so it starts without Anthropic/AWS keys and allows demo login;
+# recipes, prices, photo uploads and semantic search stay off until their keys are in server/.env.
+name: grocerez-stack
+
+services:
+  db:
+    image: pgvector/pgvector:pg16-trixie
+    environment:
+      POSTGRES_USER: grocerez
+      POSTGRES_PASSWORD: grocerez
+      POSTGRES_DB: grocerez
+    volumes:
+      - stackdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grocerez -d grocerez"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: ./server
+    # Secrets (AKAMAI_*, ANTHROPIC_API_KEY, AWS_*) come from server/.env; the values under
+    # `environment` below override anything in that file that must differ inside Docker.
+    env_file:
+      - path: ./server/.env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DATABASE_URL: postgresql://grocerez:grocerez@db:5432/grocerez
+      JWT_SECRET: local-docker-demo-secret-change-me-0123456789
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-not-configured.apps.googleusercontent.com}
+      APP_LINK_BASE: grocerez://
+      CORS_ORIGINS: http://localhost:8080
+      ENABLE_JOBS: "false"
+    # Migrate, load the demo data (safe to re-run), then start the API.
+    command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed && node dist/src/index.js"]
+    ports:
+      - "3100:3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: http://localhost:3100/api
+        EXPO_PUBLIC_DEMO_KEY: local-docker-demo
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  stackdata:

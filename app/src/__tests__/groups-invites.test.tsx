@@ -11,7 +11,11 @@ import { AuthContextForTests } from "@/state/AuthContext";
 import { apiRoutes, authValue, makeTestQueryClient, renderWithProviders, testGroup } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ push: jest.fn(), replace: jest.fn() }) }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn(), canGoBack: () => true }),
+  useLocalSearchParams: () => ({}),
+  useFocusEffect: jest.fn(),
+}));
 const apiMock = api as jest.Mock;
 const store = (SecureStore as unknown as { __store: Map<string, string> }).__store;
 
@@ -69,8 +73,8 @@ describe("Invites", () => {
       }),
     );
     await renderWithProviders(<InviteSheet />);
-    await fireEvent.changeText(screen.getByLabelText("Email"), "Will@Example.com");
-    await fireEvent.press(screen.getByText("Send invite"));
+    await fireEvent.changeText(screen.getByLabelText("Email address"), "Will@Example.com");
+    await fireEvent.press(screen.getByText("Invite"));
     await screen.findByText("They're already in this household.");
     expect(apiMock).toHaveBeenCalledWith(`/groups/${testGroup.id}/invites`, { method: "POST", body: { email: "will@example.com" } });
   });
@@ -96,7 +100,7 @@ describe("Invites", () => {
     );
     const onAccepted = jest.fn();
     const { group } = await renderWithProviders(<MyInvitesList onAccepted={onAccepted} />);
-    await screen.findByText(/Ian invited you to/);
+    await screen.findByText("Ian invited you");
     await fireEvent.press(screen.getByLabelText(`Accept invite to ${groupB.name}`));
     await waitFor(() => expect(onAccepted).toHaveBeenCalled());
     expect(group.setActiveGroupId).toHaveBeenCalledWith(groupB.id);

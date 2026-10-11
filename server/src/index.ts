@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { logger } from "./lib/logger.js";
+import { backfillItemEmbeddings } from "./jobs/embedItems.js";
 import { scheduleRecallImport } from "./jobs/importRecalls.js";
 import { sweepStaleRuns } from "./modules/agent/service.js";
 import { createSocketServer } from "./realtime/socket.js";
@@ -16,6 +17,8 @@ httpServer.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, "GrocerEZ API listening");
   // Pantry Agent runs left `running` by a dead agent or a previous process are failed (their timers are gone).
   sweepStaleRuns().catch((err) => logger.error({ err }, "agent run sweep failed"));
+  // Fill in embeddings for seeded/older items in the background; search works without them meanwhile.
+  backfillItemEmbeddings().catch((err) => logger.warn({ err: String(err) }, "item embedding backfill failed"));
 });
 
 async function shutdown(signal: string) {

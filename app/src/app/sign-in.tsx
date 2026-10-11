@@ -1,19 +1,19 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ScrollView, StyleSheet, View } from "react-native";
 
 import { errorMessage } from "@/api/client";
 import { DEMO_USERS } from "@/auth/demoUsers";
+import { LogoMark } from "@/components/brand/LogoMark";
 import { HealthBadge } from "@/components/HealthBadge";
-import { useToast } from "@/components/Toast";
-import { Button, Card } from "@/components/ui";
+import { AppText, Button, SectionLabel, useToast } from "@/components/ui";
 import { config, missingConfig } from "@/config";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
+import { color, space } from "@/theme";
 
+/** DESIGN.md §4.1 SignIn, plus the dev-only demo users and the server health line. */
 export default function SignInScreen() {
   const { signInWithGoogle, signInAsDemo } = useAuth();
-  const toast = useToast();
+  const { show: toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const showDemo = __DEV__ || !!config.demoKey;
   const missing = missingConfig();
@@ -30,59 +30,81 @@ export default function SignInScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <Text style={styles.logo} accessibilityRole="header">
-            🛒 GrocerEZ
-          </Text>
-          <Text style={styles.tagline}>One shared grocery list for your whole household.</Text>
-        </View>
+    <ScrollView testID="screen-signin" style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.top}>
+        <LogoMark />
+        <AppText variant="hero" accessibilityRole="header">
+          GrocerEZ
+        </AppText>
+        <AppText variant="lead" color="ink2" style={styles.tagline}>
+          One shared grocery list for your household. Everyone adds what they want, and the app works out what to buy.
+        </AppText>
+      </View>
 
+      <View style={styles.bottom}>
         <Button
-          title="Continue with Google"
+          label="Continue with Google"
+          variant="dark"
+          size="lg"
+          fullWidth
           loading={busy === "google"}
-          disabled={!!busy}
-          onPress={() => run("google", signInWithGoogle)}
+          disabled={!!busy && busy !== "google"}
+          onPress={() => void run("google", signInWithGoogle)}
+          testID="signin-google"
         />
+        <AppText variant="caption" color="muted" center>
+          Household invites go to the email on your Google account.
+        </AppText>
 
         {showDemo ? (
-          <Card style={styles.demo}>
-            <Text style={styles.demoTitle}>Demo users (development only)</Text>
+          <View style={styles.demo}>
+            <SectionLabel>Demo users (development only)</SectionLabel>
             {DEMO_USERS.map((u) => (
               <Button
                 key={u.id}
-                title={`${u.name} · ${u.note}`}
+                label={`${u.name} · ${u.note}`}
                 variant="secondary"
-                compact
+                size="sm"
+                fullWidth
                 loading={busy === u.id}
-                disabled={!!busy}
+                disabled={!!busy && busy !== u.id}
                 accessibilityLabel={`Sign in as ${u.name}, ${u.note}`}
-                onPress={() => run(u.id, () => signInAsDemo(u.id))}
+                onPress={() => void run(u.id, () => signInAsDemo(u.id))}
+                testID={`demo-user-${u.id}`}
               />
             ))}
-          </Card>
+          </View>
         ) : null}
 
         <View style={styles.footer}>
           <HealthBadge />
           {__DEV__ && missing.length > 0 ? (
-            <Text style={styles.missing}>Missing config: {missing.join(", ")} (see app/.env.example)</Text>
+            <AppText variant="caption" weight="bold" color="warnFg" center>
+              {`Missing config: ${missing.join(", ")} (see app/.env.example)`}
+            </AppText>
           ) : null}
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  container: { flexGrow: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.lg, maxWidth: 520, width: "100%", alignSelf: "center" },
-  hero: { alignItems: "center", gap: spacing.sm, marginBottom: spacing.xl },
-  logo: { fontSize: 36, fontWeight: "800", color: colors.primary },
-  tagline: { fontSize: fontSize.md, color: colors.textMuted, textAlign: "center" },
-  demo: { gap: spacing.sm },
-  demoTitle: { fontSize: fontSize.sm, fontWeight: "700", color: colors.textMuted },
-  footer: { alignItems: "center", gap: spacing.xs, marginTop: spacing.lg },
-  missing: { fontSize: fontSize.xs, color: colors.warning, textAlign: "center" },
+  screen: { flex: 1, backgroundColor: color.bg },
+  content: {
+    flexGrow: 1,
+    justifyContent: "space-between",
+    paddingTop: 120,
+    paddingHorizontal: 28,
+    paddingBottom: 48,
+    gap: 32,
+    maxWidth: 520,
+    width: "100%",
+    alignSelf: "center",
+  },
+  top: { gap: space.xl },
+  tagline: { maxWidth: 300 },
+  bottom: { gap: space.md },
+  demo: { gap: space.sm, marginTop: space.md },
+  footer: { gap: space.xs, marginTop: space.md },
 });

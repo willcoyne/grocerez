@@ -6,7 +6,7 @@ generator client {
 
 datasource db {
   provider   = "postgresql"
-  extensions = [pgcrypto, pg_trgm, fuzzystrmatch]
+  extensions = [pgcrypto, pg_trgm, fuzzystrmatch, vector]
 }
 
 // ─── 02 Users, diets & allergens ───────────────────────────────────────────────
@@ -165,6 +165,14 @@ model Item {
   /// NULL = seeded.
   createdBy        String?    @map("created_by") @db.Uuid
   createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Short generic description from Akamai's chat model, e.g. "chocolate sandwich cookies".
+  description      String?
+  /// Generic product type from Akamai's chat model, e.g. "cookies" (Oreos), "candy" (M&M's).
+  productType      String?    @map("product_type")
+  /// Akamai embedding of "name: description" (semantic search). Read/written with raw SQL only.
+  embedding        Unsupported("vector")?
+  embeddingModel   String?    @map("embedding_model")
+  embeddedAt       DateTime?  @map("embedded_at") @db.Timestamptz(6)
 
   creator        User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   aliases        ItemAlias[]

@@ -1,9 +1,11 @@
 import { useRouter } from "expo-router";
+import { ChevronRight, Mail } from "lucide-react-native";
 import { useEffect } from "react";
-import { AppState, Pressable, StyleSheet, Text } from "react-native";
+import { AppState, Pressable, StyleSheet } from "react-native";
 
 import { useMyInvites } from "@/api/hooks/groups";
-import { colors, fontSize, spacing, TAP_TARGET } from "@/theme";
+import { AppText } from "@/components/ui";
+import { color, pressedOpacity, radius, size, space } from "@/theme";
 
 /** "You've been invited to X" banner on the tabs. Refetches my invites whenever the app returns to the foreground. */
 export function InviteBanner() {
@@ -23,13 +25,35 @@ export function InviteBanner() {
   const text =
     list.length === 1 ? `You've been invited to ${list[0].group.name}` : `You've been invited to ${list.length} households`;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${text}. Open invites`} style={styles.banner} onPress={() => router.push("/invites")}>
-      <Text style={styles.text}>✉️ {text} ›</Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${text}. Open invites`}
+      style={({ pressed }) => [styles.banner, pressed && { opacity: pressedOpacity }]}
+      onPress={() => router.push("/invites")}
+    >
+      <Mail size={18} color={color.warnFg} />
+      <AppText variant="bodyS" weight="bold" style={styles.flex}>
+        {text}
+      </AppText>
+      <ChevronRight size={18} color={color.ink2} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  banner: { backgroundColor: colors.primaryLight, minHeight: TAP_TARGET, justifyContent: "center", paddingHorizontal: spacing.lg },
-  text: { color: colors.primaryDark, fontWeight: "700", fontSize: fontSize.md },
+  banner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    minHeight: size.hit,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    marginHorizontal: space.screenX,
+    marginTop: space.md,
+    backgroundColor: color.suggestBg,
+    borderWidth: 1,
+    borderColor: color.suggestBorder,
+    borderRadius: radius.control,
+  },
+  flex: { flex: 1 },
 });

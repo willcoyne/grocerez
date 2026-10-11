@@ -1,28 +1,58 @@
 import { useRouter } from "expo-router";
-import { ScrollView, StyleSheet, Text } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MyInvitesList } from "@/components/MyInvitesList";
-import { Button } from "@/components/ui";
+import { AppText, Button, SectionLabel } from "@/components/ui";
 import { useAuth } from "@/state/AuthContext";
-import { colors, fontSize, spacing } from "@/theme";
+import { color, space } from "@/theme";
 
-/** Signed in but not in any household: pending invites first, then "Create a household". */
+/** DESIGN.md §4.2 Household: signed in but not in any household. Invites first, then "Create a household". */
 export default function NoGroupScreen() {
   const router = useRouter();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const insets = useSafeAreaInsets();
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title} accessibilityRole="header">
-        Pending invites
-      </Text>
-      <MyInvitesList />
-      <Button title="Create a household" onPress={() => router.push("/create-group")} />
-      <Button title="Sign out" variant="ghost" onPress={() => void signOut()} />
+    <ScrollView
+      testID="screen-household"
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 64 }]}
+    >
+      <View style={styles.titleBlock}>
+        {user ? (
+          <AppText variant="caption" weight="semi" color="muted">
+            {`Signed in as ${user.displayName} · ${user.email}`}
+          </AppText>
+        ) : null}
+        <AppText variant="h1" accessibilityRole="header">
+          Join or start a household
+        </AppText>
+      </View>
+
+      <View style={styles.section}>
+        <SectionLabel>Invites for you</SectionLabel>
+        <MyInvitesList />
+      </View>
+
+      <View style={styles.divider} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <View style={styles.line} />
+        <AppText variant="caption" weight="semi" color="muted">
+          or
+        </AppText>
+        <View style={styles.line} />
+      </View>
+
+      <Button label="Create a household" variant="secondary" size="lg" fullWidth onPress={() => router.push("/create-group")} />
+      <Button label="Sign out" variant="ghost" onPress={() => void signOut()} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.xl, gap: spacing.lg, maxWidth: 560, width: "100%", alignSelf: "center" },
-  title: { fontSize: fontSize.xl, fontWeight: "800", color: colors.text },
+  screen: { flex: 1, backgroundColor: color.bg },
+  content: { paddingHorizontal: space.screenX, paddingBottom: 48, gap: space.xxl, maxWidth: 560, width: "100%", alignSelf: "center" },
+  titleBlock: { gap: space.xs },
+  section: { gap: space.md },
+  divider: { flexDirection: "row", alignItems: "center", gap: space.md },
+  line: { flex: 1, height: 1, backgroundColor: color.border },
 });

@@ -1,5 +1,6 @@
 import { prisma } from "../../db.js";
 import type { AddCabinetBody, CabinetItem, UpdateCabinetBody } from "../../contracts/cabinet.js";
+import { ALLERGENS, type Allergen } from "../../contracts/dietary.js";
 import { estimateExpiration, fromCalendarDate, groupTimeZone, toCalendarDate } from "../../lib/expiration.js";
 import { uploadKeyPattern } from "../../contracts/uploads.js";
 import { badRequest, notFound } from "../../lib/errors.js";
@@ -10,6 +11,16 @@ import { cabinetRepo } from "./repo.js";
 
 type Row = NonNullable<Awaited<ReturnType<typeof cabinetRepo.find>>>;
 
+/** item defaults ∪ product contains ∪ product may-contain, deduped, in ALLERGENS order. */
+function rowAllergens(c: Row): Allergen[] {
+  const set = new Set<string>([
+    ...c.item.defaultAllergens,
+    ...(c.product?.allergens ?? []),
+    ...(c.product?.mayContain ?? []),
+  ]);
+  return ALLERGENS.filter((a) => set.has(a));
+}
+
 export async function toCabinetItem(c: Row): Promise<CabinetItem> {
   return {
     id: c.id,
@@ -17,8 +28,18 @@ export async function toCabinetItem(c: Row): Promise<CabinetItem> {
     itemId: c.itemId,
     item: { id: c.item.id, name: c.item.name, category: c.item.category },
     product: c.product
-      ? { id: c.product.id, brand: c.product.brand, name: c.product.name, imageUrl: await images.urlFor(c.product.imageS3Key) }
+      ? {
+          id: c.product.id,
+          brand: c.product.brand,
+          name: c.product.name,
+          imageUrl: await images.urlFor(c.product.imageS3Key),
+          caloriesPerServing: c.product.caloriesPerServing == null ? null : Number(c.product.caloriesPerServing),
+          healthScore: c.product.healthScore,
+          ingredients: c.product.ingredients,
+          servingSize: c.product.servingSize,
+        }
       : null,
+    allergens: rowAllergens(c),
     status: c.status,
     quantityText: c.quantityText,
     location: c.location as CabinetItem["location"],

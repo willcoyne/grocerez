@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
-import ListScreen from "@/app/(tabs)/index";
+import ListScreen from "@/app/(tabs)/list";
 import { toSections } from "@/lib/listSections";
 import { apiRoutes, renderWithProviders, testGroup, testUser } from "@/test-utils";
 
@@ -11,7 +11,11 @@ jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: j
 jest.mock("@/lib/confirm", () => ({ confirm: jest.fn(async () => true) }));
 jest.mock("@/notifications/expirations", () => ({ maybeAskNotificationPermission: jest.fn() }));
 const mockPush = jest.fn();
-jest.mock("expo-router", () => ({ useRouter: () => ({ push: mockPush }), useIsFocused: () => true }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ push: mockPush }),
+  useIsFocused: () => true,
+  useFocusEffect: (cb: () => void | (() => void)) => jest.requireActual<typeof import("react")>("react").useEffect(cb, [cb]),
+}));
 const apiMock = api as jest.Mock;
 const g = testGroup.id;
 
@@ -59,11 +63,19 @@ describe("toSections", () => {
 describe("Shopping list", () => {
   beforeEach(() => mockPush.mockReset());
 
-  it("shows allergen badges with member and allergen", async () => {
-    apiMock.mockImplementation(apiRoutes({ [`GET /groups/${g}/shopping-list`]: () => [milk, oreos], [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }) }));
+  it("shows allergen chips with member and allergen, and the running-low chip", async () => {
+    apiMock.mockImplementation(
+      apiRoutes({
+        [`GET /groups/${g}/shopping-list`]: () => [milk, oreos],
+        [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }),
+        [`GET /groups/${g}/cabinet`]: () => [{ id: "c1", itemId: oreos.itemId, status: "running_low" }],
+      }),
+    );
     await renderWithProviders(<ListScreen />);
-    expect(await screen.findByLabelText("Allergen warning: Milk, User 3")).toBeTruthy();
-    expect(screen.getByText("2 items · 0 checked")).toBeTruthy();
+    expect(await screen.findByText("Contains milk · User 3")).toBeTruthy();
+    expect(screen.getByText("2 to buy · 0 in the cart")).toBeTruthy();
+    expect(await screen.findByText("Running low at home")).toBeTruthy();
+    expect(screen.getByText("Check items off as you shop")).toBeTruthy();
   });
 
   it("check-off is optimistic and rolls back when the request finally fails", async () => {
@@ -81,15 +93,15 @@ describe("Shopping list", () => {
       }),
     );
     const { queryClient } = await renderWithProviders(<ListScreen />);
-    await fireEvent.press(await screen.findByLabelText("Oreos"));
-    // Optimistic: checked immediately, with a syncing dot and "✓ by you".
-    await screen.findByText("2 items · 1 checked");
-    expect(screen.getByLabelText("syncing")).toBeTruthy();
-    expect(screen.getByText("✓ by you")).toBeTruthy();
+    await fireEvent.press(await screen.findByLabelText("Check off Oreos"));
+    // Optimistic: checked immediately, with a syncing dot and "checked by you".
+    await screen.findByText("1 to buy · 1 in the cart");
+    expect(screen.getByLabelText("Syncing")).toBeTruthy();
+    expect(screen.getByText("In the cart · checked by you")).toBeTruthy();
     expect(apiMock).toHaveBeenCalledWith(`/groups/${g}/shopping-list/${oreos.id}`, { method: "PATCH", body: { checked: true } });
 
     rejectPatch(new ApiError(500, "INTERNAL", "Server hiccup"));
-    await screen.findByText("2 items · 0 checked");
+    await screen.findByText("2 to buy · 0 in the cart");
     expect(queryClient.getQueryData<ShoppingListItem[]>(keys.shoppingList(g))?.find((r) => r.id === oreos.id)?.checked).toBe(false);
     void resolvePatch;
   });
@@ -105,10 +117,10 @@ describe("Shopping list", () => {
       }),
     );
     await renderWithProviders(<ListScreen />);
-    await fireEvent.press(await screen.findByText("Finish trip (1)"));
+    await fireEvent.press(await screen.findByText("Finish trip · move 1 to the cabinet"));
     await waitFor(() => expect(screen.getByLabelText("Finishing…")).toBeDisabled());
     finish({ movedToCabinet: 1 });
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith(`/expiration-check?itemIds=${checked.itemId}`));
-    await screen.findByText("1 item added to cabinet");
+    await screen.findByText("1 item moved to the cabinet");
   });
 });

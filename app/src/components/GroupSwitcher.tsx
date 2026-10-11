@@ -1,53 +1,63 @@
-import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Check } from "lucide-react-native";
+import { type ReactNode, useState } from "react";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
 
+import { AppText, ScreenHeader } from "@/components/ui";
+import { plural } from "@/lib/format";
 import { useActiveGroup } from "@/state/ActiveGroupContext";
-import { colors, fontSize, radius, spacing, TAP_TARGET } from "@/theme";
+import { color, radius, size, space } from "@/theme";
 
-/** Header title: the active household, with a dropdown to switch when the user is in several. */
-export function GroupSwitcher() {
+/**
+ * Tab screen header (DESIGN.md §3 ScreenHeader) bound to the active household.
+ * When the user is in several households the "{group} · n members" line opens a switcher.
+ */
+export function TabHeader({ title, right }: { title: string; right?: ReactNode }) {
   const { activeGroup, groups, setActiveGroupId } = useActiveGroup();
   const [open, setOpen] = useState(false);
   const several = groups.length > 1;
 
   return (
     <>
-      <Pressable
-        accessibilityRole={several ? "button" : "header"}
-        accessibilityLabel={several ? `Household ${activeGroup?.name}. Switch household` : activeGroup?.name}
-        disabled={!several}
-        onPress={() => setOpen(true)}
-        style={styles.title}
-      >
-        <Text style={styles.titleText} numberOfLines={1}>
-          {activeGroup?.name ?? "GrocerEZ"}
-          {several ? " ▾" : ""}
-        </Text>
-      </Pressable>
+      <ScreenHeader
+        groupName={activeGroup?.name}
+        memberCount={activeGroup?.memberCount}
+        title={title}
+        right={right}
+        onGroupPress={several ? () => setOpen(true) : undefined}
+        groupHint={several ? "Switch" : undefined}
+      />
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} accessibilityLabel="Close household list">
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Switch household</Text>
-            {groups.map((g) => (
-              <Pressable
-                key={g.id}
-                accessibilityRole="button"
-                accessibilityState={{ selected: g.id === activeGroup?.id }}
-                style={styles.option}
-                onPress={() => {
-                  setActiveGroupId(g.id);
-                  setOpen(false);
-                }}
-              >
-                <Text style={[styles.optionText, g.id === activeGroup?.id && styles.selected]}>
-                  {g.id === activeGroup?.id ? "✓ " : ""}
-                  {g.name}
-                </Text>
-                <Text style={styles.muted}>
-                  {g.memberCount} member{g.memberCount === 1 ? "" : "s"}
-                </Text>
-              </Pressable>
-            ))}
+            <AppText variant="micro" color="muted">
+              Switch household
+            </AppText>
+            {groups.map((g) => {
+              const selected = g.id === activeGroup?.id;
+              return (
+                <Pressable
+                  key={g.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={g.name}
+                  accessibilityState={{ selected }}
+                  style={[styles.option, selected && styles.optionOn]}
+                  onPress={() => {
+                    setActiveGroupId(g.id);
+                    setOpen(false);
+                  }}
+                >
+                  <View style={styles.flex}>
+                    <AppText variant="bodyL" weight="heavy">
+                      {g.name}
+                    </AppText>
+                    <AppText variant="caption" color="muted">
+                      {plural(g.memberCount, "member")}
+                    </AppText>
+                  </View>
+                  {selected ? <Check size={20} color={color.primary} strokeWidth={3} /> : null}
+                </Pressable>
+              );
+            })}
           </View>
         </Pressable>
       </Modal>
@@ -56,13 +66,19 @@ export function GroupSwitcher() {
 }
 
 const styles = StyleSheet.create({
-  title: { minHeight: TAP_TARGET, justifyContent: "center", maxWidth: 260 },
-  titleText: { fontSize: fontSize.lg, fontWeight: "700", color: colors.text },
-  backdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-start", paddingTop: 100, padding: spacing.lg },
-  sheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.xs },
-  sheetTitle: { fontSize: fontSize.md, fontWeight: "700", color: colors.textMuted, marginBottom: spacing.sm },
-  option: { minHeight: TAP_TARGET, justifyContent: "center", paddingVertical: spacing.sm },
-  optionText: { fontSize: fontSize.md, color: colors.text },
-  selected: { fontWeight: "700", color: colors.primary },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
+  backdrop: { flex: 1, backgroundColor: color.overlay, paddingTop: 100, padding: space.screenX },
+  sheet: { backgroundColor: color.surface, borderRadius: radius.cardLg, padding: space.lg, gap: space.sm },
+  option: {
+    minHeight: size.hit,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: color.border,
+  },
+  optionOn: { borderColor: color.primary },
+  flex: { flex: 1 },
 });

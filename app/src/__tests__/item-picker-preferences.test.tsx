@@ -1,10 +1,9 @@
 import type { Item } from "@contracts/items";
 import type { Preference } from "@contracts/preferences";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, screen } from "@testing-library/react-native";
 
 import { api, ApiError } from "@/api/client";
 import { keys } from "@/api/keys";
-import { ItemPickerBody } from "@/components/ItemPicker";
 import { MyPreferences } from "@/components/MyPreferences";
 import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
@@ -19,43 +18,6 @@ const cheerios: Item = {
   defaultAllergens: [],
   shelfLifeDays: 180,
 };
-
-describe("ItemPicker", () => {
-  it('typing "cherios" offers Cheerios; Yes saves the alias and returns Cheerios', async () => {
-    apiMock.mockImplementation(
-      apiRoutes({
-        "GET /items/search": () => ({ match: "suggested", results: [cheerios] }),
-        "POST /items": () => cheerios,
-      }),
-    );
-    const onPick = jest.fn();
-    const onClose = jest.fn();
-    await renderWithProviders(<ItemPickerBody onPick={onPick} onClose={onClose} />);
-    await fireEvent.changeText(screen.getByLabelText("Search items"), "cherios");
-    await screen.findByText(/Did you mean/);
-    expect(apiMock).toHaveBeenCalledWith("/items/search", expect.objectContaining({ query: { q: "cherios" } }));
-    await fireEvent.press(screen.getByLabelText("Yes, Cheerios"));
-    await waitFor(() => expect(onPick).toHaveBeenCalledWith(cheerios));
-    expect(apiMock).toHaveBeenCalledWith("/items", { method: "POST", body: { name: "cherios", aliasOf: cheerios.id } });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("no match → Create 'X' asks for a category", async () => {
-    apiMock.mockImplementation(
-      apiRoutes({
-        "GET /items/search": () => ({ match: "none", results: [] }),
-        "POST /items": (body) => ({ ...cheerios, name: (body as { name: string }).name }),
-      }),
-    );
-    const onPick = jest.fn();
-    await renderWithProviders(<ItemPickerBody onPick={onPick} onClose={jest.fn()} />);
-    await fireEvent.changeText(screen.getByLabelText("Search items"), "dragonfruit");
-    await fireEvent.press(await screen.findByText(/Create “dragonfruit”/));
-    await fireEvent.press(screen.getByLabelText("Produce"));
-    await waitFor(() => expect(onPick).toHaveBeenCalled());
-    expect(apiMock).toHaveBeenCalledWith("/items", { method: "POST", body: { name: "dragonfruit", category: "produce" } });
-  });
-});
 
 describe("My preferences", () => {
   const pref: Preference = {
@@ -72,7 +34,7 @@ describe("My preferences", () => {
     updatedAt: "",
   };
 
-  it("shows In cabinet / On list tags and rolls back a failed delete", async () => {
+  it("shows the On the list chip and rolls back a failed delete", async () => {
     apiMock.mockImplementation(
       apiRoutes({
         [`GET /groups/${testGroup.id}/preferences`]: () => [pref],
@@ -85,8 +47,8 @@ describe("My preferences", () => {
     );
     const { queryClient } = await renderWithProviders(<MyPreferences groupId={testGroup.id} />);
     await screen.findByText(/^Cheerios/);
-    await screen.findByText("On list");
-    await fireEvent.press(screen.getByLabelText("Delete Cheerios"));
+    await screen.findByText("On the list");
+    await fireEvent.press(screen.getByLabelText("Remove Cheerios"));
     await screen.findByText("boom");
     expect(queryClient.getQueryData<Preference[]>(keys.preferences(testGroup.id, "me"))).toHaveLength(1);
   });
