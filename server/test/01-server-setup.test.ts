@@ -65,7 +65,9 @@ describe("01 server setup", () => {
       JWT_SECRET: "x".repeat(32),
       GOOGLE_CLIENT_IDS: "a",
     } as NodeJS.ProcessEnv;
-    expect(() => loadConfig(env)).toThrow(/ANTHROPIC_API_KEY: missing/);
+    expect(() => loadConfig(env)).toThrow(/AWS_REGION: missing/);
+    // Claude is optional everywhere: only the List's price estimate uses it (503 NOT_CONFIGURED without a key).
+    expect(() => loadConfig(env)).not.toThrow(/ANTHROPIC_API_KEY/);
     const ok = loadConfig({ ...env, NODE_ENV: "development" });
     expect(ok.GOOGLE_CLIENT_IDS).toEqual(["a"]);
     expect(ok.PORT).toBe(3000);

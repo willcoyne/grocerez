@@ -106,7 +106,7 @@ const schema = z.object({
     .transform((v) => v === "true"),
 });
 
-const PROD_REQUIRED = ["ANTHROPIC_API_KEY", "AWS_REGION", "S3_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] as const;
+const PROD_REQUIRED = ["AWS_REGION", "S3_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] as const;
 
 export type Config = z.infer<typeof schema>;
 
