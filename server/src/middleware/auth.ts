@@ -16,7 +16,8 @@ async function agentTokenAllowed(run: AgentRunClaims, method: string, path: stri
   const m = GROUP_PATH.exec(path);
   if (!m || m[1].toLowerCase() !== run.groupId.toLowerCase()) return false;
   const rest = (m[2] ?? "").replace(/\/+$/, "");
-  if (method !== "GET" && !(method === "POST" && rest === "/agent/safety-check")) return false;
+  const agentPosts = ["/agent/safety-check", "/agent/recipes/search"];
+  if (method !== "GET" && !(method === "POST" && agentPosts.includes(rest))) return false;
   const live = await prisma.agentRun.count({
     where: { id: run.runId, groupId: run.groupId, userId: run.userId, status: "running" },
   });

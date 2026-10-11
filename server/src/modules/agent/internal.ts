@@ -4,6 +4,9 @@ import { z } from "zod";
 import { config } from "../../config.js";
 import { AppError } from "../../lib/errors.js";
 import { perIp } from "../../middleware/rateLimit.js";
+import { RecipeIngestBody } from "../../contracts/agent.js";
+import { validate } from "../../middleware/validate.js";
+import { recipeIndex } from "./recipes.js";
 import { agentService } from "./service.js";
 
 /** Constant-time compare (hashing first makes the lengths equal, so timingSafeEqual never throws or leaks length). */
@@ -39,3 +42,14 @@ agentInternalRouter.post("/internal/agent-events", perIp(600, 60_000), requireAg
   await agentService.handleEvent(envelope, req.body);
   res.status(204).end();
 });
+
+/** Crawler → recipe index (challenge 01 §12): upsert ≤ 100 recipes by url; the server computes allergens + embeddings. */
+agentInternalRouter.post(
+  "/internal/recipes",
+  perIp(120, 60_000),
+  requireAgentSecret,
+  validate({ body: RecipeIngestBody }),
+  async (req, res) => {
+    res.json(await recipeIndex.ingest(req.body.recipes));
+  },
+);

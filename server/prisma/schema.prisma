@@ -486,3 +486,30 @@ model PriceEstimate {
   @@unique([itemId, zipCode])
   @@map("price_estimates")
 }
+
+// ─── Pantry Agent recipe index (challenge 01 §12) ───────────────────────────────
+
+/// Crawled recipe (schema.org Recipe JSON-LD). Upserted by POST /api/internal/recipes; searched by the agent.
+/// Partial indexes live in the migration only (Prisma can't express them): recipes_missing_embedding_idx and the
+/// HNSW index on (embedding::vector(1024)) WHERE vector_dims(embedding) = 1024.
+model Recipe {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  url             String     @unique
+  site            String     @db.VarChar(80)
+  title           String     @db.VarChar(200)
+  imageUrl        String?    @map("image_url")
+  minutes         Int?
+  servings        Int?
+  ingredientLines String[]   @default([]) @map("ingredient_lines")
+  ingredients     String[]   @default([])
+  /// Computed at ingest: keyword table over the lines ∪ catalog defaultAllergens of the ingredients.
+  allergens       Allergen[] @default([])
+  /// Akamai embedding of "title: ingredients". Read/written with raw SQL only.
+  embedding       Unsupported("vector")?
+  embeddingModel  String?    @map("embedding_model")
+  embeddedAt      DateTime?  @map("embedded_at") @db.Timestamptz(6)
+  crawledAt       DateTime   @default(now()) @map("crawled_at") @db.Timestamptz(6)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("recipes")
+}
