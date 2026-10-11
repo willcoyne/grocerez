@@ -6,22 +6,6 @@ import { z } from "zod";
 
 export const PricesBody = z.object({ zipCode: z.string().regex(/^\d{5}$/, "must be a 5-digit ZIP code").optional() });
 
-export const ClaudePrices = z.object({
-  prices: z
-    .array(
-      z.object({
-        itemId: z.string(),
-        itemName: z.string(),
-        lowCents: z.number().int(),
-        highCents: z.number().int(),
-        typicalCents: z.number().int().nullable(),
-        unit: z.string().max(100).nullable(),
-        sourceUrls: z.array(z.string().max(2000)).max(10),
-      }),
-    )
-    .max(200),
-});
-
 export const PriceItem = z.object({
   itemId: z.uuid(),
   name: z.string(),
@@ -30,6 +14,11 @@ export const PriceItem = z.object({
   typicalCents: z.number().int().nullable(),
   unit: z.string().nullable(),
   sources: z.array(z.string()),
+  /**
+   * regional_average: based on a BLS average retail price for the ZIP's census region (sources = data.bls.gov series).
+   * ai_estimate: the model's typical US supermarket price, no source (items BLS doesn't track).
+   */
+  basis: z.enum(["regional_average", "ai_estimate"]),
   /** Always true: label these as "estimate" in the app. */
   estimate: z.literal(true),
   cached: z.boolean(),

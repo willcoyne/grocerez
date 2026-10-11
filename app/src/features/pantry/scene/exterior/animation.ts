@@ -1,6 +1,6 @@
 // Per-frame pose logic for the exterior, kept pure (inputs: phase, openProgress, time) so it is testable and can
 // drive both the R3F component and a plain three.js preview.
-import type { PantryPhase } from "../../types";
+import type { NoteKind, PantryPhase } from "../../types";
 import { type ExteriorHandles, NOTE_PIN_Y } from "./builders";
 import { LIST_LIFT_START } from "../motion";
 import { PANTRY_DIMENSIONS as D } from "./dimensions";
@@ -14,13 +14,17 @@ export type ExteriorAnimState = {
   openedAt: number;
   /** whether the latest shake started from the crooked pose (re-open) instead of neat */
   shakeFromCrooked: boolean;
-  /** clock time the doors reached fully open (for the little wobble) */
-  doorFullAt: number | null;
+  /** door swing state (see stepDoor) */
+  door: DoorMotion;
   hover: boolean;
   /** pointer is over the pinned list (web hover) */
   noteHover: boolean;
   /** smoothed 0..1 hover lift of the note */
   noteLift: number;
+  /** pointer is over the pinned Me note (web hover) */
+  meHover: boolean;
+  /** smoothed 0..1 hover lift of the Me note */
+  meLift: number;
   /** pointer is over the pinned Week note (web hover) */
   weekHover: boolean;
   /** smoothed 0..1 hover lift of the Week note */
@@ -34,10 +38,12 @@ export function createAnimState(): ExteriorAnimState {
     opened: false,
     openedAt: -Infinity,
     shakeFromCrooked: false,
-    doorFullAt: null,
+    door: createDoorMotion(),
     hover: false,
     noteHover: false,
     noteLift: 0,
+    meHover: false,
+    meLift: 0,
     weekHover: false,
     weekLift: 0,
     glow: 0,
@@ -64,6 +70,148 @@ export function doorSwing(p: number): number {
 /** Door swing angle (radians, positive = open) for a given openProgress. */
 export function doorAngle(openProgress: number): number {
   return D.doorOpenAngle * doorSwing(openProgress);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Door motion (opening, closing, reversals, the settle wobble and the "peek" tap hint)
+//
+// The doors are driven from ONE continuous value, the linear phase clock `open` (0 closed .. 1 open; PantryScreen's
+// PhaseDriver), with a separate curve per direction. Opening keeps the flung-open look (doorSwing, overshoot allowed).
+// Closing must NOT replay that curve backwards: run in reverse, doorSwing's overshoot first swings the doors further
+// OPEN (110° → 114°) before they turn and close, and its steep start becomes a slam at the end. Closing is a plain
+// ease-in-out from wherever the doors are to exactly 0: monotonic, soft landing, never past the frame. A change of
+// direction mid-way starts the new curve from the angle on screen (both curves begin with zero velocity), so the
+// doors never jump. The wobble only runs after a completed opening and the peek only after the doors have rested
+// shut for a while, each starting/stopping at zero offset.
+
+/** Largest swing angle the doors ever reach: 110° + the opening overshoot (~3.9%) + the settle wobble (0.03 rad). */
+export const DOOR_MAX_ANGLE = D.doorOpenAngle * 1.045 + 0.03;
+
+/**
+ * Where props may be mounted on the pantry's front stiles (list note on the right, meal-prep calendar on the left)
+ * without the doors ever touching them, for every angle the doors reach (0 .. DOOR_MAX_ANGLE; the doors never swing
+ * below 0). World units, right stile; mirror x for the left one. The stile face is z = 0 and spans |x| 0.85 .. 1.10;
+ * the hinge line is |x| = 0.88 (front of the closed door z = 0.06, back z = 0.01). Measured from the real door geometry
+ * (incl. the mid-rail sill that pokes 0.045 forward and the knobs) by exterior/__tests__/door-motion.test.ts.
+ *  - hinge zone |x| < `outboardX`: the closed door covers it from z = 0.01, so a prop must stay behind `hingeZoneMaxZ`;
+ *  - |x| ≥ `outboardX`: stays clear if its front is behind `outboardMaxZ`, except in the mid-rail sill's height band
+ *    (`sill.minY` .. `sill.maxY`), where the sill passes just outboard of the hinge at full open: behind `sill.maxZ`;
+ *  - outside the door's height band (`doorMinY` .. `doorMaxY`) there is no constraint.
+ */
+export const STILE_CLEARANCE = {
+  outboardX: 0.9,
+  hingeZoneMaxZ: 0.008,
+  outboardMaxZ: 0.12,
+  sill: { minY: 1.09, maxY: 1.15, maxZ: 0.045 },
+  doorMinY: D.door.bottomY,
+  doorMaxY: D.door.bottomY + D.door.height,
+} as const;
+
+/** Inverse of easeInOutCubic (0..1 → 0..1), to recover the linear clock from an eased `openProgress`. */
+export function uneaseInOutCubic(p: number): number {
+  const v = clamp01(p);
+  return v < 0.5 ? Math.cbrt(v / 4) : 1 - Math.cbrt(2 * (1 - v)) / 2;
+}
+
+/** No peek for this long after the doors come to rest shut (the landing must read as final). */
+export const PEEK_SETTLE = 1.5;
+/** Peek cycle: every PEEK_PERIOD s the doors open a hair for the last PEEK_LEN s of the cycle. */
+const PEEK_PERIOD = 4.5;
+const PEEK_LEN = 0.7;
+const PEEK_AMP = 0.04;
+
+/** "Tap me" peek offset (radians) `restTime` s after the doors came to rest shut; 0 during the settle period. */
+export function peekOffset(restTime: number): number {
+  if (!(restTime >= PEEK_SETTLE)) return 0;
+  const local = (restTime - PEEK_SETTLE) % PEEK_PERIOD;
+  const start = PEEK_PERIOD - PEEK_LEN;
+  if (local <= start) return 0;
+  return PEEK_AMP * Math.pow(Math.sin(((local - start) / PEEK_LEN) * Math.PI), 2);
+}
+
+/** The settle wobble is exactly over after this long (faded out, so it is never still running when a close starts). */
+export const WOBBLE_LEN = 1.2;
+
+/** Small damped wobble (radians) `t` s after the doors reached fully open; starts at 0 and is exactly 0 from WOBBLE_LEN. */
+export function doorWobble(t: number): number {
+  if (!(t > 0) || t >= WOBBLE_LEN) return 0;
+  return 0.03 * Math.exp(-5 * t) * Math.sin(16 * t) * (1 - smoothstep(0.7 * WOBBLE_LEN, WOBBLE_LEN, t));
+}
+
+export type DoorMotion = {
+  /** direction of the current swing */
+  mode: "open" | "close";
+  /** angle on screen when the current swing started, and the linear clock value then */
+  from: number;
+  q0: number;
+  /** last linear clock value seen (null until the first frame) */
+  lastQ: number | null;
+  /** angle applied last frame (radians, incl. wobble/peek) */
+  angle: number;
+  /** clock time the doors reached fully open (wobble), or null */
+  fullAt: number | null;
+  /** clock time the doors came to rest shut in `closed` (peek), or null */
+  restAt: number | null;
+  /** smoothed peek offset, so cancelling a peek (tap, list) eases out instead of snapping shut */
+  peek: number;
+};
+
+export function createDoorMotion(): DoorMotion {
+  return { mode: "open", from: 0, q0: 0, lastQ: null, angle: 0, fullAt: null, restAt: null, peek: 0 };
+}
+
+const Q_EPS = 1e-6;
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * Advance the doors one frame. `q` is the LINEAR open clock (0..1), `now` a monotonic clock (s), `dt` the frame time.
+ * Returns the swing angle (radians, positive = open) and remembers it in `m.angle`.
+ */
+export function stepDoor(m: DoorMotion, phase: PantryPhase, q: number, now: number, dt: number): number {
+  const open = D.doorOpenAngle;
+  q = clamp01(q);
+  if (m.lastQ === null) m.lastQ = q;
+  const dir = q > m.lastQ + Q_EPS ? "open" : q < m.lastQ - Q_EPS ? "close" : null;
+  if (dir && (dir !== m.mode || m.peek > 0)) {
+    // reverse (or leaving a peek): the new curve starts from what is on screen (wobble/peek folded in), from where
+    // the clock is now
+    m.mode = dir;
+    m.from = m.angle;
+    m.q0 = m.lastQ;
+    m.peek = 0;
+    m.fullAt = null;
+  }
+  m.lastQ = q;
+
+  let angle: number;
+  if (m.mode === "open") {
+    // from the closed rest this is exactly the original opening: doorAngle(easeInOutCubic(q))
+    const span = 1 - m.q0;
+    const u = span > Q_EPS ? clamp01((q - m.q0) / span) : 1;
+    angle = m.from + (open - m.from) * doorSwing(easeInOut(u));
+    if (q >= 1) {
+      if (m.fullAt === null) m.fullAt = now;
+      angle += doorWobble(now - m.fullAt);
+    }
+  } else {
+    // monotonic ease-in-out down to exactly 0 (no overshoot, so never through the frame / into the stiles)
+    angle = m.q0 > Q_EPS ? Math.max(0, m.from) * easeInOut(q / m.q0) : 0;
+  }
+
+  // peek: only once the doors have rested shut in `closed` for PEEK_SETTLE; eases out when cancelled
+  const atRest = phase === "closed" && q <= 0 && angle <= 1e-9;
+  if (atRest) {
+    if (m.restAt === null) m.restAt = now;
+  } else {
+    m.restAt = null;
+  }
+  const target = atRest && m.restAt !== null ? peekOffset(now - m.restAt) : 0;
+  m.peek = atRest ? target : m.peek * Math.exp(-Math.max(0, dt) * 14);
+  if (m.peek < 1e-5) m.peek = 0;
+  angle += m.peek;
+
+  m.angle = angle;
+  return angle;
 }
 
 /** Where each "Grocer" letter settles after the jolt: x offset, y-rotation, z-tilt. Leans chosen so neighbours don't collide. */
@@ -145,7 +293,21 @@ export function notePose(now: number, hover: number, lift: number, tappable: boo
   };
 }
 
-export type ExteriorInput = { phase: PantryPhase; openProgress: number; listProgress?: number };
+export type ExteriorInput = {
+  phase: PantryPhase;
+  /** eased door progress (easeInOutCubic of the linear clock) */
+  openProgress: number;
+  listProgress?: number;
+  /** live LINEAR door clock read this frame (preferred: no React lag or quantisation); see PantryExteriorProps.clock */
+  openClock?: number;
+  /** which pinned paper the `list` phase lifts toward the camera (default the List) */
+  liftedNote?: NoteKind;
+  /**
+   * The user's "fast" setting: no animation at all. Doors sit exactly at the clock's angle (no overshoot, wobble or
+   * peek), letters and sign are already settled, papers don't flutter or hover, the knob doesn't breathe.
+   */
+  still?: boolean;
+};
 
 /** Apply poses to the scene graph. `now` is a monotonically increasing clock in seconds. */
 export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: ExteriorInput, now: number, dt: number) {
@@ -166,20 +328,10 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
     s.lastPhase = phase;
   }
 
-  // --- doors
-  let angle = doorAngle(p);
-  if (p >= 0.999) {
-    if (s.doorFullAt === null) s.doorFullAt = now;
-    const tau = now - s.doorFullAt;
-    angle += 0.03 * Math.exp(-5 * tau) * Math.sin(16 * tau);
-  } else if (p < 0.98) {
-    s.doorFullAt = null;
-  }
-  if (phase === "closed" && p <= 0.001) {
-    // every few seconds the doors "peek" open a hair, inviting a tap
-    const local = now % 4.5;
-    if (local > 3.8) angle += 0.04 * Math.pow(Math.sin(((local - 3.8) / 0.7) * Math.PI), 2);
-  }
+  // --- doors (linear clock: live when given, else recovered from the eased openProgress)
+  const q = input.openClock !== undefined ? clamp01(input.openClock) : uneaseInOutCubic(p);
+  const still = !!input.still;
+  const angle = still ? q * D.doorOpenAngle : stepDoor(s.door, phase, q, now, dt);
   h.leftDoor.rotation.y = -angle;
   h.rightDoor.rotation.y = angle;
 
@@ -187,7 +339,11 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   const since = now - s.openedAt;
   for (let i = 0; i < h.letters.length; i++) {
     const L = h.letters[i];
-    const pose: LetterPose = s.opened ? letterPose(i, since, s.shakeFromCrooked) : { dx: 0, dy: 0, ry: 0, rz: 0 };
+    const pose: LetterPose = !s.opened
+      ? { dx: 0, dy: 0, ry: 0, rz: 0 }
+      : still
+        ? letterPose(i, Infinity, true) // settled crooked, no jolt
+        : letterPose(i, since, s.shakeFromCrooked);
     // lift so a tilted letter pivots on its corner instead of sinking into the crown
     const lift = Math.abs(Math.sin(pose.rz)) * L.halfW * 0.85;
     L.mesh.position.set(L.x + pose.dx, D.crownTop + pose.dy + lift, h.lettersZ);
@@ -195,23 +351,36 @@ export function updateExterior(h: ExteriorHandles, s: ExteriorAnimState, input: 
   }
 
   // --- sign
-  h.sign.rotation.z = signAngle(now, since, s.opened, s.shakeFromCrooked);
+  h.sign.rotation.z = still ? (s.opened ? SIGN_CROOKED : 0) : signAngle(now, since, s.opened, s.shakeFromCrooked);
 
-  // --- pinned list: "tap me" flutter / hover lift / lift-off toward the camera
-  s.noteLift += ((s.noteHover && phase === "closed" ? 1 : 0) - s.noteLift) * Math.min(1, dt * 10);
-  const np = notePose(now, s.noteLift, noteLiftFor(input.listProgress ?? 0), phase === "closed", D.note.rotZ);
-  h.notePaper.position.set(np.x, np.y, np.z);
-  h.notePaper.rotation.set(np.rx, 0, np.rz);
-
-  // --- pinned Week note: the same flutter/hover, out of step with the list; it never lifts off (the sheet opens)
-  s.weekLift += ((s.weekHover && phase === "closed" ? 1 : 0) - s.weekLift) * Math.min(1, dt * 10);
-  const wp = notePose(now + 2.6, s.weekLift, 0, phase === "closed", D.weekNote.rotZ);
-  h.weekPaper.position.set(wp.x, wp.y, wp.z);
-  h.weekPaper.rotation.set(wp.rx, 0, wp.rz);
+  // --- pinned papers (List, Me, Week): "tap me" flutter (out of step) / hover lift / lift-off toward the camera
+  const closed = phase === "closed";
+  const lifted = input.liftedNote ?? "list";
+  const lift = noteLiftFor(input.listProgress ?? 0);
+  const k = Math.min(1, dt * 10);
+  s.noteLift += ((s.noteHover && closed ? 1 : 0) - s.noteLift) * k;
+  s.meLift += ((s.meHover && closed ? 1 : 0) - s.meLift) * k;
+  s.weekLift += ((s.weekHover && closed ? 1 : 0) - s.weekLift) * k;
+  const papers = [
+    { paper: h.notePaper, kind: "list", hover: s.noteLift, phase: 0, rotZ: D.note.rotZ },
+    { paper: h.mePaper, kind: "me", hover: s.meLift, phase: 1.3, rotZ: D.meNote.rotZ },
+    { paper: h.weekPaper, kind: "week", hover: s.weekLift, phase: 2.6, rotZ: D.weekNote.rotZ },
+  ] as const;
+  for (const n of papers) {
+    const pose = still
+      ? notePose(0, 0, n.kind === lifted ? lift : 0, false, n.rotZ) // pinned flat: no flutter, no hover lift
+      : notePose(now + n.phase, n.hover, n.kind === lifted ? lift : 0, closed, n.rotZ);
+    n.paper.position.set(pose.x, pose.y, pose.z);
+    n.paper.rotation.set(pose.rx, 0, pose.rz);
+  }
 
   // --- knob breathing glow (closed only) to invite a tap
   const target =
-    phase === "closed" ? 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.weekHover ? 0.35 : 0) : 0;
-  s.glow += (target - s.glow) * Math.min(1, dt * 6);
+    phase !== "closed"
+      ? 0
+      : still
+        ? 0.31
+        : 0.16 + 0.3 * (0.5 + 0.5 * Math.sin(now * 2.6)) + (s.hover && !s.noteHover && !s.meHover && !s.weekHover ? 0.35 : 0);
+  s.glow = still ? target : s.glow + (target - s.glow) * Math.min(1, dt * 6);
   getMaterials().knob.emissiveIntensity = s.glow;
 }

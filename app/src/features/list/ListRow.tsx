@@ -12,6 +12,8 @@ export type ListRowProps = {
   names: Map<string, string>;
   runningLow: boolean;
   syncing: boolean;
+  /** "~$3.49" from the last price estimate (Prices screen), when there is one. */
+  priceText?: string | null;
   onToggle: (row: ShoppingListItem) => void;
   onScan: (row: ShoppingListItem) => void;
   onDelete: (row: ShoppingListItem) => void;
@@ -30,7 +32,7 @@ function metaFor(row: ShoppingListItem, meId: string | undefined, names: Map<str
 }
 
 /** One shopping-list row (DESIGN.md §4.5), plus carson's scan and delete actions. */
-export function ListRow({ row, meId, names, runningLow, syncing, onToggle, onScan, onDelete }: ListRowProps) {
+export function ListRow({ row, meId, names, runningLow, syncing, priceText, onToggle, onScan, onDelete }: ListRowProps) {
   const name = row.item.name;
   const chips: { key: string; label: string; tone: ChipTone }[] = [
     ...row.allergenFlags.map((f) => ({
@@ -52,6 +54,11 @@ export function ListRow({ row, meId, names, runningLow, syncing, onToggle, onSca
           <AppText variant="bodyL" weight="heavy" color={row.checked ? "muted" : "ink"} strike={row.checked} style={styles.name}>
             {name}
           </AppText>
+          {priceText ? (
+            <AppText variant="bodyS" weight="semi" color="ink2" testID={`row-${row.itemId}-price`}>
+              {priceText}
+            </AppText>
+          ) : null}
           {syncing ? <View style={styles.syncDot} accessible accessibilityLabel="Syncing" testID={`row-${row.itemId}-syncing`} /> : null}
         </View>
         <AppText variant="caption" color="muted">

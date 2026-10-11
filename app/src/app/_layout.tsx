@@ -11,8 +11,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { makeQueryClient, setupReactQueryNative } from "@/api/queryClient";
 import { ErrorState, LoadingState, ToastProvider } from "@/components/ui";
 import { SocketProvider } from "@/realtime/SocketProvider";
+import { ThemeProvider } from "@/features/theme/ThemeProvider";
 import { ActiveGroupProvider, useActiveGroup } from "@/state/ActiveGroupContext";
 import { AuthProvider, useAuth } from "@/state/AuthContext";
+import { ThemeUserSync } from "@/state/uiPrefs";
 import { errorMessage } from "@/api/client";
 import { color, font } from "@/theme";
 import { View } from "react-native";
@@ -38,9 +40,12 @@ export default function RootLayout() {
             <ActiveGroupProvider>
               <SocketProvider>
                 <ToastProvider>
-                  <StatusBar style="dark" />
-                  {/* A font failure falls back to system fonts rather than blocking the app. */}
-                  <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+                  <ThemeProvider>
+                    <ThemeUserSync />
+                    <StatusBar style="dark" />
+                    {/* A font failure falls back to system fonts rather than blocking the app. */}
+                    <RootNavigator fontsReady={fontsLoaded || !!fontError} />
+                  </ThemeProvider>
                 </ToastProvider>
               </SocketProvider>
             </ActiveGroupProvider>

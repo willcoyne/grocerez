@@ -2,18 +2,22 @@
 /**
  * Warm key (the only shadow caster, small map) + soft fill + hemisphere bounce. The key light and its shadow camera
  * follow the camera's height so shelves deep down the column still get soft shadows. The cooler fridge/freezer light
- * lives with the shelves (scene/shelves).
+ * lives with the shelves (scene/shelves). Colours / intensities / shadow casting come from the active theme
+ * (themeLights; cozy reproduces the original values).
  */
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { themeLights } from "../../theme/canvas";
+import { useSceneTheme } from "../../theme/ThemeProvider";
 import { SHADOW_MAP_SIZE } from "./sceneConfig";
 
 const KEY_OFFSET = new THREE.Vector3(-2.6, 3.4, 5.2);
 const FILL_OFFSET = new THREE.Vector3(3.2, 1.2, 4.5);
 
 export function Lights() {
+  const L = themeLights(useSceneTheme());
   const key = useRef<THREE.DirectionalLight>(null);
   const fill = useRef<THREE.DirectionalLight>(null);
   const target = useMemo(() => new THREE.Object3D(), []);
@@ -47,20 +51,20 @@ export function Lights() {
   return (
     <>
       <primitive object={target} />
-      <hemisphereLight args={["#FFF4E2", "#8B5A2B", 0.75]} />
-      <ambientLight color="#FFE9CF" intensity={0.18} />
+      <hemisphereLight key={`${L.hemisphere.sky}|${L.hemisphere.ground}`} args={[L.hemisphere.sky, L.hemisphere.ground, L.hemisphere.intensity]} />
+      <ambientLight color={L.ambient.color} intensity={L.ambient.intensity} />
       <directionalLight
         ref={key}
-        color="#FFD9A8"
-        intensity={2.3}
-        castShadow
+        color={L.key.color}
+        intensity={L.key.intensity}
+        castShadow={L.key.castShadow}
         shadow-mapSize-width={SHADOW_MAP_SIZE}
         shadow-mapSize-height={SHADOW_MAP_SIZE}
         shadow-bias={-0.0006}
         shadow-normalBias={0.02}
         shadow-radius={4}
       />
-      <directionalLight ref={fill} color="#FFF1E0" intensity={0.55} />
+      <directionalLight ref={fill} color={L.fill.color} intensity={L.fill.intensity} />
     </>
   );
 }

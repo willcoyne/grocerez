@@ -5,4 +5,4 @@ export { InlineAdd, TextField, type InlineAddProps, type TextFieldProps } from '
 export { Avatar, Card, DashedEmpty, ErrorState, LoadingState, ScreenHeader, SectionLabel, type CardProps } from './layout';
 export { AiLabel, Checkbox, IconButton, Segmented, StatusChip, SuggestBanner, ToggleChip, type ChipTone } from './controls';
 export { TOAST_MS, ToastProvider, useToast, useToastBottomInset, type ToastOptions } from './Toast';
-export { TAB_BAR_HEIGHT, TAB_META, TabBar } from './TabBar';
+export { TAB_BAR_HEIGHT, TAB_META, TabBar, type TabId } from './TabBar';

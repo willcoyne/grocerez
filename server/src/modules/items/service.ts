@@ -16,6 +16,7 @@ import { config } from "../../config.js";
 import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { itemsRepo, searchRowToItem, toItem } from "./repo.js";
+import { enrichNewItemInBackground } from "../products/lookup.js";
 
 /** Background embeds in flight (tests await them with `waitForItemEmbeds`). */
 const pendingEmbeds = new Set<Promise<void>>();
@@ -141,7 +142,11 @@ export const itemsService = {
       return { item: toItem(item), created };
     });
     // Only brand-new items need an embedding (aliases point at an existing, already-embedded item).
-    if (result.created && !body.aliasOf) this.embedItemInBackground(result.item);
+    if (result.created && !body.aliasOf) {
+      this.embedItemInBackground(result.item);
+      // Allergens from the name now, then the AI product lookup (backend/13).
+      enrichNewItemInBackground(result.item, userId);
+    }
     return result;
   },
 

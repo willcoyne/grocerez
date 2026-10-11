@@ -7,7 +7,8 @@ import { prisma } from "../src/db.js";
 import { agentClient } from "../src/lib/agentClient.js";
 import { verifyAgentRunToken, verifyAppToken } from "../src/lib/jwt.js";
 import { setIo } from "../src/lib/realtime.js";
-import { agentTimers, sweepStaleRuns } from "../src/modules/agent/service.js";
+import { agentTimers, sweepStaleRuns, waitForPlanEstimates } from "../src/modules/agent/service.js";
+import { agent as akamai } from "../src/modules/products/lookup.js";
 import { api, itemId, makeGroup, makeUser, type TestUser } from "./helpers.js";
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/agent/demo-run.json", import.meta.url), "utf8"));
@@ -208,6 +209,33 @@ describe("12 agent: internal events", () => {
     expect(await runRow(runId)).toMatchObject({ status: "failed", error: "Plan didn't validate", plan: null });
     expect((await event(runId, 6, "step", { id: "x", label: "late", status: "done" })).status).toBe(409);
     expect((await event(runId, 6, "proposed", { plan: plan(), meta })).status).toBe(409);
+  });
+
+  it("a plan proposed without a price estimate gets one filled in afterwards (Akamai prices, every item priced)", async () => {
+    const { owner, g } = await household();
+    await prisma.user.update({ where: { id: owner.id }, data: { zipCode: "64105" } });
+    const key = { key: config.AKAMAI_API_KEY, url: config.AKAMAI_BASE_URL };
+    config.AKAMAI_API_KEY = "test-akamai-key";
+    config.AKAMAI_BASE_URL = "https://akamai.test/v1";
+    const chat = vi.spyOn(akamai, "chat").mockImplementation(async (b) => {
+      const prompt = (b.messages as { content: string }[])[1].content;
+      const ids = [...prompt.matchAll(/itemId (\S+): /g)].map((m) => m[1]);
+      const prices = ids.map((itemId) => ({ itemId, blsId: null, lowCents: 100, highCents: 300, typicalCents: 200, unit: "1" }));
+      return { choices: [{ message: { content: JSON.stringify({ prices }) } }] } as never;
+    });
+    try {
+      const p = { ...plan(), estimate: null };
+      const runId = await proposedRun(owner, g.id, p);
+      await waitForPlanEstimates();
+      const n = p.missingItems.length;
+      expect(n).toBeGreaterThan(0);
+      expect((await runRow(runId)).plan).toMatchObject({ estimate: { lowCents: 100 * n, highCents: 300 * n, label: "AI estimate" } });
+      expect(chat).toHaveBeenCalled();
+    } finally {
+      chat.mockRestore();
+      config.AKAMAI_API_KEY = key.key;
+      config.AKAMAI_BASE_URL = key.url;
+    }
   });
 
   it("proposed stores plan + meta; failed stores the message; both are terminal; agent:changed is emitted with runId", async () => {

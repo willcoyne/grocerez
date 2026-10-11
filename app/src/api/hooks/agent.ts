@@ -14,8 +14,8 @@ import { keys } from "../keys";
 
 /** How often a running run is polled. The socket ("agent:changed") usually beats it; polling covers a dropped socket. */
 export const AGENT_POLL_MS = 1500;
-/** The server fails a run after 120 s; past this (+10 s slack) a still-`running` run is treated as stuck. */
-export const AGENT_RUN_TIMEOUT_MS = 130_000;
+/** The server fails a run after 180 s; past this (+10 s slack) a still-`running` run is treated as stuck. */
+export const AGENT_RUN_TIMEOUT_MS = 190_000;
 /** A proposed plan the user walked away from is reopened for this long. */
 export const RESUME_PROPOSED_MS = 30 * 60_000;
 

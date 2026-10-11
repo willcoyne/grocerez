@@ -90,7 +90,7 @@ export function AgentChoiceChips<T>({
  * fresh nonce. The /agent modal stays as the internal/dev view (and the recorded-run replay).
  */
 export function openWeekSheet(router: ReturnType<typeof useRouter>) {
-  router.navigate(`/cabinet?week=${Date.now()}`);
+  router.navigate("/cabinet?station=week");
 }
 
 /**

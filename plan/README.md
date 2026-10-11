@@ -88,7 +88,7 @@ Folders are numbered in suggested build order. Each README lists its **Goal**, w
 |---|---|---|
 | **M1 — Skeleton** | Repos run locally, DB up, sign-in works | `*/01-*`, `*/02-*` |
 | **M2 — MVP loop** | Groups, invites, preferences, cabinet, list generation, check-off, finish trip, ran out | frontend 03–06 · backend 03–07 · database 03–07 |
-| **M3 — Smart items** | Product scanning, nutrition and allergens, expiration tracking, recall alerts | frontend 07–08 · backend 08–09, 11 · database 08–09 |
+| **M3 — Smart items** | Product scanning, nutrition and allergens, expiration tracking, recall alerts | frontend 07–08 · backend 08–09, 11, 13 (Akamai AI product lookup while SmartLabel access is pending) · database 08–09 |
 | **M4 — Agentic** | Recipe suggestions, price estimates | frontend 09 · backend 10 |
 | **Demo** | Seed data, deploy | database 10 · backend 12 |
 

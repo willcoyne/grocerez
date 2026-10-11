@@ -17,44 +17,74 @@
  * "endless" filler shelves never poke out above/below the pantry; in `shelves` the exterior is hidden instead.
  *
  * PHASES  closed → (tap pantry) opening 1.6 s → zooming 1.2 s → shelves → (Back) closing → closed.
- *         closed → (tap the pinned list) list: camera flies to the note, the paper lifts off its pin (clock.list 0→1),
- *         then the ShoppingListNote overlay opens; closing it runs clock.list 1→0 and returns to closed.
- * ITEMS   Tapping a food item selects it (tap again / scroll / Back clears): the camera flies to it, the item flips to
- *         show its back label (ShelfColumn flippedId) and a "Details" pill links to /item-detail/[id].
+ *         closed → (tap a pinned paper: List, Me or Week) list: camera flies to that note, the paper lifts off its pin
+ *         (clock.list 0→1), then its overlay opens (ShoppingListNote / MeSheet / WeekSheet); closing it runs
+ *         clock.list 1→0 and returns to closed. `noteTarget` says which paper.
+ * ITEMS   Tapping a food item selects it (tap again / scroll / Back clears): the item turns in place to show the
+ *         label printed on its back (ShelfColumn flippedId), the camera zooms in until that label fills ~82% of the
+ *         view (CameraFocus.label), and a "Details" pill links to /item-detail/[id]. Search fly-to stays farther out.
  * Progress lives in a mutable PhaseClock advanced by <PhaseDriver/> inside the render loop (no per-frame React
  * renders of this screen); the exterior gets an eased `openProgress` from a tiny wrapper that re-renders only itself.
  * Reduced motion: doors take 0.3 s and the camera cuts instead of dollying.
  *
+ * ROOM (SPEC round 3)  The scene is the whole room: RoomShell + the cork board and scanner props (RoomLayer) around the
+ *         pantry. The nav bar (roomNav.ts requestStation), deep links (`?station=`) and prop taps call goToStation(id):
+ *         `pantry` = the closed view (doors still open the shelves), `list` / `me` / `week` = the note phase for that
+ *         paper, `household` / `scan` = the camera glides
+ *         there in the closed phase (CameraRig `station`) and its sheet (features/stations, or the ScanSheet for the
+ *         scanner) opens on arrival; closing the sheet glides back to the pantry. Leaving the shelves / the note first
+ *         is queued (`pending`). One sheet is mounted at a time, as siblings after the canvas.
+ * THEMES  The visual subtree is keyed on the theme id, so a theme switch rebuilds every themed material; the old
+ *         theme's material/texture caches are disposed once that subtree has unmounted (ThemeCacheJanitor).
  * INTERACTION LAYERS  Objects on layer 0 receive R3F pointer events; the camera renders layers 0+1. A subtree that
  * must be visible but not tappable (the shelves behind closed doors) is moved to layer 1 each frame by useSceneMask.
  */
 import { useFrame } from "@react-three/fiber";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { AccessibilityInfo, ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
 
 import { errorMessage } from "@/api/client";
+import { useCabinet } from "@/api/hooks/cabinet";
+import { useDietary } from "@/api/hooks/me";
 import { useMealPlan } from "@/api/hooks/mealPlan";
 import { AppText, Button, ErrorState } from "@/components/ui";
+import { useCabinetActions } from "@/components/useCabinetActions";
+import { MapOutPicker } from "@/features/cabinet/CabinetScreen";
+import { RanOutPrompt } from "@/features/cabinet/RanOutPrompt";
+import { useRanOutPrompt } from "@/features/cabinet/ranOutStore";
+import { MeSheet } from "@/features/me/MeSheet";
+import { ScanSheet } from "@/features/scan";
+import { HouseholdSheet } from "@/features/stations";
 import { WeekSheet } from "@/features/week/WeekSheet";
 import { weekPreviewLines } from "@/features/week/weekDates";
+import { disposeThemeCaches } from "@/features/theme/materials";
+import { useThemeId } from "@/features/theme/ThemeProvider";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
+import { useAuth } from "@/state/AuthContext";
+import { useMotion } from "@/state/uiPrefs";
 
 import { usePantry } from "./data";
 import { activeFilterCount, applyFilters } from "./filters";
-import { BackButton, FilterButton, FilterSheet, SearchButton, SearchPanel, ShoppingListNote } from "./overlay";
+import { BackButton, FilterButton, FilterSheet, SearchButton, SearchPanel, ShoppingListNote, ToolButtons } from "./overlay";
 import { pantry as palette, softShadow } from "./overlay/palette";
 import { CameraRig, type CameraFocus, type PhaseClock, type Vec3 } from "./scene/CameraRig";
+import { itemLabelFrame } from "./scene/food/backPanel";
 import { PANTRY_DIMENSIONS } from "./scene/exterior/dimensions";
 import { PantryExterior } from "./scene/exterior/PantryExterior";
 import { Lights } from "./scene/Lights";
+import { exteriorShown } from "./scene/motion";
 import { PantryCanvas } from "./scene/PantryCanvas";
+import type { RoomStationId } from "./scene/room/stations";
 import { itemWorldPosition, ShelfColumn, totalHeight } from "./scene/shelves";
 import { easeInOutCubic, useShelfScroll } from "./scene/useShelfScroll";
-import { EMPTY_FILTERS, type PantryFilters, type PantryItem, type PantryPhase } from "./types";
+import { EMPTY_FILTERS, type NoteKind, type PantryFilters, type PantryItem, type PantryPhase } from "./types";
+import { isRoomStationId, setCurrentStation, useStationRequest } from "./roomNav";
+import { RoomLayer } from "./RoomLayer";
+import { useRoomData } from "./useRoomData";
 
 /** Shelf-column origin in exterior/world coordinates (see header). */
 export const SHELF_ORIGIN: Vec3 = [0, 2.9, -0.3];
@@ -62,9 +92,11 @@ export const SHELF_ORIGIN: Vec3 = [0, 2.9, -0.3];
 /** Phase timings in seconds. */
 export const DURATIONS = {
   normal: { open: 1.6, zoom: 1.2, pull: 1.1, doorDelay: 0.35, doorClose: 1.1, list: 1.4 },
+  /** The user's "fast" setting (state/uiPrefs.tsx): no animations, every move cuts straight to its view. */
+  fast: { open: 0, zoom: 0, pull: 0, doorDelay: 0, doorClose: 0, list: 0 },
   reduced: { open: 0.3, zoom: 0, pull: 0, doorDelay: 0, doorClose: 0.3, list: 0 },
 } as const;
-type Durations = (typeof DURATIONS)["normal" | "reduced"];
+type Durations = (typeof DURATIONS)["normal" | "fast" | "reduced"];
 
 const NEXT_PHASE: Partial<Record<PantryPhase, PantryPhase>> = {
   opening: "zooming",
@@ -84,24 +116,33 @@ const OPENING_CLIP = [
   new THREE.Plane(new THREE.Vector3(0, 1, 0), -OPENING.minY),
   new THREE.Plane(new THREE.Vector3(0, -1, 0), OPENING.maxY),
 ];
+/** Stations the camera leaves the pantry for (each opens a sheet). List, Me and Week are papers on the pantry. */
+export type AwayStation = Exclude<RoomStationId, "pantry" | NoteKind>;
+
+const isNoteKind = (id: RoomStationId): id is NoteKind => id === "list" || id === "me" || id === "week";
+
+export type PantryScreenProps = {
+  /** Switches the Pantry tab to the cabinet list view (CabinetScreen), which has every cabinet action. */
+  onShowList?: () => void;
+};
+
 const LAYER_INTERACTIVE = 1 << 0;
 const LAYER_PASSIVE = 1 << 1;
 
-export type PantryScreenProps = {
-  /**
-   * Opens the Week sheet (spec §13) when it changes to a new non-empty value: other tabs navigate here with a fresh
-   * `?week=<nonce>` ("Plan our week" on Household, "Plan meals" in alerts).
-   */
-  weekSignal?: string;
-};
-
-export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
+export function PantryScreen({ onShowList }: PantryScreenProps = {}) {
   const groupId = useRequiredGroupId();
   const router = useRouter();
+  const cabinet = useCabinet(groupId);
+  const actions = useCabinetActions(groupId);
+  const ranOutPrompt = useRanOutPrompt();
+  const [adding, setAdding] = useState(false);
+  const scan = useCallback(() => router.push("/scanner?mode=add-to-cabinet"), [router]);
   const data = usePantry(groupId);
   const insets = useSafeAreaInsets();
-  const reducedMotion = useReducedMotion();
-  const durations = reducedMotion ? DURATIONS.reduced : DURATIONS.normal;
+  // OS "reduce motion" or the user's "fast" setting: the camera cuts instead of gliding, items flip without easing.
+  const motion = useMotion();
+  const reducedMotion = useReducedMotion() || motion === "fast";
+  const durations = motion === "fast" ? DURATIONS.fast : reducedMotion ? DURATIONS.reduced : DURATIONS.normal;
 
   const [phase, setPhase] = useState<PantryPhase>("closed");
   const [leaving, setLeaving] = useState(false);
@@ -112,17 +153,35 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   /** Tapped item: flipped to its back label, camera framed on it, "Details" pill shown. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  /** ShoppingListNote overlay is open (after the fly-to + lift in the `list` phase). */
-  const [listOpen, setListOpen] = useState(false);
-  /** The Week sheet (spec §13) is open; it sits over the closed pantry, under the pinned Week note. */
-  const [weekOpen, setWeekOpen] = useState(false);
-  const [seenWeekSignal, setSeenWeekSignal] = useState<string | undefined>(undefined);
-  if (weekSignal && weekSignal !== seenWeekSignal) {
-    setSeenWeekSignal(weekSignal);
-    setWeekOpen(true);
-  }
+  /** Which pinned paper the `list` phase flies to (state for rendering, ref for the render loop). */
+  const [noteTarget, setNoteTarget] = useState<NoteKind>("list");
+  const noteTargetRef = useRef<NoteKind>("list");
+  /** The target paper's overlay is open (after the fly-to + lift in the `list` phase). */
+  const [noteOpen, setNoteOpen] = useState(false);
+  /** Room station the camera is at / gliding to (closed phase only); null = the pantry view. */
+  const [away, setAway] = useState<AwayStation | null>(null);
+  /** The mounted station sheet (kept after closing so it can slide out) and whether it is open. */
+  const [sheet, setSheet] = useState<AwayStation | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  /** Station to go to once the pantry is back in its closed view (leaving the shelves / the note first). */
+  const [pending, setPending] = useState<RoomStationId | null>(null);
+  /** The camera is at the closed pantry framing (false while at / gliding back from a station). */
+  const [atHome, setAtHome] = useState(true);
+  const roomData = useRoomData(groupId);
+  const themeId = useThemeId();
   const mealPlan = useMealPlan(groupId);
   const weekPreview = useMemo(() => weekPreviewLines(mealPlan.data), [mealPlan.data]);
+  const { user } = useAuth();
+  const dietary = useDietary();
+  const mePreview = useMemo(() => {
+    if (!user) return [];
+    const allergies = dietary.data?.allergens ?? [];
+    return [
+      user.displayName.split(" ")[0],
+      allergies.length ? `No ${allergies.map((a) => a.replace(/_/g, " ")).join(", ")}` : "No allergies",
+      user.zipCode ? `ZIP ${user.zipCode}` : "Set your ZIP",
+    ];
+  }, [user, dietary.data]);
 
   const clock = useRef<PhaseClock>({ open: 0, zoom: 0, list: 0 });
   /** `list` phase direction: +1 flying to the note, -1 putting it back. */
@@ -180,6 +239,7 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
   );
 
   const openPantry = useCallback(() => {
+    if (away) return; // the camera is at (or flying to) a station
     setPhase((p) => {
       if (p !== "closed") return p;
       clock.current.open = 0;
@@ -188,28 +248,30 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
     });
     clearFocus();
     scroll.scrollTo(0, { animated: false }); // clamps to the top bound
-  }, [clearFocus, scroll]);
+  }, [away, clearFocus, scroll]);
 
-  const openList = useCallback(() => {
-    setPhase((p) => {
-      if (p !== "closed") return p;
+  /** Fly to a pinned paper (List, Me or Week) and lift it; its overlay opens when it arrives. */
+  const openNote = useCallback(
+    (kind: NoteKind) => {
+      if (away || phase !== "closed") return;
       clock.current.list = 0;
       listDir.current = 1;
-      return "list";
-    });
-  }, []);
+      noteTargetRef.current = kind;
+      setNoteTarget(kind);
+      setPhase("list");
+    },
+    [away, phase],
+  );
+  const openList = useCallback(() => openNote("list"), [openNote]);
+  const openMe = useCallback(() => openNote("me"), [openNote]);
+  const openWeek = useCallback(() => openNote("week"), [openNote]);
 
-  const closeList = useCallback(() => {
-    setListOpen(false);
+  const closeNote = useCallback(() => {
+    setNoteOpen(false);
     listDir.current = -1;
   }, []);
 
-  const onListArrived = useCallback(() => setListOpen(true), []);
-
-  // The Week note opens its sheet straight over the closed pantry (no camera flight).
-  const openWeek = useCallback(() => {
-    if (phase === "closed") setWeekOpen(true);
-  }, [phase]);
+  const onNoteArrived = useCallback(() => setNoteOpen(true), []);
 
   const closePantry = useCallback(() => {
     if (phase !== "shelves" || leaving) return;
@@ -227,12 +289,115 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
     else go();
   }, [phase, leaving, clearFocus, scroll]);
 
+  /** Close the open station sheet; the camera glides back to the pantry view. */
+  const closeSheet = useCallback(() => {
+    setSheetOpen(false);
+    setAway(null);
+  }, []);
+
+  /** Nav bar / deep link / prop tap: move to a station of the room (see header, ROOM). */
+  const goToStation = useCallback(
+    (id: RoomStationId) => {
+      if (id === "pantry") {
+        setPending(null);
+        if (away) closeSheet();
+        else if (phase === "list") closeNote();
+        else if (phase === "shelves") closePantry();
+        return;
+      }
+      // already on (or flying to) that paper; one being put back is queued so it flies out again once it's pinned
+      if (isNoteKind(id) && phase === "list" && noteTarget === id && listDir.current > 0) return setPending(null);
+      if (phase !== "closed") {
+        // Out of the shelves / off the paper first; opening / zooming finish into the shelves, then close.
+        setPending(id);
+        if (phase === "list") closeNote();
+        else if (phase === "shelves") closePantry();
+        return;
+      }
+      if (isNoteKind(id)) {
+        if (away) {
+          // back to the pantry framing, then the paper flight (it starts from the closed view)
+          setPending(id);
+          closeSheet();
+          return;
+        }
+        setPending(null);
+        openNote(id);
+        return;
+      }
+      setPending(null);
+      if (away === id) return;
+      clearFocus();
+      setSheetOpen(false); // a station -> station move closes the current sheet while the camera glides
+      setAway(id);
+      setAtHome(false);
+    },
+    [away, phase, noteTarget, closeSheet, closeNote, closePantry, openNote, clearFocus],
+  );
+
+  /** CameraRig: the glide finished (null = back at the pantry framing). */
+  const onArrive = useCallback((st: RoomStationId | null) => {
+    if (st === null) {
+      setAtHome(true);
+      return;
+    }
+    if (st === "pantry" || isNoteKind(st)) return;
+    setSheet(st);
+    setSheetOpen(true);
+  }, []);
+
+  // Run a queued station once the pantry is back in its closed view (or close the shelves it was waiting for).
+  // (Deferred a tick: these start transitions; the timer is cancelled if anything changes first.)
+  useEffect(() => {
+    if (!pending) return;
+    let run: (() => void) | null = null;
+    if (phase === "shelves" && !leaving) run = closePantry;
+    else if (phase === "closed" && !away && atHome) run = () => goToStation(pending);
+    if (!run) return;
+    const t = setTimeout(run, 0);
+    return () => clearTimeout(t);
+  }, [pending, phase, leaving, away, atHome, closePantry, goToStation]);
+
+  // Requests from the nav bar (only the ones made after this screen mounted).
+  const request = useStationRequest();
+  const [firstSeq] = useState(() => request?.seq ?? 0);
+  const handledSeq = useRef(firstSeq);
+  const goRef = useRef(goToStation);
+  useEffect(() => {
+    goRef.current = goToStation;
+  });
+  useEffect(() => {
+    if (!request || request.seq <= handledSeq.current) return;
+    handledSeq.current = request.seq;
+    goRef.current(request.id);
+  }, [request]);
+
+  // Deep links from the retired tab routes: /cabinet?station=list|me|household|...
+  const { station: linkParam } = useLocalSearchParams<{ station?: string }>();
+  const linkStation = typeof linkParam === "string" ? linkParam : undefined;
+  const handledLink = useRef<string | undefined>(undefined);
+  const routerRef = useRef(router);
+  useEffect(() => {
+    routerRef.current = router;
+  });
+  useEffect(() => {
+    if (linkStation === handledLink.current) return;
+    handledLink.current = linkStation; // cleared param -> undefined, so the same link works again later
+    if (!isRoomStationId(linkStation)) return;
+    goRef.current(linkStation);
+    routerRef.current.setParams({ station: undefined });
+  }, [linkStation]);
+
+  // Tell the nav bar where the camera is (or is heading).
+  const navStation: RoomStationId = pending ?? away ?? (phase === "list" ? noteTarget : "pantry");
+  useEffect(() => setCurrentStation(navStation), [navStation]);
+
   // Android hardware back closes panels, then the pantry.
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        if (weekOpen) return setWeekOpen(false), true;
-        if (phase === "list") return closeList(), true;
+        if (away) return closeSheet(), true;
+        if (phase === "list") return closeNote(), true;
         if (searchOpen) return setSearchOpen(false), true;
         if (filterOpen) return setFilterOpen(false), true;
         if (selectedId) return clearFocus(), true;
@@ -240,7 +405,7 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
         return false;
       });
       return () => sub.remove();
-    }, [searchOpen, filterOpen, phase, selectedId, closePantry, closeList, clearFocus, weekOpen]),
+    }, [away, searchOpen, filterOpen, phase, selectedId, closePantry, closeNote, closeSheet, clearFocus]),
   );
 
   const advance = useCallback((from: PantryPhase) => {
@@ -248,11 +413,21 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
     if (next) setPhase((p) => (p === from ? next : p));
   }, []);
 
-  /** Scroll + dolly the camera so `item` is centred and close (search fly-to, item tap). */
+  /**
+   * Scroll + dolly the camera so `item` is centred and close (search fly-to). With `label`, frame the item's flipped
+   * back label instead: straight on and close enough to read (item tap).
+   */
   const flyTo = useCallback(
-    (item: PantryItem) => {
+    (item: PantryItem, opts: { label?: boolean } = {}) => {
       const pos = itemWorldPosition(sections, item.id);
       if (!pos) return false;
+      if (opts.label) {
+        const f = itemLabelFrame(item);
+        const label = { x: pos[0] + f.x, y: pos[1] + f.y, z: pos[2] + f.z, width: f.width, height: f.height };
+        scroll.scrollTo(-label.y);
+        focus.current = { x: label.x, y: label.y, label };
+        return true;
+      }
       const centreY = pos[1] + 0.2; // visual centre of the item
       scroll.scrollTo(-centreY);
       focus.current = { x: pos[0], y: centreY };
@@ -283,7 +458,7 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
       }
       setHighlightId(null);
       setSelectedId(item.id);
-      flyTo(item);
+      flyTo(item, { label: true });
     },
     [selectedId, flyTo, clearTimers, clearFocus],
   );
@@ -293,22 +468,36 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
     [items, selectedId],
   );
 
+  /** The cabinet row behind the selected item, for the quick actions (running low / ran out). */
+  const selectedRow = useMemo(
+    () => (selectedItem ? (cabinet.data?.find((r) => r.id === selectedItem.id) ?? null) : null),
+    [cabinet.data, selectedItem],
+  );
+
   const inShelves = phase === "shelves" && !leaving;
   const isEmpty = !data.isLoading && !data.error && items.length === 0;
+  /** Room props react only in the plain closed pantry view. */
+  const roomInteractive = phase === "closed" && !away;
+  // While a sheet / the list note is open, screen readers skip the scene and its pills (iOS uses the sheet's
+  // accessibilityViewIsModal; Android needs importantForAccessibility on the covered views).
+  const sceneHidden = sheetOpen || noteOpen;
+  const hideA11y = {
+    importantForAccessibility: sceneHidden && Platform.OS === "android" ? ("no-hide-descendants" as const) : ("auto" as const),
+    accessibilityElementsHidden: sceneHidden,
+  };
 
   return (
     <View style={styles.fill} testID="pantry-screen">
       <GestureDetector gesture={scroll.gesture}>
-        <View style={styles.fill} collapsable={false}>
+        <View style={styles.fill} collapsable={false} {...hideA11y}>
           <PantryCanvas active={focused} onWheel={scroll.onWheel} testID="pantry-canvas">
-            <Lights />
             <PhaseDriver
               phase={phase}
               clock={clock}
               durations={durations}
               listDir={listDir}
               onDone={advance}
-              onListArrived={onListArrived}
+              onListArrived={onNoteArrived}
             />
             <CameraRig
               phase={phase}
@@ -318,17 +507,31 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
               contentHeight={contentHeight}
               frame={PANTRY_DIMENSIONS.bounds}
               focus={focus}
+              reducedMotion={reducedMotion}
+              station={away}
+              onArrive={onArrive}
+              noteTarget={noteTargetRef}
             />
+            {/* Keyed on the theme: a theme switch remounts every themed mesh/material (ThemeCacheJanitor disposes). */}
+            <group key={themeId}>
+            <Lights />
+            <RoomMount phase={phase} clock={clock} interactive={roomInteractive}>
+              <RoomLayer data={roomData} onStation={goToStation} disabled={!roomInteractive} still={motion === "fast"} />
+            </RoomMount>
             <ExteriorMount
               phase={phase}
               clock={clock}
               listPreview={listPreview}
               onPress={openPantry}
               onListPress={openList}
+              liftedNote={noteTarget}
+              mePreview={mePreview}
+              onMePress={openMe}
               weekPreview={weekPreview}
               onWeekPress={openWeek}
+              still={motion === "fast"}
             />
-            <ShelvesMount phase={phase}>
+            <ShelvesMount phase={phase} clock={clock}>
               <ShelfColumn
                 sections={sections}
                 scrollY={scroll.scrollY}
@@ -337,14 +540,17 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
                 onItemPress={onItemPress}
                 highlightId={selectedItem?.id ?? highlightId}
                 flippedId={selectedItem?.id ?? null}
+                reducedMotion={reducedMotion}
               />
             </ShelvesMount>
+            </group>
+            <ThemeCacheJanitor themeId={themeId} />
           </PantryCanvas>
         </View>
       </GestureDetector>
 
-      {phase === "closed" ? (
-        <View style={[styles.bottomCenter, styles.row]} pointerEvents="box-none">
+      {phase === "closed" && !away ? (
+        <View style={[styles.bottomCenter, styles.row]} pointerEvents="box-none" {...hideA11y}>
           <Pressable
             testID="pantry-open-button"
             accessibilityRole="button"
@@ -369,25 +575,11 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
               List
             </AppText>
           </Pressable>
-          <Pressable
-            testID="pantry-week-button"
-            accessibilityRole="button"
-            accessibilityLabel="Week plan"
-            accessibilityHint={
-              weekPreview.length ? `Opens the week's dinners. ${weekPreview.join(". ")}` : "Opens the week's dinners pinned on the pantry"
-            }
-            onPress={openWeek}
-            style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
-          >
-            <AppText variant="caption" weight="bold" style={styles.pillText}>
-              Week
-            </AppText>
-          </Pressable>
         </View>
       ) : null}
 
       {data.isLoading ? (
-        <View style={[styles.topCenter, { top: insets.top + 16 }]} pointerEvents="none" testID="pantry-loading">
+        <View style={[styles.topCenter, { top: insets.top + 16 }]} pointerEvents="none" testID="pantry-loading" {...hideA11y}>
           <View style={styles.pill} accessibilityRole="progressbar" accessibilityLabel="Loading your pantry">
             <ActivityIndicator color={palette.oakDark} />
             <AppText variant="caption" weight="bold" style={styles.pillText}>
@@ -398,7 +590,7 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
       ) : null}
 
       {data.error ? (
-        <View style={[styles.topCard, { top: insets.top + 76 }]} testID="pantry-error">
+        <View style={[styles.topCard, { top: insets.top + 76 }]} testID="pantry-error" {...hideA11y}>
           <ErrorState message={errorMessage(data.error)} onRetry={() => void data.refetch()} />
         </View>
       ) : null}
@@ -411,12 +603,41 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
           <AppText variant="caption" center color="muted">
             Scan a product to stock your pantry.
           </AppText>
-          <Button label="Scan a product" size="sm" onPress={() => router.push("/scanner?mode=add-to-cabinet")} />
+          <View style={styles.row}>
+            <Button label="Add items" size="sm" onPress={() => setAdding(true)} />
+            <Button label="Scan a product" size="sm" variant="secondary" onPress={scan} />
+          </View>
         </View>
       ) : null}
 
       {inShelves && selectedItem ? (
-        <View style={[styles.bottomCenter, { bottom: insets.bottom + 20 }]} pointerEvents="box-none">
+        <View style={[styles.bottomCenter, styles.detailsRow, { bottom: insets.bottom + 20 }]} pointerEvents="box-none">
+          {selectedRow ? (
+            <View style={[styles.row, styles.quickRow]}>
+              <Pressable
+                testID="pantry-low-button"
+                accessibilityRole="button"
+                accessibilityLabel={selectedRow.status === "running_low" ? `${selectedItem.name} is back in stock` : `${selectedItem.name} is running low`}
+                onPress={() => (selectedRow.status === "running_low" ? actions.backInStock(selectedRow) : actions.markLow(selectedRow))}
+                style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+              >
+                <AppText variant="caption" weight="bold" style={styles.pillText}>
+                  {selectedRow.status === "running_low" ? "Back in stock" : "Running low"}
+                </AppText>
+              </Pressable>
+              <Pressable
+                testID="pantry-ranout-button"
+                accessibilityRole="button"
+                accessibilityLabel={`${selectedItem.name} ran out`}
+                onPress={() => actions.ranOut(selectedRow)}
+                style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+              >
+                <AppText variant="caption" weight="bold" style={styles.pillText}>
+                  Ran out
+                </AppText>
+              </Pressable>
+            </View>
+          ) : null}
           <Pressable
             testID="pantry-details-button"
             accessibilityRole="button"
@@ -432,14 +653,39 @@ export function PantryScreen({ weekSignal }: PantryScreenProps = {}) {
         </View>
       ) : null}
 
-      <WeekSheet key={groupId} visible={weekOpen && phase === "closed"} groupId={groupId} onClose={() => setWeekOpen(false)} />
-
-      <ShoppingListNote
-        visible={phase === "list" && listOpen}
+      {/* The pinned papers: List, Me and Week open after the fly-to + lift. */}
+      <ShoppingListNote visible={phase === "list" && noteOpen && noteTarget === "list"} groupId={groupId} onClose={closeNote} />
+      <MeSheet visible={phase === "list" && noteOpen && noteTarget === "me"} groupId={groupId} onClose={closeNote} />
+      <WeekSheet
+        key={groupId}
+        visible={phase === "list" && noteOpen && noteTarget === "week"}
         groupId={groupId}
-        onClose={closeList}
-        onStartShopping={() => router.push("/shopping")}
+        onClose={closeNote}
       />
+
+      {(phase === "closed" && !away) || inShelves ? (
+        <ToolButtons compact={phase === "closed"} onListView={onShowList} onAdd={() => setAdding(true)} onScan={scan} />
+      ) : null}
+      <MapOutPicker groupId={groupId} visible={adding} onClose={() => setAdding(false)} onScan={scan} />
+
+      {ranOutPrompt && ((phase === "closed" && !away) || inShelves) ? (
+        <View style={[styles.topCard, styles.promptCard, { top: insets.top + 12 }]}>
+          <RanOutPrompt
+            name={ranOutPrompt.item.name}
+            busy={actions.addingAnyway}
+            onAdd={() => actions.addAnyway(ranOutPrompt)}
+            onDismiss={() => actions.dismissRanOut(ranOutPrompt)}
+          />
+        </View>
+      ) : null}
+
+      {/* Station sheets: one mounted at a time, after the canvas (StationSheet leaves the top of the scene visible). */}
+      {sheet === "household" ? (
+        <HouseholdSheet visible={sheetOpen} onClose={closeSheet} />
+      ) : null}
+      {sheet === "scan" ? (
+        <ScanSheet visible={sheetOpen} onClose={closeSheet} context={{ kind: "lookup", groupId }} title="Scan a label" />
+      ) : null}
 
       {inShelves ? (
         <>
@@ -544,16 +790,24 @@ function ExteriorMount({
   listPreview,
   onPress,
   onListPress,
+  liftedNote,
+  mePreview,
+  onMePress,
   weekPreview,
   onWeekPress,
+  still,
 }: {
   phase: PantryPhase;
   clock: MutableRefObject<PhaseClock>;
   listPreview: string[];
   onPress: () => void;
   onListPress: () => void;
+  liftedNote: NoteKind;
+  mePreview: string[];
+  onMePress: () => void;
   weekPreview: string[];
   onWeekPress: () => void;
+  still: boolean;
 }) {
   const [openProgress, setOpenProgress] = useState(0);
   const [listProgress, setListProgress] = useState(0);
@@ -571,14 +825,18 @@ function ExteriorMount({
     }
   });
   const group = useRef<THREE.Group>(null);
-  const hidden = phase === "shelves";
-  useSceneMask(group, { visible: !hidden, interactive: phase === "closed", clip: null });
+  // hidden in `shelves` and until the closing camera is back in the doorway (motion.ts exteriorShown)
+  const visible = () => exteriorShown(phase, clock.current.zoom);
+  useSceneMask(group, { visible, interactive: phase === "closed", clip: null });
   const press = useCallback(() => {
     if (phase === "closed") onPress();
   }, [phase, onPress]);
   const listPress = useCallback(() => {
     if (phase === "closed") onListPress();
   }, [phase, onListPress]);
+  const mePress = useCallback(() => {
+    if (phase === "closed") onMePress();
+  }, [phase, onMePress]);
   const weekPress = useCallback(() => {
     if (phase === "closed") onWeekPress();
   }, [phase, onWeekPress]);
@@ -591,18 +849,69 @@ function ExteriorMount({
         onPress={press}
         onListPress={listPress}
         listProgress={listProgress}
+        liftedNote={liftedNote}
+        mePreview={mePreview}
+        onMePress={mePress}
         weekPreview={weekPreview}
         onWeekPress={weekPress}
+        still={still}
+        clock={clock}
       />
     </group>
   );
 }
 
+/**
+ * The room (shell + station props): shown exactly while the exterior is (hidden inside the shelves, where the column
+ * must look endless), tappable only when `interactive`. Its materials are never clipped (clip: undefined).
+ */
+function RoomMount({
+  phase,
+  clock,
+  interactive,
+  children,
+}: {
+  phase: PantryPhase;
+  clock: MutableRefObject<PhaseClock>;
+  interactive: boolean;
+  children: ReactNode;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const visible = () => exteriorShown(phase, clock.current.zoom);
+  useSceneMask(group, { visible, interactive, clip: undefined });
+  return <group ref={group}>{children}</group>;
+}
+
+/**
+ * Disposes the previous theme's cached materials/textures after a theme switch. Mounted after the theme-keyed
+ * subtree inside the canvas, so its effect runs once that subtree's old meshes have been removed (same commit).
+ */
+function ThemeCacheJanitor({ themeId }: { themeId: string }) {
+  const prev = useRef(themeId);
+  useEffect(() => {
+    if (prev.current === themeId) return;
+    const old = prev.current;
+    prev.current = themeId;
+    disposeThemeCaches(old);
+  }, [themeId]);
+  return null;
+}
+
 /** Shelf column at SHELF_ORIGIN: clipped to the opening and not tappable until the camera is inside. */
-function ShelvesMount({ phase, children }: { phase: PantryPhase; children: ReactNode }) {
+function ShelvesMount({
+  phase,
+  clock,
+  children,
+}: {
+  phase: PantryPhase;
+  clock: MutableRefObject<PhaseClock>;
+  children: ReactNode;
+}) {
   const group = useRef<THREE.Group>(null);
   const inside = phase === "shelves";
-  useSceneMask(group, { visible: phase !== "closed", interactive: inside, clip: inside ? null : OPENING_CLIP });
+  // unclipped exactly while the exterior is hidden, so the switch happens at the doorway pose
+  const clip = () => (exteriorShown(phase, clock.current.zoom) ? OPENING_CLIP : null);
+  useSceneMask(group, { visible: phase !== "closed", interactive: inside, clip });
   return (
     <group ref={group} position={SHELF_ORIGIN}>
       {children}
@@ -613,10 +922,16 @@ function ShelvesMount({ phase, children }: { phase: PantryPhase; children: React
 /**
  * Applies visibility, the interaction layer and clipping planes to every object/material under `ref`, every frame
  * (children mount asynchronously, e.g. items arriving from the server, so a one-off traversal would miss them).
+ * `visible` / `clip` may be functions evaluated per frame (they follow the phase clock, not just the phase).
  */
 function useSceneMask(
   ref: MutableRefObject<THREE.Group | null>,
-  opts: { visible: boolean; interactive: boolean; clip: THREE.Plane[] | null },
+  opts: {
+    visible: boolean | (() => boolean);
+    interactive: boolean;
+    /** undefined = never touch the materials' clipping planes */
+    clip: THREE.Plane[] | null | (() => THREE.Plane[] | null) | undefined;
+  },
 ) {
   const o = useRef(opts);
   useEffect(() => {
@@ -624,16 +939,21 @@ function useSceneMask(
   });
   useFrame(({ camera }) => {
     const g = ref.current;
-    if (!g) return;
+    if (typeof g?.traverse !== "function") return; // not mounted yet, or not a three.js object (Jest renderer)
     camera.layers.mask = LAYER_INTERACTIVE | LAYER_PASSIVE;
-    g.visible = o.current.visible;
+    const { visible, clip: clipOpt } = o.current;
+    g.visible = typeof visible === "function" ? visible() : visible;
     if (!g.visible) {
       // Hidden objects are still raycast by three.js; move them off the interactive layer.
       g.traverse((obj) => (obj.layers.mask = LAYER_PASSIVE));
       return;
     }
     const mask = o.current.interactive ? LAYER_INTERACTIVE : LAYER_PASSIVE;
-    const clip = o.current.clip;
+    if (clipOpt === undefined) {
+      g.traverse((obj) => (obj.layers.mask = mask));
+      return;
+    }
+    const clip = typeof clipOpt === "function" ? clipOpt() : clipOpt;
     g.traverse((obj) => {
       obj.layers.mask = mask;
       const mat = (obj as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
@@ -670,7 +990,11 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   bottomCenter: { position: "absolute", left: 0, right: 0, bottom: 20, alignItems: "center" },
   row: { flexDirection: "row", justifyContent: "center", gap: 10, flexWrap: "wrap", paddingHorizontal: 16 },
-  detailsPill: { backgroundColor: palette.oakDark, maxWidth: "80%" },
+  // keep clear of the round search / filter buttons in the bottom corners
+  detailsRow: { paddingHorizontal: 96 },
+  quickRow: { marginBottom: 10 },
+  promptCard: { left: 80, right: 80, padding: 0, backgroundColor: "transparent" },
+  detailsPill: { backgroundColor: palette.oakDark, maxWidth: "100%" },
   detailsText: { color: palette.cream },
   topCenter: { position: "absolute", left: 0, right: 0, top: 56, alignItems: "center" },
   pill: {

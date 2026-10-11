@@ -200,3 +200,18 @@ export function merge(parts: BufferGeometry[]): BufferGeometry {
   merged.computeBoundingBox();
   return merged;
 }
+
+/**
+ * Merge several lists of pieces into one geometry with one draw group per list (group i -> material index i), so a
+ * mesh can give parts of one merged body different materials (e.g. glowing trim). Empty lists add no group.
+ */
+export function mergeGrouped(groups: BufferGeometry[][]): BufferGeometry {
+  const counts = groups.map((list) => list.reduce((n, g) => n + g.getAttribute("position").count, 0));
+  const merged = merge(groups.flat());
+  let start = 0;
+  counts.forEach((count, i) => {
+    if (count > 0) merged.addGroup(start, count, i);
+    start += count;
+  });
+  return merged;
+}

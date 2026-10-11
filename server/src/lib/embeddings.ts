@@ -31,7 +31,7 @@ export const itemEmbeddingText = (item: { name: string; category: string | null 
 export const toVectorLiteral = (v: number[]) => `[${v.join(",")}]`;
 
 /** POST to Akamai, retrying rate limits (429) and 5xx with backoff (honoring Retry-After). */
-async function akamaiPost(path: string, body: unknown, opts: { retries: number; timeoutMs: number }): Promise<Response> {
+export async function akamaiPost(path: string, body: unknown, opts: { retries: number; timeoutMs: number }): Promise<Response> {
   if (!embeddingsConfigured()) throw new AppError(503, "NOT_CONFIGURED", "Akamai AI is not configured");
   const url = `${config.AKAMAI_BASE_URL!.replace(/\/+$/, "")}${path}`;
   for (let attempt = 0; ; attempt++) {

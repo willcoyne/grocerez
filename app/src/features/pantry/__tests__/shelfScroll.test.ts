@@ -1,5 +1,6 @@
-import { shelfScrollBounds, shelfDistance } from "../scene/motion";
+import { COLUMN_OVERFILL, shelfScrollBounds, shelfDistance, TAN } from "../scene/motion";
 import { applyRubber, rubberBand, stepScroll, type ScrollState } from "../scene/motion";
+import { COLUMN_WIDTH } from "../scene/shelves/layout";
 
 const fresh = (y = 0, v = 0): ScrollState => ({ y, v, dragging: false, dragStart: y, tween: null });
 const run = (s: ScrollState, seconds: number, b = { min: 0, max: 10 }) => {
@@ -53,10 +54,11 @@ describe("shelf scroll physics", () => {
 });
 
 describe("camera framing", () => {
-  it("fits the 1.7-wide column on a narrow portrait screen", () => {
-    const portrait = shelfDistance(390 / 700);
-    const wide = shelfDistance(1.6);
-    expect(portrait).toBeGreaterThan(wide);
+  it("makes the column's outer width overfill the view by COLUMN_OVERFILL on phone screens (no side gaps)", () => {
+    for (const aspect of [390 / 844, 390 / 700, 360 / 780]) {
+      const viewWidth = 2 * shelfDistance(aspect) * TAN * aspect;
+      expect(COLUMN_WIDTH / viewWidth).toBeCloseTo(COLUMN_OVERFILL, 6);
+    }
   });
 
   it("scroll bounds start with the top shelf near the top of the view and never invert", () => {

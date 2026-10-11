@@ -1,8 +1,8 @@
-// Former Cabinet tab (list view). No longer routed: the Pantry scene replaced it as the home tab (features/pantry).
-// Kept as a component so its behaviour stays covered by src/__tests__/cabinet.test.tsx.
+// Cabinet list view: the Pantry tab's alternative to the 3D scene ("List view" button in features/pantry). Has every
+// cabinet action (filters by place, quick actions, the ran-out prompt, scan lookup, map out the cabinet).
 import type { CabinetItem } from "@contracts/cabinet";
 import { useRouter } from "expo-router";
-import { ScanLine } from "lucide-react-native";
+import { Box, ScanLine } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
@@ -26,7 +26,7 @@ import { useRanOutPrompt } from "@/features/cabinet/ranOutStore";
 import { useRequiredGroupId } from "@/state/ActiveGroupContext";
 import { color, space } from "@/theme";
 
-export default function CabinetScreen() {
+export default function CabinetScreen({ onShow3D }: { onShow3D?: () => void } = {}) {
   const groupId = useRequiredGroupId();
   const cabinet = useCabinet(groupId);
   const alerts = useAlerts(groupId);
@@ -59,9 +59,16 @@ export default function CabinetScreen() {
       <TabHeader
         title="Cabinet"
         right={
-          <IconButton label="Scan a product" onPress={() => router.push("/scanner?mode=lookup")}>
-            <ScanLine size={24} color={color.primary} />
-          </IconButton>
+          <View style={styles.headerButtons}>
+            <IconButton label="Scan a product" onPress={() => router.push("/scanner?mode=lookup")}>
+              <ScanLine size={24} color={color.primary} />
+            </IconButton>
+            {onShow3D ? (
+              <IconButton label="3D pantry view" onPress={onShow3D} testID="cabinet-3d-button">
+                <Box size={24} color={color.primary} />
+              </IconButton>
+            ) : null}
+          </View>
         }
       />
       {cabinet.isPending ? (
@@ -104,7 +111,7 @@ export default function CabinetScreen() {
 }
 
 /** "Map out cabinet": ItemPicker in quick-add-many mode with a location selector. */
-function MapOutPicker({ groupId, visible, onClose, onScan }: { groupId: string; visible: boolean; onClose: () => void; onScan: () => void }) {
+export function MapOutPicker({ groupId, visible, onClose, onScan }: { groupId: string; visible: boolean; onClose: () => void; onScan: () => void }) {
   const add = useAddCabinetItem(groupId);
   const { show: toast } = useToast();
   const [location, setLocation] = useState<CabinetLocation>("pantry");
@@ -147,4 +154,5 @@ const styles = StyleSheet.create({
   pad: { padding: space.screenX },
   gap: { gap: space.sm },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  headerButtons: { flexDirection: "row", gap: space.xs },
 });

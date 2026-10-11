@@ -2,6 +2,9 @@ import type { Allergen } from "@contracts/dietary";
 
 export type PantryPhase = "closed" | "opening" | "zooming" | "shelves" | "closing" | "list";
 
+/** The papers pinned on the pantry's right stile, top to bottom. The `list` phase flies to (and lifts) one of them. */
+export type NoteKind = "list" | "me" | "week";
+
 /** Shelf groups, top to bottom (infinite-shelves.jpg). */
 export const SHELF_GROUPS = ["snacks", "ingredients", "produce", "fridge", "freezer"] as const;
 export type ShelfGroup = (typeof SHELF_GROUPS)[number];

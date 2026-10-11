@@ -1,32 +1,29 @@
 /* eslint-disable react/no-unknown-property -- R3F JSX props (geometry, position, ...) are valid three.js props */
 /**
  * 3D text for shelf lips / appliance headers. TextGeometry + a bundled typeface JSON (no canvas / DOM), so it renders
- * on native (expo-gl) and web alike. Geometries are cached per (text, size) and centred on their origin.
+ * on native (expo-gl) and web alike. Geometries are cached per (theme, text, size) and centred on their origin.
  *
- * Font: Helvetiker Bold from three.js examples/fonts (MgOpen licence, embedded in the JSON), trimmed to ASCII + "°".
+ * Font: the theme's typeface (theme core getThemeFont; cozy = Helvetiker Bold, MgOpen licence).
  */
 import { memo } from "react";
 import * as THREE from "three";
-import { Font, type FontData } from "three/examples/jsm/loaders/FontLoader.js";
 import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 
-import fontJson from "../fonts/helvetiker_bold.typeface.json";
-
-let font: Font | null = null;
-function getFont(): Font {
-  if (!font) font = new Font(fontJson as unknown as FontData);
-  return font;
-}
+import { drawableTextFor, getThemeFont } from "../../../theme/fonts";
+import { getActiveTheme } from "../../../theme/store";
+import type { SceneTheme } from "../../../theme/types";
+import { textScaleFor } from "../sceneTheme";
 
 const geoCache = new Map<string, THREE.BufferGeometry>();
 
-/** Cached, centred (x/y) text geometry whose back face sits at z = 0. */
-export function labelGeometry(text: string, size: number, depth = 0.005): THREE.BufferGeometry {
-  const key = `${text}|${size}|${depth}`;
+/** Cached, centred (x/y) text geometry whose back face sits at z = 0, in the theme's font. */
+export function labelGeometry(text: string, size: number, depth = 0.005, theme: SceneTheme = getActiveTheme()): THREE.BufferGeometry {
+  const key = `${theme.id}|${text}|${size}|${depth}`;
   let geo = geoCache.get(key);
   if (!geo) {
-    const g = new TextGeometry(text, {
-      font: getFont(),
+    const font = getThemeFont(theme);
+    const g = new TextGeometry(drawableTextFor(font, text), {
+      font,
       size,
       depth,
       curveSegments: 3,
@@ -44,6 +41,8 @@ export function labelGeometry(text: string, size: number, depth = 0.005): THREE.
 
 type Props = {
   text: string;
+  /** font source (default: the active theme) */
+  theme?: SceneTheme;
   size: number;
   position: [number, number, number];
   material: THREE.Material;
@@ -66,9 +65,10 @@ export const ShelfLabel = memo(function ShelfLabel({
   maxWidth,
   depth,
   highlightMaterial,
+  theme,
 }: Props) {
   if (!text) return null;
-  const geo = labelGeometry(text, size, depth);
+  const geo = labelGeometry(text, size * textScaleFor(theme ?? getActiveTheme(), "label"), depth, theme);
   const width = geo.boundingBox ? geo.boundingBox.max.x - geo.boundingBox.min.x : 0;
   const s = maxWidth && width > maxWidth ? maxWidth / width : 1;
   const [x, y, z] = position;

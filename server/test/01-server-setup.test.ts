@@ -58,16 +58,16 @@ describe("01 server setup", () => {
     expect(() => loadConfig(env)).toThrow(/JWT_SECRET: missing/);
   });
 
-  it("production requires the external-service secrets", () => {
+  it("production starts without optional external-service secrets (features answer 503 instead)", () => {
     const env = {
       NODE_ENV: "production",
       DATABASE_URL: "postgresql://x",
       JWT_SECRET: "x".repeat(32),
       GOOGLE_CLIENT_IDS: "a",
     } as NodeJS.ProcessEnv;
-    expect(() => loadConfig(env)).toThrow(/AWS_REGION: missing/);
-    // Claude is optional everywhere: only the List's price estimate uses it (503 NOT_CONFIGURED without a key).
-    expect(() => loadConfig(env)).not.toThrow(/ANTHROPIC_API_KEY/);
+    expect(loadConfig(env).ANTHROPIC_API_KEY).toBeUndefined();
+    expect(() => loadConfig({ ...env, JWT_SECRET: "short" })).toThrow(/JWT_SECRET/);
+    expect(() => loadConfig({ ...env, AGENT_URL: "http://agent:8000", AGENT_SHARED_SECRET: "short" })).toThrow(/AGENT_SHARED_SECRET/);
     const ok = loadConfig({ ...env, NODE_ENV: "development" });
     expect(ok.GOOGLE_CLIENT_IDS).toEqual(["a"]);
     expect(ok.PORT).toBe(3000);

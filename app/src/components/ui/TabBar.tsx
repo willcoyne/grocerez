@@ -1,6 +1,4 @@
-import type { Tabs } from 'expo-router/js-tabs';
-import { DoorClosed, List, User, Users, type LucideIcon } from 'lucide-react-native';
-import type { ComponentProps } from 'react';
+import { CalendarDays, DoorClosed, List, User, Users, type LucideIcon } from 'lucide-react-native';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,55 +6,71 @@ import { color, size } from '@/theme';
 
 import { AppText } from './AppText';
 
-type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
+/**
+ * Bottom nav for the one-room app (features/pantry/SPEC.md round 3). Each tab is a place in the 3D room, not a
+ * screen: pressing one asks the room to move the camera there (`onSelect`). Order: Pantry · List · Me · Week ·
+ * Household (List, Me and Week are the papers pinned on the pantry). Pressing the active tab again still calls `onSelect` (the room uses it to go back, e.g. out of the shelves).
+ */
+export const TAB_IDS = ['pantry', 'list', 'me', 'week', 'household'] as const;
+export type TabId = (typeof TAB_IDS)[number];
 
-/** Route name → label, icon, testID. Order matches DESIGN.md §3: List, Cabinet, Me, Household. */
-export const TAB_META: Record<string, { label: string; Icon: LucideIcon }> = {
-  index: { label: 'List', Icon: List },
-  list: { label: 'List', Icon: List },
-  cabinet: { label: 'Pantry', Icon: DoorClosed },
-  me: { label: 'Me', Icon: User },
-  group: { label: 'Household', Icon: Users },
+export const TAB_META: Record<TabId, { label: string; hint: string; Icon: LucideIcon }> = {
+  pantry: { label: 'Pantry', hint: 'Shows the pantry', Icon: DoorClosed },
+  list: { label: 'List', hint: 'Zooms in on the shopping list pinned to the pantry', Icon: List },
+  me: { label: 'Me', hint: 'Zooms in on your Me paper: preferences, allergies, profile and appearance', Icon: User },
+  week: { label: 'Week', hint: "Zooms in on the week's dinners pinned to the pantry", Icon: CalendarDays },
+  household: { label: 'Household', hint: 'Goes to the household cork board: members, invites and alerts', Icon: Users },
 };
 
 /** Height of the bar above the safe area; screens use it to keep toasts and bottom bars clear. */
 export const TAB_BAR_HEIGHT = size.tabBar;
 
-export function TabBar({ state, navigation, descriptors }: TabBarProps) {
+export type TabBarProps = {
+  active: TabId;
+  onSelect: (id: TabId) => void;
+  /** Numeric badges per tab (e.g. Household alerts); 0 / missing = no badge. */
+  badges?: Partial<Record<TabId, number>>;
+};
+
+export function TabBar({ active, onSelect, badges }: TabBarProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.bar, { paddingBottom: insets.bottom, height: size.tabBar + insets.bottom }]} accessibilityRole="tablist">
-      {state.routes.map((route, index) => {
-        const meta = TAB_META[route.name];
-        if (!meta) return null;
-        const focused = state.index === index;
+    <View style={[styles.bar, { paddingBottom: insets.bottom, minHeight: size.tabBar + insets.bottom }]} accessibilityRole="tablist">
+      {TAB_IDS.map((id) => {
+        const meta = TAB_META[id];
+        const focused = active === id;
         const tint = focused ? color.primary : color.muted;
-        const badge = descriptors[route.key]?.options.tabBarBadge;
-        const onPress = () => {
-          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-          if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
-        };
+        const badge = badges?.[id];
+        const showBadge = badge != null && badge > 0;
         return (
           <Pressable
-            key={route.key}
-            testID={`tabbar-${route.name}`}
+            key={id}
+            testID={`tabbar-${id}`}
             accessibilityRole="tab"
-            accessibilityLabel={badge != null ? `${meta.label}, ${badge} alerts` : meta.label}
+            accessibilityLabel={showBadge ? `${meta.label}, ${badge} alerts` : meta.label}
+            accessibilityHint={meta.hint}
             accessibilityState={{ selected: focused }}
-            onPress={onPress}
+            onPress={() => onSelect(id)}
             style={styles.tab}>
             <View style={[styles.indicator, focused && styles.indicatorOn]} />
             <View>
               <meta.Icon size={22} color={tint} />
-              {badge != null ? (
-                <View style={styles.badge} testID={`tabbar-${route.name}-badge`}>
+              {showBadge ? (
+                <View style={styles.badge} testID={`tabbar-${id}-badge`}>
                   <AppText variant="micro" weight="heavy" color="onPrimary" style={styles.badgeText}>
                     {String(badge)}
                   </AppText>
                 </View>
               ) : null}
             </View>
-            <AppText variant="micro" weight="bold" color={focused ? 'primary' : 'muted'}>
+            <AppText
+              variant="micro"
+              weight="bold"
+              color={focused ? 'primary' : 'muted'}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              style={styles.label}>
               {meta.label}
             </AppText>
           </Pressable>
@@ -73,8 +87,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: color.border,
   },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, minHeight: size.hit },
-  indicator: { position: 'absolute', top: 0, left: 16, right: 16, height: 3, backgroundColor: 'transparent' },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, minHeight: size.hit, paddingVertical: 4 },
+  indicator: { position: 'absolute', top: 0, left: 12, right: 12, height: 3, backgroundColor: 'transparent' },
   indicatorOn: { backgroundColor: color.primary },
   badge: {
     position: 'absolute',
@@ -89,4 +103,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeText: { fontSize: 11, lineHeight: 14, letterSpacing: 0 },
+  // five tabs on a 375 pt phone: no extra tracking, so "HOUSEHOLD" fits
+  label: { letterSpacing: 0, paddingHorizontal: 2 },
 });

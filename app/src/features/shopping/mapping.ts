@@ -76,13 +76,11 @@ export function toPantryItem(row: ShoppingListItem): PantryItem {
     caloriesPerServing: null,
     healthScore: null,
     imageUrl: null,
+    // List rows have no scanned label, so the back-label fields are empty.
     ingredients: null,
     servingSize: null,
   } satisfies PantryItem;
-  // Optional label fields some PantryItem versions carry (round-2 "flip" back label). Spread so the literal never trips
-  // excess-property checks whichever version of the type is in the tree.
-  const extra = { ingredients: null, servingSize: null };
-  return { ...extra, ...base };
+  return base;
 }
 
 export function toStoreItem(row: ShoppingListItem, meId: string | null | undefined): StoreItem {

@@ -4,6 +4,8 @@ export const LIST_FALLBACK = ["ham", "eggs", "rice"];
 
 export const WEEK_FALLBACK = ["Tap to", "plan this", "week"];
 
+export const ME_FALLBACK = ["Tap to set", "your diet", "and allergies"];
+
 /** Longest Week-note line; longer titles are cut ("Mon Chicken..") so the big type stays readable on the door. */
 const WEEK_LINE_MAX = 14;
 
@@ -15,6 +17,16 @@ export function weekNoteLines(preview: readonly string[] | null | undefined): st
     .slice(0, 3)
     .map((s) => (s.length > WEEK_LINE_MAX ? `${s.slice(0, WEEK_LINE_MAX - 2).trimEnd()}..` : s));
   return clean.length ? clean : [...WEEK_FALLBACK];
+}
+
+/** Up to 3 short lines for the pinned Me note (name, allergies, ZIP), or the fallback while they load. */
+export function meNoteLines(preview: readonly string[] | null | undefined): string[] {
+  const clean = (preview ?? [])
+    .map((s) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : ""))
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((s) => (s.length > WEEK_LINE_MAX ? `${s.slice(0, WEEK_LINE_MAX - 2).trimEnd()}..` : s));
+  return clean.length ? clean : [...ME_FALLBACK];
 }
 
 /** First 3 non-empty shopping-list names, or the friendly fallback when there are none. */

@@ -10,6 +10,8 @@ export const storageKeys = {
   user: "grocerez.user",
   activeGroupId: "grocerez.activeGroupId",
   notificationsAsked: "grocerez.notificationsAsked",
+  /** selected scene theme id (features/theme) */
+  theme: "grocerez.theme",
 } as const;
 
 const web = Platform.OS === "web";

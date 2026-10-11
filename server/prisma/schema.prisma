@@ -38,6 +38,12 @@ model User {
   /// S3 key of an uploaded avatar (backend/11). Shown instead of the Google picture when set.
   avatarS3Key String?  @map("avatar_s3_key")
   zipCode     String?  @map("zip_code")
+  /// "room" (the 3D pantry room) or "simple" (plain screens, no 3D); CHECK enforced.
+  uiMode      String   @default("room") @map("ui_mode")
+  /// The room's theme id (app features/theme registry); CHECK enforced.
+  theme       String   @default("cozy")
+  /// 3D room animation speed: "normal" or "fast"; CHECK enforced.
+  motion      String   @default("normal")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -183,6 +189,7 @@ model Item {
   listItems      ShoppingListItem[]
   products       Product[]
   priceEstimates PriceEstimate[]
+  productLookups ProductLookup[]
 
   @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
   @@map("items")
@@ -522,6 +529,22 @@ model PriceEstimate {
 
   @@unique([itemId, zipCode])
   @@map("price_estimates")
+}
+
+/// backend/13: cached AI product lookups (shelf life, price, allergens with cited sources). Stale after 30 days.
+model ProductLookup {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// "name:<normalized>|<price region>" or "gtin:<gtin14>|<price region>".
+  lookupKey String   @unique @map("lookup_key")
+  itemId    String?  @map("item_id") @db.Uuid
+  result    Json
+  model     String
+  fetchedAt DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  item Item? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@map("product_lookups")
 }
 
 // ─── Pantry Agent recipe index (challenge 01 §12) ───────────────────────────────

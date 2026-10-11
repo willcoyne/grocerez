@@ -3,6 +3,17 @@ import { z } from "zod";
 export const GoogleAuthBody = z.object({ idToken: z.string().min(1).max(8192) });
 export type GoogleAuthBody = z.infer<typeof GoogleAuthBody>;
 
+/** The fun 3D room, or plain screens without 3D or animation. Saved per user (PATCH /me). */
+export const UiMode = z.enum(["room", "simple"]);
+export type UiMode = z.infer<typeof UiMode>;
+/** The room's theme (app features/theme registry). Saved per user (PATCH /me). */
+export const ThemeId = z.enum(["cozy", "pixel", "sketch", "neon", "diner"]);
+export type ThemeId = z.infer<typeof ThemeId>;
+
+/** 3D room animation speed: "fast" roughly halves the door, camera and paper animations. Saved per user. */
+export const Motion = z.enum(["normal", "fast"]);
+export type Motion = z.infer<typeof Motion>;
+
 export const User = z.object({
   id: z.uuid(),
   email: z.string(),
@@ -10,6 +21,9 @@ export const User = z.object({
   /** Google picture URL, or a presigned S3 GET URL when the user uploaded an avatar (11). */
   avatarUrl: z.string().nullable(),
   zipCode: z.string().nullable(),
+  uiMode: UiMode,
+  theme: ThemeId,
+  motion: Motion,
   createdAt: z.string(),
 });
 export type User = z.infer<typeof User>;
@@ -24,6 +38,9 @@ export const UpdateMeBody = z
     zipCode: z.string().regex(/^\d{5}$/, "must be a 5-digit ZIP code").nullable().optional(),
     /** `key` from POST /uploads/presign {purpose:"avatar"} after the PUT succeeded (11). null removes the upload. */
     avatarKey: z.string().max(200).nullable().optional(),
+    uiMode: UiMode.optional(),
+    theme: ThemeId.optional(),
+    motion: Motion.optional(),
   })
   .strict();
 export type UpdateMeBody = z.infer<typeof UpdateMeBody>;

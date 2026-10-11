@@ -9,9 +9,10 @@ import { ActivityIndicator, Animated, Platform, Pressable, StyleSheet, View, typ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "@/components/ui";
+import { useMotion } from "@/state/uiPrefs";
 import { font } from "@/theme";
 
-import { pantry, softShadow } from "./palette";
+import { type OverlayPalette, pantry, shadowFor, useOverlayPalette, useOverlayStyles } from "./palette";
 
 /** Notepad colours, matching the 3D note (cream paper, blue rules, red margin, red pin). */
 export const NOTE_PAPER = {
@@ -49,15 +50,47 @@ export type PaperSheetProps = {
    * or screen readers could never reach the card (a modal view hides its siblings).
    */
   overlayIsModal?: boolean;
+  /**
+   * A plain page instead of a sheet over the 3D room (the simple interface, state/uiPrefs.tsx): fills its screen,
+   * no backdrop, no landing animation, no pin, and no ✕ (the tab bar navigates away).
+   */
+  page?: boolean;
 };
 
-export function PaperSheet({ testID, title, closeLabel, onClose, subheader, children, footer, overlay, overlayIsModal }: PaperSheetProps) {
+export function PaperSheet({ testID, title, closeLabel, onClose, subheader, children, footer, overlay, overlayIsModal, page }: PaperSheetProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const insets = useSafeAreaInsets();
-  // Paper "lands" from the lifted 3D note: fade + settle.
-  const [appear] = useState(() => new Animated.Value(0));
+  // Paper "lands" from the lifted 3D note: fade + settle (the user's "fast" setting: it's just there).
+  const fast = useMotion() === "fast";
+  const [appear] = useState(() => new Animated.Value(fast ? 1 : 0));
   useEffect(() => {
+    if (page || fast) return;
     Animated.spring(appear, { toValue: 1, useNativeDriver: Platform.OS !== "web", friction: 8, tension: 70 }).start();
-  }, [appear]);
+  }, [appear, page, fast]);
+
+  if (page) {
+    return (
+      <View style={styles.pageWrap} testID={testID}>
+        <View style={[styles.sheet, styles.page]}>
+          <View style={styles.margin} pointerEvents="none" />
+          <View style={styles.header}>
+            <View style={styles.titleWrap}>
+              <AppText weight="display" style={styles.title} accessibilityRole="header">
+                {title}
+              </AppText>
+              <View style={styles.squiggle} />
+            </View>
+          </View>
+          {subheader}
+          {children}
+          {footer}
+        </View>
+        {overlay}
+      </View>
+    );
+  }
 
   return (
     <View style={StyleSheet.absoluteFill} testID={testID}>
@@ -97,10 +130,10 @@ export function PaperSheet({ testID, title, closeLabel, onClose, subheader, chil
             accessibilityRole="button"
             accessibilityLabel={closeLabel}
             hitSlop={6}
-            style={({ pressed }) => [styles.close, pressed && paperStyles.pressed]}
+            style={({ pressed }) => [styles.close, pressed && paper.pressed]}
             testID={`${testID}-close`}
           >
-            <X size={22} color={NOTE_PAPER.pencil} />
+            <X size={22} color={P.oakInk} />
           </Pressable>
         </View>
         {subheader}
@@ -119,8 +152,11 @@ export function PaperSheet({ testID, title, closeLabel, onClose, subheader, chil
 
 /** Brown small-caps section label with a rule under it ("PRODUCE", "MON 12"). */
 export function PaperSection({ title, testID }: { title: string; testID?: string }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
-    <AppText variant="micro" style={paperStyles.section} accessibilityRole="header" testID={testID}>
+    <AppText variant="micro" style={paper.section} accessibilityRole="header" testID={testID}>
       {title}
     </AppText>
   );
@@ -128,11 +164,14 @@ export function PaperSection({ title, testID }: { title: string; testID?: string
 
 /** Pencil line under the title ("3 to buy · 1 in the cart"). */
 export function PaperCaption({ children, strong, testID }: { children: ReactNode; strong?: boolean; testID?: string }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <AppText
       variant={strong ? "bodyS" : "caption"}
       weight={strong ? "semi" : undefined}
-      style={[paperStyles.pencil, paperStyles.count]}
+      style={[paper.pencil, paper.count]}
       testID={testID}
     >
       {children}
@@ -162,6 +201,9 @@ export function PaperPrimaryButton({
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const inactive = disabled || loading;
   return (
     <Pressable
@@ -171,11 +213,11 @@ export function PaperPrimaryButton({
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-      style={({ pressed }) => [paperStyles.primary, inactive && paperStyles.primaryOff, pressed && !inactive && paperStyles.pressed, style]}
+      style={({ pressed }) => [paper.primary, inactive && paper.primaryOff, pressed && !inactive && paper.pressed, style]}
       testID={testID}
     >
       {loading ? <ActivityIndicator color="#FFFFFF" /> : icon}
-      <AppText weight="bold" style={paperStyles.primaryText}>
+      <AppText weight="bold" style={paper.primaryText}>
         {label}
       </AppText>
     </Pressable>
@@ -183,17 +225,18 @@ export function PaperPrimaryButton({
 }
 
 /** Shared text/row styles for paper content (hand lettering, pencil captions, ruled rows). */
-export const paperStyles = StyleSheet.create({
-  hand: { fontFamily: font.display, color: NOTE_PAPER.pencil },
-  pencil: { color: pantry.muted },
+export const makePaperStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+  hand: { fontFamily: font.display, color: P.oakInk },
+  pencil: { color: P.muted },
   count: { paddingLeft: PAPER_MARGIN_X, paddingRight: 16, marginTop: 6 },
   section: {
-    color: pantry.oakDark,
+    color: P.oakDark,
     paddingLeft: PAPER_MARGIN_X,
     paddingTop: 14,
     paddingBottom: 4,
     borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
+    borderBottomColor: P.noteRule,
     letterSpacing: 1.2,
   },
   row: {
@@ -201,7 +244,7 @@ export const paperStyles = StyleSheet.create({
     alignItems: "flex-start",
     minHeight: PAPER_RULE,
     borderBottomWidth: 1,
-    borderBottomColor: NOTE_PAPER.rule,
+    borderBottomColor: P.noteRule,
   },
   scroll: { flex: 1, marginTop: 8 },
   scrollContent: { paddingBottom: 24 },
@@ -220,51 +263,54 @@ export const paperStyles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 16,
     borderRadius: 27,
-    backgroundColor: pantry.green,
+    backgroundColor: P.green,
     flexDirection: "row",
     gap: 8,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 20,
     paddingVertical: 12,
-    ...softShadow,
+    ...shadowFor(P),
   },
   primaryOff: { opacity: 0.55 },
   primaryText: { color: "#FFFFFF", fontSize: 18, lineHeight: 24 },
   pressed: { opacity: 0.75 },
 });
 
-const styles = StyleSheet.create({
-  backdrop: { backgroundColor: pantry.backdrop },
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
+  backdrop: { backgroundColor: P.backdrop },
   sheet: {
     position: "absolute",
     left: 14,
     right: 14,
-    backgroundColor: NOTE_PAPER.paper,
+    backgroundColor: P.notePaper,
     borderRadius: 6,
     paddingTop: 26,
     overflow: "visible",
-    ...softShadow,
+    ...shadowFor(P),
   },
-  margin: { position: "absolute", top: 0, bottom: 0, left: PAPER_MARGIN_X - 10, width: 2, backgroundColor: NOTE_PAPER.margin },
+  margin: { position: "absolute", top: 0, bottom: 0, left: PAPER_MARGIN_X - 10, width: 2, backgroundColor: P.noteMargin },
   header: { flexDirection: "row", alignItems: "flex-start", paddingLeft: PAPER_MARGIN_X, paddingRight: 8 },
   titleWrap: { flex: 1, paddingTop: 4 },
   title: {
     fontFamily: font.display,
     fontSize: 40,
     lineHeight: 46,
-    color: NOTE_PAPER.pencil,
+    color: P.oakInk,
     transform: [{ rotate: "-3deg" }],
   },
   squiggle: {
     width: 84,
     height: 4,
     borderRadius: 2,
-    backgroundColor: NOTE_PAPER.pencil,
+    backgroundColor: P.oakInk,
     opacity: 0.7,
     marginTop: 2,
     transform: [{ rotate: "-2deg" }],
   },
+  pageWrap: { flex: 1 },
+  page: { position: "relative", flex: 1, left: 0, right: 0, marginHorizontal: 12, marginTop: 8, marginBottom: 8, paddingTop: 16 },
   close: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   pin: {
     position: "absolute",
@@ -273,8 +319,8 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: NOTE_PAPER.pin,
-    ...softShadow,
+    backgroundColor: P.notePin,
+    ...shadowFor(P),
   },
-  pinShine: { position: "absolute", top: 5, left: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: NOTE_PAPER.pinShine },
+  pinShine: { position: "absolute", top: 5, left: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: P.notePinShine },
 });

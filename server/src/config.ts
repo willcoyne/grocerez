@@ -37,9 +37,9 @@ const NON_DINNER_TITLE =
   `^(?:(?!\\m${NON_DINNER_CONNECTORS}\\M|&).)*\\m(?:${NON_DINNER_NOUNS.join("|")})\\M(?:\\W+recipe)?\\W*(?:\\([^)]*\\)\\W*)?$`;
 
 /**
- * Environment schema. Core variables are always required. The external-service credentials
- * (Anthropic, AWS) are required in production only; in development/test the features that need them
- * answer 503 NOT_CONFIGURED instead, so the M2 loop runs before those accounts exist.
+ * Environment schema. Core variables are always required. External-service credentials (Akamai, Anthropic,
+ * S3 / Linode Object Storage) are optional in every environment: the features that need them answer
+ * 503 NOT_CONFIGURED, so the Linode deployment starts with whatever keys the team has.
  */
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -55,6 +55,7 @@ const schema = z.object({
   ANTHROPIC_API_KEY: optional,
   AWS_REGION: optional,
   S3_BUCKET: optional,
+  /** S3-compatible endpoint for non-AWS storage, e.g. Linode Object Storage https://us-ord-1.linodeobjects.com. */
   S3_ENDPOINT: optional,
   AWS_ACCESS_KEY_ID: optional,
   AWS_SECRET_ACCESS_KEY: optional,
@@ -111,8 +112,6 @@ const schema = z.object({
     .transform((v) => v === "true"),
 });
 
-const PROD_REQUIRED = ["AWS_REGION", "S3_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] as const;
-
 export type Config = z.infer<typeof schema>;
 
 export class ConfigError extends Error {}
@@ -126,13 +125,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       const key = issue.path.join(".") || "(root)";
       problems.push(`${key}: ${env[key] === undefined ? "missing" : issue.message}`);
     }
-  } else {
-    if (parsed.data.NODE_ENV === "production") {
-      for (const key of PROD_REQUIRED) if (!parsed.data[key]) problems.push(`${key}: missing (required in production)`);
-    }
-    if (parsed.data.AGENT_URL && (parsed.data.AGENT_SHARED_SECRET ?? "").length < 32) {
-      problems.push("AGENT_SHARED_SECRET: must be at least 32 characters when AGENT_URL is set");
-    }
+  } else if (parsed.data.AGENT_URL && (parsed.data.AGENT_SHARED_SECRET ?? "").length < 32) {
+    problems.push("AGENT_SHARED_SECRET: must be at least 32 characters when AGENT_URL is set");
   }
   if (problems.length || !parsed.success) {
     throw new ConfigError(`Invalid environment configuration:\n  - ${problems.join("\n  - ")}\nSee server/.env.example.`);

@@ -17,15 +17,14 @@ import { useMealPlan } from "@/api/hooks/mealPlan";
 import { stepSpoken, useStepAnnouncement } from "@/components/AgentStepList";
 import { AppText, ErrorState } from "@/components/ui";
 import {
-  NOTE_PAPER,
+  makePaperStyles,
   PAPER_MARGIN_X,
   PaperCaption,
   PaperPrimaryButton,
   PaperSection,
   PaperSheet,
-  paperStyles,
 } from "@/features/pantry/overlay/PaperSheet";
-import { pantry } from "@/features/pantry/overlay/palette";
+import { type OverlayPalette, useOverlayPalette, useOverlayStyles } from "@/features/pantry/overlay/palette";
 import { confirm } from "@/lib/confirm";
 import { plural } from "@/lib/format";
 
@@ -34,14 +33,26 @@ import { WeekRecipeCard } from "./WeekRecipeCard";
 import { UseSoonSection } from "./UseSoonSection";
 import { byDate, datesToPlan, dayLabels, rangeLabel, warningText, weekDates } from "./weekDates";
 
-export type WeekSheetProps = { visible: boolean; groupId: string; onClose: () => void };
+export type WeekSheetProps = {
+  visible: boolean;
+  groupId: string;
+  onClose: () => void;
+  /** Render as a plain page (the simple interface's Week tab) instead of a sheet over the 3D room. */
+  page?: boolean;
+};
 
-export function WeekSheet({ visible, groupId, onClose }: WeekSheetProps) {
+export function WeekSheet({ visible, groupId, onClose, page }: WeekSheetProps) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   if (!visible) return null;
-  return <Sheet groupId={groupId} onClose={onClose} />;
+  return <Sheet groupId={groupId} onClose={onClose} page={page} />;
 }
 
-function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
+function Sheet({ groupId, onClose, page }: Omit<WeekSheetProps, "visible">) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const plan = useMealPlan(groupId);
   const week = useWeekRun(groupId);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -75,16 +86,16 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
   let body: React.ReactNode;
   if (plan.isPending) {
     body = (
-      <View style={paperStyles.center} testID="week-loading" accessibilityRole="progressbar" accessibilityLabel="Loading the week">
-        <ActivityIndicator color={NOTE_PAPER.pencil} />
-        <AppText variant="bodyS" style={paperStyles.pencil}>
+      <View style={paper.center} testID="week-loading" accessibilityRole="progressbar" accessibilityLabel="Loading the week">
+        <ActivityIndicator color={P.oakInk} />
+        <AppText variant="bodyS" style={paper.pencil}>
           Loading the week…
         </AppText>
       </View>
     );
   } else if (plan.isError) {
     body = (
-      <View style={paperStyles.center} testID="week-error">
+      <View style={paper.center} testID="week-error">
         <ErrorState message={errorMessage(plan.error)} onRetry={() => void plan.refetch()} />
       </View>
     );
@@ -147,6 +158,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
       title="Week"
       closeLabel="Close week plan"
       onClose={onClose}
+      page={page}
       subheader={
         plan.data ? (
           <>
@@ -175,7 +187,7 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
         ) : null
       }
     >
-      <ScrollView style={paperStyles.scroll} contentContainerStyle={paperStyles.scrollContent}>
+      <ScrollView style={paper.scroll} contentContainerStyle={paper.scrollContent}>
         {v.state === "running" || v.state === "starting" ? (
           <AgentLines steps={v.state === "running" ? v.steps : []} reconnecting={v.state === "running" && v.reconnecting} />
         ) : null}
@@ -190,26 +202,29 @@ function Sheet({ groupId, onClose }: Omit<WeekSheetProps, "visible">) {
 
 /** The agent's steps as handwritten lines at the top of the sheet ("Reading the cabinet… ✓"). */
 function AgentLines({ steps, reconnecting }: { steps: AgentStep[]; reconnecting: boolean }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const lines = steps.length ? steps : [{ seq: 0, id: "starting", label: "Starting the agent…", status: "running" as const }];
   useStepAnnouncement(steps);
   return (
     <View style={styles.lines} accessibilityLabel="Agent steps" testID="week-agent-lines">
       {lines.map((s) => (
         <View key={`${s.seq}-${s.id}`} style={styles.line} accessible accessibilityLabel={stepSpoken(s)}>
-          <AppText weight="display" style={[paperStyles.hand, styles.lineText, s.status === "failed" && styles.failedText]}>
+          <AppText weight="display" style={[paper.hand, styles.lineText, s.status === "failed" && styles.failedText]}>
             {s.label}
           </AppText>
           {s.status === "running" ? (
-            <ActivityIndicator size="small" color={NOTE_PAPER.pencil} />
+            <ActivityIndicator size="small" color={P.oakInk} />
           ) : s.status === "failed" ? (
-            <X size={18} color={pantry.redInk} strokeWidth={3} />
+            <X size={18} color={P.redInk} strokeWidth={3} />
           ) : (
-            <Check size={18} color={pantry.green} strokeWidth={3} />
+            <Check size={18} color={P.green} strokeWidth={3} />
           )}
         </View>
       ))}
       {reconnecting ? (
-        <AppText variant="caption" style={paperStyles.pencil}>
+        <AppText variant="caption" style={paper.pencil}>
           Connection hiccup, reconnecting…
         </AppText>
       ) : null}
@@ -228,6 +243,9 @@ function RunProblem({
   onRetry: () => void;
   onDismiss: () => void;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <View style={styles.problem} testID="week-run-problem">
       <AppText weight="semi" style={styles.failedText} accessibilityRole="alert">
@@ -254,6 +272,9 @@ function TextButton({
   disabled?: boolean;
   testID?: string;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -261,7 +282,7 @@ function TextButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled: !!disabled }}
-      style={({ pressed }) => [styles.textButton, disabled && styles.faint, pressed && paperStyles.pressed]}
+      style={({ pressed }) => [styles.textButton, disabled && styles.faint, pressed && paper.pressed]}
       testID={testID}
     >
       <AppText variant="bodyS" weight="bold" style={styles.green}>
@@ -285,6 +306,9 @@ function MealRow({
   warnings?: readonly ExpiryWarning[];
   onPress?: () => void;
 }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   const day = dayLabels(date);
   const uses = meal.uses.length ? `uses ${meal.uses.slice(0, 3).map((u) => u.toLowerCase()).join(", ")}` : null;
   // Title + time open the card; the citation is its own link next to it (never a link nested inside a button).
@@ -293,21 +317,21 @@ function MealRow({
       <AppText variant="bodyL" weight="heavy" style={pending ? styles.pendingName : styles.name}>
         {meal.title}
       </AppText>
-      <AppText variant="caption" style={paperStyles.pencil}>
+      <AppText variant="caption" style={paper.pencil}>
         {[`${meal.minutes} min`, uses].filter(Boolean).join(" · ")}
       </AppText>
     </>
   );
   return (
-    <View style={[paperStyles.row, styles.rowPad]} testID={`week-row-${date}`}>
-      <View style={styles.bullet}>{pending ? <Pencil size={16} color={NOTE_PAPER.pencil} /> : <View style={styles.dot} />}</View>
+    <View style={[paper.row, styles.rowPad]} testID={`week-row-${date}`}>
+      <View style={styles.bullet}>{pending ? <Pencil size={16} color={P.oakInk} /> : <View style={styles.dot} />}</View>
       <View style={styles.rowText}>
         {onPress ? (
           <Pressable
             onPress={onPress}
             accessibilityRole="button"
             accessibilityLabel={`${day.spoken}: ${meal.title}, ${meal.minutes} minutes. Open the recipe card`}
-            style={({ pressed }) => [styles.rowMain, pressed && paperStyles.pressed]}
+            style={({ pressed }) => [styles.rowMain, pressed && paper.pressed]}
             testID={`week-open-${date}`}
           >
             {main}
@@ -324,28 +348,28 @@ function MealRow({
               accessibilityRole="link"
               accessibilityLabel={`Open the full recipe on ${meal.source.site}`}
               hitSlop={10}
-              style={({ pressed }) => [styles.cite, pressed && paperStyles.pressed]}
+              style={({ pressed }) => [styles.cite, pressed && paper.pressed]}
               testID={`week-cite-${date}`}
             >
               <AppText variant="caption" weight="bold" style={styles.green}>{`${meal.source.site} ↗`}</AppText>
             </Pressable>
           ) : (
             <View style={styles.aiCreated} accessible accessibilityLabel="AI-created recipe">
-              <Sparkles size={12} color={pantry.muted} />
-              <AppText variant="caption" style={paperStyles.pencil}>
+              <Sparkles size={12} color={P.muted} />
+              <AppText variant="caption" style={paper.pencil}>
                 AI-created
               </AppText>
             </View>
           )}
           {pending ? (
-            <AppText variant="caption" weight="semi" style={paperStyles.pencil}>
+            <AppText variant="caption" weight="semi" style={paper.pencil}>
               · Proposed, not saved yet
             </AppText>
           ) : null}
         </View>
         {warnings.map((w) => (
           <View key={w.item} style={styles.warnLine} accessible accessibilityLabel={`Warning: ${warningText(w)}`} testID={`week-warning-${date}`}>
-            <CircleAlert size={14} color={pantry.redInk} />
+            <CircleAlert size={14} color={P.redInk} />
             <AppText variant="caption" weight="semi" style={styles.failedText}>
               {warningText(w)}
             </AppText>
@@ -358,21 +382,24 @@ function MealRow({
 
 /** A day pencilled in as soon as the agent finds its recipe (step preview), before the plan is proposed. */
 function PreviewRow({ date, preview }: { date: string; preview: DayPreview }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <View
-      style={[paperStyles.row, styles.rowPad]}
+      style={[paper.row, styles.rowPad]}
       accessible
       accessibilityLabel={`${dayLabels(date).spoken}: found ${preview.title}${preview.site ? ` on ${preview.site}` : ""}`}
       testID={`week-preview-${date}`}
     >
       <View style={styles.bullet}>
-        <Pencil size={16} color={NOTE_PAPER.pencil} />
+        <Pencil size={16} color={P.oakInk} />
       </View>
       <View style={styles.rowText}>
-        <AppText weight="display" style={[paperStyles.hand, styles.sketch]}>
+        <AppText weight="display" style={[paper.hand, styles.sketch]}>
           {preview.title}
         </AppText>
-        <AppText variant="caption" style={paperStyles.pencil}>
+        <AppText variant="caption" style={paper.pencil}>
           {preview.site ? `found on ${preview.site}…` : "AI-created…"}
         </AppText>
       </View>
@@ -381,17 +408,20 @@ function PreviewRow({ date, preview }: { date: string; preview: DayPreview }) {
 }
 
 function FindingRow({ date }: { date: string }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <View
-      style={[paperStyles.row, styles.rowPad]}
+      style={[paper.row, styles.rowPad]}
       accessible
       accessibilityLabel={`${dayLabels(date).spoken}: finding a recipe`}
       testID={`week-finding-${date}`}
     >
       <View style={styles.bullet}>
-        <ActivityIndicator size="small" color={NOTE_PAPER.pencil} />
+        <ActivityIndicator size="small" color={P.oakInk} />
       </View>
-      <AppText weight="display" style={[paperStyles.hand, styles.sketch, styles.faint]}>
+      <AppText weight="display" style={[paper.hand, styles.sketch, styles.faint]}>
         Finding a recipe…
       </AppText>
     </View>
@@ -399,6 +429,9 @@ function FindingRow({ date }: { date: string }) {
 }
 
 function EmptyRow({ date, disabled, onPress }: { date: string; disabled: boolean; onPress: () => void }) {
+  const P = useOverlayPalette();
+  const styles = useOverlayStyles(makeStyles);
+  const paper = useOverlayStyles(makePaperStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -406,40 +439,41 @@ function EmptyRow({ date, disabled, onPress }: { date: string; disabled: boolean
       accessibilityRole="button"
       accessibilityLabel={`Plan a dinner for ${dayLabels(date).spoken}`}
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [paperStyles.row, styles.empty, disabled && styles.faint, pressed && paperStyles.pressed]}
+      style={({ pressed }) => [paper.row, styles.empty, disabled && styles.faint, pressed && paper.pressed]}
       testID={`week-plan-day-${date}`}
     >
-      <Plus size={20} color={pantry.green} strokeWidth={2.6} />
-      <AppText weight="display" style={[paperStyles.hand, styles.addText]}>
+      <Plus size={20} color={P.green} strokeWidth={2.6} />
+      <AppText weight="display" style={[paper.hand, styles.addText]}>
         Plan a dinner
       </AppText>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (P: OverlayPalette) =>
+  StyleSheet.create({
   flex: { flex: 1 },
   lines: { paddingLeft: PAPER_MARGIN_X, paddingRight: 16, paddingTop: 8, paddingBottom: 6, gap: 2 },
   line: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 30 },
   lineText: { fontSize: 18, lineHeight: 24, flexShrink: 1 },
-  failedText: { color: pantry.redInk },
+  failedText: { color: P.redInk },
   problem: { paddingLeft: PAPER_MARGIN_X, paddingRight: 16, paddingVertical: 10, gap: 4 },
   problemActions: { flexDirection: "row", gap: 16 },
   textButton: { minHeight: 44, justifyContent: "center", alignSelf: "center", paddingHorizontal: 12 },
-  green: { color: pantry.green },
+  green: { color: P.green },
   rowPad: { paddingVertical: 6, paddingRight: 12 },
   bullet: { width: PAPER_MARGIN_X, alignItems: "center", paddingTop: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: NOTE_PAPER.pencil, marginTop: 2 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: P.oakInk, marginTop: 2 },
   rowText: { flex: 1, gap: 2 },
   rowMain: { gap: 2, alignSelf: "stretch" },
   cite: { minHeight: 24, justifyContent: "center" },
-  name: { color: NOTE_PAPER.ink },
-  pendingName: { color: NOTE_PAPER.pencil },
+  name: { color: P.ink },
+  pendingName: { color: P.oakInk },
   metaLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 },
   warnLine: { flexDirection: "row", alignItems: "center", gap: 4 },
   aiCreated: { flexDirection: "row", alignItems: "center", gap: 3 },
   sketch: { fontSize: 19, lineHeight: 25, transform: [{ rotate: "-0.8deg" }] },
   faint: { opacity: 0.6 },
   empty: { alignItems: "center", gap: 8, paddingLeft: PAPER_MARGIN_X - 2 },
-  addText: { fontSize: 20, lineHeight: 26, color: pantry.green },
+  addText: { fontSize: 20, lineHeight: 26, color: P.green },
 });

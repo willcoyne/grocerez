@@ -18,6 +18,8 @@ COPY package.json prisma.config.ts tsconfig.json ./
 COPY prisma ./prisma
 # The seed (tsx prisma/seed.ts) imports TypeScript from src/, so keep the sources for `prisma db seed`.
 COPY src ./src
+# Bundled datasets for the product lookup agent (USDA FoodKeeper, BLS average prices).
+COPY data ./data
 EXPOSE 3000
 USER node
 # MIGRATE_DATABASE_URL (owner) is used by migrate deploy when set; DATABASE_URL (grocerez_app) by the API.
