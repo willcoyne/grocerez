@@ -33,7 +33,8 @@ export function perGroup(limit: number, windowMs: number, scope = "") {
     limit,
     standardHeaders: "draft-8",
     legacyHeaders: false,
-    keyGenerator: (req) => `${scope}:${String(req.params.groupId)}`,
+    // requireGroupMember's canonical id, so re-casing the path can't open a fresh bucket.
+    keyGenerator: (req) => `${scope}:${req.membership?.groupId ?? String(req.params.groupId).toLowerCase()}`,
     handler: handler("Too many requests for this group, try again later"),
   });
 }

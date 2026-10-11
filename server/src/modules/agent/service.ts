@@ -16,7 +16,7 @@ import { prisma } from "../../db.js";
 import { agentClient } from "../../lib/agentClient.js";
 import { AppError, conflict, notConfigured, notFound } from "../../lib/errors.js";
 import { groupTimeZone, householdToday, toCalendarDate } from "../../lib/expiration.js";
-import { signAppToken } from "../../lib/jwt.js";
+import { signAgentRunToken } from "../../lib/jwt.js";
 import { logger } from "../../lib/logger.js";
 import { normalize } from "../../lib/normalize.js";
 import { emitGroup } from "../../lib/realtime.js";
@@ -25,7 +25,7 @@ import { withRegeneration } from "../shopping-list/engine.js";
 import { shoppingListRepo } from "../shopping-list/repo.js";
 import { shoppingListService } from "../shopping-list/service.js";
 import { agentRepo } from "./repo.js";
-import { safety } from "./safety.js";
+import { safety, type SafetyMeal } from "./safety.js";
 
 /** Mutable so tests can shorten them. */
 export const agentTimers = { runTimeoutMs: 120_000, staleAfterMs: 120_000, emitThrottleMs: 250 };
@@ -96,16 +96,22 @@ async function expire(runId: string) {
   }
 }
 
-function scheduleTimeout(runId: string) {
+function scheduleTimeout(runId: string, ms = agentTimers.runTimeoutMs) {
   setTimeout(() => {
     expire(runId).catch((err) => logger.error({ err, runId }, "agent run timeout failed"));
-  }, agentTimers.runTimeoutMs).unref();
+  }, Math.max(0, ms)).unref();
 }
 
-/** Boot sweep: runs still `running` after staleAfterMs belong to a dead agent or a previous server process. */
+/**
+ * Boot sweep: runs still `running` after staleAfterMs belong to a dead agent or a previous server process → failed.
+ * Younger running runs lost their timer with that process, so the remaining part of their timeout is re-armed here.
+ */
 export async function sweepStaleRuns(olderThanMs = agentTimers.staleAfterMs): Promise<number> {
   const rows = await agentRepo.failStale(new Date(Date.now() - olderThanMs), TOO_LONG);
   for (const r of rows) emitGroup(r.groupId, "agent:changed", r.userId, { runId: r.id });
+  for (const r of await agentRepo.running()) {
+    scheduleTimeout(r.id, r.createdAt.getTime() + agentTimers.runTimeoutMs - Date.now());
+  }
   return rows.length;
 }
 
@@ -117,6 +123,16 @@ async function resolveItem(userId: string, name: string): Promise<Item | null> {
   const res = await itemsService.search(name);
   if (res.match !== "none" && res.results[0]) return res.results[0];
   return (await itemsService.create(userId, { name: name.trim().slice(0, 200) })).item;
+}
+
+function unsafe(failing: { title: string; problems: SafetyCheckResponse["meals"][number]["problems"] }[]) {
+  const first = failing[0].problems[0];
+  return new AppError(
+    422,
+    "PLAN_UNSAFE",
+    `This plan isn't safe for everyone: ${first.ingredient} (${first.reason}: ${first.members.join(", ")})`,
+    { meals: failing.map((m) => ({ title: m.title, problems: m.problems })) },
+  );
 }
 
 function noteFor(forMeals: string[]): string {
@@ -135,7 +151,7 @@ export const agentService = {
     try {
       await agentClient.startRun({
         runId, groupId, prompt: body.prompt, budgetCents, zipCode: user?.zipCode ?? null,
-        apiBaseUrl: config.AGENT_PUBLIC_API_URL, runToken: signAppToken(userId, "15m"),
+        apiBaseUrl: config.AGENT_PUBLIC_API_URL, runToken: signAgentRunToken(userId, runId, groupId),
       });
     } catch (err) {
       logger.warn({ err, runId }, "agent service unreachable");
@@ -182,30 +198,32 @@ export const agentService = {
     }
     const plan = parsed.data;
 
-    const check = await safety.check(groupId, plan.meals);
-    const failing = check.meals.filter((m) => !m.passes);
-    if (failing.length) {
-      const first = failing[0].problems[0];
-      throw new AppError(
-        422,
-        "PLAN_UNSAFE",
-        `This plan isn't safe for everyone: ${first.ingredient} (${first.reason}: ${first.members.join(", ")})`,
-        { meals: failing.map((m) => ({ title: m.title, problems: m.problems })) },
-      );
-    }
+    // Check everything the plan tells people to buy or cook, not only meals[].ingredients: missing/uses names, the
+    // title and steps (safety.check), and missingItems — the rows apply actually writes (as a final "To buy" entry).
+    const toCheck: SafetyMeal[] = plan.meals.map((m) => ({
+      title: m.title,
+      ingredients: [...new Set([...m.ingredients, ...m.missing, ...m.uses])],
+      steps: m.steps,
+    }));
+    if (plan.missingItems.length) toCheck.push({ title: "To buy", ingredients: plan.missingItems.map((i) => i.name) });
+    const failing = (await safety.check(groupId, toCheck)).meals.filter((m) => !m.passes);
+    if (failing.length) throw unsafe(failing);
 
     // Resolve names (outside the transaction: may create catalog items). Merge names that land on the same item.
-    const wanted = new Map<string, { name: string; forMeals: string[] }>();
+    const wanted = new Map<string, { name: string; forMeals: string[]; item: Item }>();
     for (const m of plan.missingItems) {
       const item = await resolveItem(userId, m.name).catch((err) => {
         logger.warn({ err, name: m.name }, "could not resolve agent item");
         return null;
       });
       if (!item) continue;
-      const w = wanted.get(item.id) ?? { name: m.name, forMeals: [] };
+      const w = wanted.get(item.id) ?? { name: m.name, forMeals: [], item };
       for (const t of m.forMeals) if (!w.forMeals.includes(t)) w.forMeals.push(t);
       wanted.set(item.id, w);
     }
+    // The resolved catalog item may differ from the name (fuzzy match): check its own allergens/category too.
+    const itemProblems = await safety.checkItems(groupId, [...wanted.values()].map((w) => w.item));
+    if (itemProblems.length) throw unsafe([{ title: "To buy", problems: itemProblems }]);
     const itemIds = [...wanted.keys()];
 
     const { result } = await withRegeneration(groupId, userId, ["shopping-list:changed"], async (tx) => {
@@ -252,7 +270,16 @@ export const agentService = {
         notifyRun(owner);
         throw new AppError(422, "PLAN_INVALID", "Plan didn't validate", ev.success ? undefined : ev.error.issues.slice(0, 20));
       }
-      if (!(await agentRepo.propose(owner.id, ev.data.payload.plan, ev.data.payload.meta))) throw notRunning();
+      let saved: boolean;
+      try {
+        saved = await agentRepo.propose(owner.id, ev.data.payload.plan, ev.data.payload.meta);
+      } catch (err) {
+        // A plan that can't be stored must not leave the run `running` until the timeout.
+        logger.error({ err, runId: owner.id }, "could not store the proposed plan");
+        if (await agentRepo.fail(owner.id, "Plan couldn't be saved")) notifyRun(owner);
+        throw new AppError(422, "PLAN_INVALID", "Plan couldn't be saved");
+      }
+      if (!saved) throw notRunning();
     } else {
       const ev = AgentEvent.parse(body);
       if (ev.type === "step") {

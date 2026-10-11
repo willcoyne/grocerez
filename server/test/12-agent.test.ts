@@ -5,7 +5,7 @@ import { config } from "../src/config.js";
 import type { AgentPlan } from "../src/contracts/agent.js";
 import { prisma } from "../src/db.js";
 import { agentClient } from "../src/lib/agentClient.js";
-import { verifyAppToken } from "../src/lib/jwt.js";
+import { verifyAgentRunToken, verifyAppToken } from "../src/lib/jwt.js";
 import { setIo } from "../src/lib/realtime.js";
 import { agentTimers, sweepStaleRuns } from "../src/modules/agent/service.js";
 import { api, itemId, makeGroup, makeUser, type TestUser } from "./helpers.js";
@@ -81,9 +81,29 @@ describe("12 agent: start a run", () => {
     expect(req).toMatchObject({
       runId, groupId: g.id, prompt: "Plan our week, cheap", budgetCents: 6000, zipCode: "64105", apiBaseUrl: config.AGENT_PUBLIC_API_URL,
     });
-    expect(verifyAppToken(req.runToken)).toBe(owner.id);
+    expect(verifyAgentRunToken(req.runToken)).toEqual({ userId: owner.id, runId, groupId: g.id });
+    expect(verifyAppToken(req.runToken)).toBeNull(); // not a session token
     const decoded = jwt.decode(req.runToken) as { iat: number; exp: number };
     expect(decoded.exp - decoded.iat).toBe(15 * 60);
+  });
+
+  it("the run token only reads its own group (+ safety-check) and only while the run is running", async () => {
+    const { owner, g } = await household();
+    const runId = await startRunFor(owner, g.id);
+    const auth = { Authorization: `Bearer ${(startRun.mock.calls[0][0] as { runToken: string }).runToken}` };
+    for (const p of ["agent/household", "cabinet", "shopping-list", "preferences?userId=all"]) {
+      expect((await api().get(`/api/groups/${g.id}/${p}`).set(auth)).status, p).toBe(200);
+    }
+    const meals = { meals: [{ title: "Greens", ingredients: ["Spinach"] }] };
+    expect((await api().post(`/api/groups/${g.id}/agent/safety-check`).set(auth).send(meals)).status).toBe(200);
+    expect((await api().post(`/api/groups/${g.id}/shopping-list`).set(auth).send({ itemId: await itemId("Spinach") })).status).toBe(401);
+    expect((await api().get("/api/me").set(auth)).status).toBe(401);
+    const other = await makeGroup(owner);
+    expect((await api().get(`/api/groups/${other.id}/cabinet`).set(auth)).status).toBe(401);
+
+    await event(runId, 0, "failed", { message: "done" });
+    expect((await api().get(`/api/groups/${g.id}/cabinet`).set(auth)).status).toBe(401);
+    expect((await api().get(`/api/groups/${g.id}/cabinet`).set(owner.auth)).status).toBe(200); // normal tokens unaffected
   });
 
   it("503 NOT_CONFIGURED without AGENT_URL, and no run is created", async () => {
