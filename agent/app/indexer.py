@@ -175,8 +175,9 @@ class DomainStats:
 class StateFile:
     """agent/.index-state.json: {"done": {url: "ok"|"nojsonld"|"blocked"|"error"}} so --resume skips finished URLs."""
 
-    def __init__(self, path: Path | None, resume: bool = True) -> None:
+    def __init__(self, path: Path | None, resume: bool = True, refresh: bool = False) -> None:
         self.path = path
+        self.refresh = refresh  # --refresh: re-fetch and re-send URLs that are already indexed (e.g. to fill in `course`)
         self.done: dict[str, str] = {}
         if path and resume and path.exists():
             try:
@@ -185,7 +186,7 @@ class StateFile:
                 self.done = {}
 
     def skip(self, url: str) -> bool:
-        return self.done.get(url) in ("ok", "nojsonld")
+        return not self.refresh and self.done.get(url) in ("ok", "nojsonld")
 
     def mark(self, url: str, status: str) -> None:
         self.done[url] = status
@@ -206,7 +207,7 @@ def to_indexed(parsed: Any) -> IndexedRecipe | None:
         return IndexedRecipe.model_validate({
             "url": parsed.url, "site": parsed.site, "title": parsed.title, "imageUrl": parsed.image,
             "minutes": parsed.minutes_src, "servings": parsed.servings_src,
-            "ingredientLines": parsed.lines, "ingredients": parsed.ingredients,
+            "ingredientLines": parsed.lines, "ingredients": parsed.ingredients, "course": parsed.course,
         })
     except ValidationError as e:
         log.info("recipe skipped (invalid for the index): %s %s", parsed.url, e.errors()[:1])

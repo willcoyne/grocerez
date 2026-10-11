@@ -835,7 +835,7 @@ async def test_index_hit_is_used_without_touching_tavily(ctx, client, sink, stat
     out = json.loads(await t["find_recipe"]("lemon chicken", must_use=["Chicken Breast", "Spinach"]))
     req = search.calls.last.request
     assert req.headers["authorization"] == f"Bearer {TOKEN}"
-    assert json.loads(req.content) == {"query": "lemon chicken dinner main dish", "mustUse": ["Chicken Breast", "Spinach"], "limit": 6}
+    assert json.loads(req.content) == {"query": "lemon chicken dinner main dish", "mustUse": ["Chicken Breast", "Spinach"], "limit": 6, "browse": False}
     assert not tavily.called
     assert set(out) == {"found", "title", "site", "uses", "missing"} and out["missing"] == ["Lemons"]
     first = json.loads(safety.calls[0].request.content)["meals"][0]

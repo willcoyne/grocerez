@@ -297,7 +297,7 @@ async def test_indexed_recipe_has_lines_and_metadata_but_never_the_method_text()
     assert r.ingredients == ["Chicken Breast", "Garlic", "Salt"] and r.minutes == 30 and r.servings == 4
     assert SECRET_METHOD not in r.model_dump_json() and "425" not in r.model_dump_json()
     assert set(r.model_dump()) == {"url", "site", "title", "imageUrl", "minutes", "servings", "ingredientLines",
-                                   "ingredients"}
+                                   "ingredients", "course"}
 
 
 # ─── resume, max-total, batching ─────────────────────────────────────────────

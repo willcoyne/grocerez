@@ -247,6 +247,9 @@ class ParsedRecipe:
     outline: list[str] = field(default_factory=list)  # first ~10 words of each source step (never the full text)
     minutes_src: int | None = None  # as published (None when the page gives none; `minutes` then defaults to 30)
     servings_src: int | None = None
+    course: list[str] = field(default_factory=list)  # schema.org recipeCategory, lower-cased ("main course", "dinner")
+    rid: str | None = None  # recipe index id (index hits only)
+    distance: float | None = None  # cosine distance to the query (index hits only; 0 = identical)
 
 
 _ROUNDUP = re.compile(r"^\s*\d+\s|\b(?:recipes|ideas|roundup|collection)\s*$|\b\d+\s+(?:best|easy|healthy|quick)\b", re.I)
@@ -293,6 +296,20 @@ def parse_yield(value: Any) -> int | None:
         m = re.search(r"\d+", value)
         return int(m.group()) if m else None
     return None
+
+
+def parse_course(value: Any) -> list[str]:
+    """recipeCategory as a string or list (items may hold commas) -> unique lower-cased course names (<= 8)."""
+    items = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        for part in item.split(","):
+            c = " ".join(html_lib.unescape(part).lower().split())[:60]
+            if c and c not in out:
+                out.append(c)
+    return out[:8]
 
 
 def parse_image(value: Any) -> str | None:
@@ -417,6 +434,7 @@ def parse_recipe_html(page: str, url: str) -> ParsedRecipe | None:
             step_count=count_steps(node.get("recipeInstructions")),
             ingredients=generic[:25],
             outline=extract_outline(node.get("recipeInstructions")),
+            course=parse_course(node.get("recipeCategory")),
             minutes_src=max(1, min(1440, total)) if total else None,
             servings_src=max(1, min(50, parse_yield(node.get("recipeYield")) or 0)) if parse_yield(node.get("recipeYield")) else None,
         )

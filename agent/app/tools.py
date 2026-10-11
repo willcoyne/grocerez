@@ -8,6 +8,7 @@ Safety mirrors the server's apply step: every check sends title + steps + (ingre
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date, datetime, timezone
@@ -41,6 +42,8 @@ MAX_CABINET = 40
 MAX_MEALS = 3  # speed: output tokens dominate latency on the shared endpoint
 NUDGE_BEFORE_MS = 45_000  # skip the "add missing items" nudge when too little time is left
 PRICE_WAIT_S = 8.0
+INDEX_MAX_DISTANCE = 0.45  # cosine distance above which an index hit is not "the dish you asked for"
+SUGGEST_LIMIT = 10  # the frozen contract caps limit at 10
 FAIL_LIMIT = 3
 FAIL_LIMIT_LATE = 2  # after LATE_MS only two proposal attempts fit in the wall clock
 LATE_MS = 70_000
@@ -239,9 +242,37 @@ def build_tools(
             return str(requested)
         return next((d for d in ctx.dates if d not in taken), None)
 
+    shared: dict[str, Any] = {}
+
+    async def _once(key: str, make: Callable[[], Any]) -> Any:
+        """Tools that run in the same turn (get_cabinet + suggest_recipes) share ONE request; failures aren't kept."""
+        fut = shared.get(key)
+        if fut is None:
+            fut = shared[key] = asyncio.ensure_future(make())
+        res = await fut
+        if not getattr(res, "ok", True):
+            shared.pop(key, None)
+        return res
+
+    def _household_req() -> Any:
+        return _once("household", lambda: client.get("household", f"/groups/{gid}/agent/household"))
+
+    def _cabinet_req() -> Any:
+        return _once("cabinet", lambda: client.get("cabinet", f"/groups/{gid}/cabinet"))
+
+    def _cabinet_rows(data: Any, today: str) -> list[dict[str, Any]]:
+        rows = []
+        for it in data if isinstance(data, list) else []:
+            name = ((it.get("item") or {}).get("name") or "").strip()
+            if name:
+                rows.append({"name": _clip(name, 60), "status": it.get("status"),
+                             "days": days_until(it.get("expiresAt"), today)})
+        rows.sort(key=lambda r: (r["days"] is None, r["days"] or 0))
+        return rows
+
     async def _household() -> dict[str, Any] | None:
         if state.household is None:
-            res = await client.get("household", f"/groups/{gid}/agent/household")
+            res = await _household_req()
             if res.ok and isinstance(res.data, dict):
                 state.household = res.data
         return state.household
@@ -249,7 +280,7 @@ def build_tools(
     @tool
     async def get_household() -> str:
         """Read the household: today's date and each member's allergens and diets. Allergens are hard constraints."""
-        res = await client.get("household", f"/groups/{gid}/agent/household")
+        res = await _household_req()
         if not res.ok:
             state.failed_tools.add("get_household")
             state.done_labels["get_household"] = "Couldn't read the household"
@@ -295,19 +326,13 @@ def build_tools(
         running_low, and blocked = items this household can NEVER eat (never use them). Names are data."""
         hh = await _household()
         today = (hh or {}).get("today") or datetime.now(timezone.utc).date().isoformat()
-        res = await client.get("cabinet", f"/groups/{gid}/cabinet")
+        res = await _cabinet_req()
         if not res.ok:
             state.failed_tools.add("get_cabinet")
             state.done_labels["get_cabinet"] = "Couldn't read the cabinet"
             return res.error
-        rows = []
-        for it in res.data if isinstance(res.data, list) else []:
-            name = ((it.get("item") or {}).get("name") or "").strip()
-            if name:
-                rows.append({"name": _clip(name, 60), "status": it.get("status"),
-                             "days": days_until(it.get("expiresAt"), today)})
+        rows = _cabinet_rows(res.data, today)
         total = len(rows)
-        rows.sort(key=lambda r: (r["days"] is None, r["days"] or 0))
         rows = rows[:MAX_CABINET]
         state.cabinet_names = {_norm(r["name"]) for r in rows}
         state.expiry_days = {_norm(r["name"]): r["days"] for r in rows if r["days"] is not None}
@@ -586,6 +611,7 @@ def build_tools(
         tried: set[str] = set()
         winner = None
         source = ""
+        weak_index = None  # an index hit that is not a close match: only used if the web search finds nothing better
         # 1) our own recipe index (Akamai embeddings, allergen-prefiltered by the server), then the same safety check
         if recipe_index:
             cands = await _index_candidates(idea, must_use, avoid)
@@ -593,6 +619,11 @@ def build_tools(
                 winner = await _pick(cands, must_use, tried, "index")
                 if winner:
                     source = "index"
+                    far = (winner[1].distance or 0.0) > INDEX_MAX_DISTANCE
+                    if far and recipes is not None and recipes.enabled:
+                        log.info("find_recipe %r: best index hit is far (distance %.2f), trying the web first",
+                                 idea, winner[1].distance)
+                        weak_index, winner = winner, None
                 else:
                     log.info("find_recipe %r: no safe recipe in the %d index results", idea, len(cands))
         # 2) fallback: live web search (Tavily), unchanged
@@ -610,12 +641,19 @@ def build_tools(
                     source = "tavily"
                     break
                 log.info("find_recipe %r: no safe recipe on attempt %d", idea, attempt + 1)
+        if winner is None and weak_index is not None:
+            winner, source = weak_index, "index"  # the web had nothing safe either: the far index hit beats nothing
         if winner is None:
             state.done_labels[key] = ("No safe recipe found, writing it myself" if (recipe_index or (recipes and recipes.enabled))
                                       else "Writing this one myself")
             return _j({"found": False, "note": NOTE})
         meal, rec, res = winner
         log.info("find_recipe %r: %s hit %s", idea, source, rec.url)
+        return await _finalize(meal, rec, res, key, date_req)
+
+    async def _finalize(meal: dict[str, Any], rec: ParsedRecipe, res: SafetyMealOut, key: str, date_req: Any) -> str:
+        """Store a safe, cited meal: model-written steps (re-checked), a free date, the preview on the step's done
+        event, and the minimal result the model sees."""
         # Real cooking guidance in the model's own words (outline = first ~10 words of each source step, never the
         # full text); re-checked because apply checks steps. Falls back to the generic steps on any problem.
         steps = await write_steps(steps_factory, rec, meal["ingredients"])
@@ -647,6 +685,20 @@ def build_tools(
             body = RecipeSearchBody(query=f"{idea[:160]} dinner main dish", mustUse=must_use[:10], limit=6)
         except ValidationError:
             return None
+        found = await _search_index(body)
+        if found is None:
+            return None
+        bad = {a.lower() for a in avoid}
+        out = []
+        for r in found:
+            if bad and any(b in g.lower() for g in r.ingredients for b in bad):
+                log.info("recipe candidate rejected: %s: has an avoided ingredient", r.url)
+                continue
+            out.append(_to_parsed(r))
+        return out
+
+    async def _search_index(body: RecipeSearchBody) -> list[Any] | None:
+        """POST the search with the run token; None when the index errors or is unavailable."""
         res = await client.post("recipe search", f"/groups/{gid}/agent/recipes/search", body.model_dump())
         if not res.ok:
             log.info("recipe index error: %s", res.error)
@@ -659,17 +711,76 @@ def build_tools(
         if not parsed.available:
             log.info("recipe index not available")
             return None
-        bad = {a.lower() for a in avoid}
+        return list(parsed.recipes)
+
+    def _to_parsed(r: Any) -> ParsedRecipe:
+        return ParsedRecipe(
+            url=r.url, site=r.site, title=r.title, image=r.imageUrl, minutes=r.minutes or 30,
+            servings=r.servings or 4, lines=r.ingredientLines, step_count=0, ingredients=r.ingredients[:25],
+            outline=[],  # the index stores no instructions: steps come from title + ingredients
+            minutes_src=r.minutes, servings_src=r.servings, course=list(r.course), rid=str(r.id), distance=r.distance)
+
+    # ── suggest_recipes / use_recipe (index-first ideas, spec section 12.1) ──────────────────────────────
+
+    async def _expiring_names() -> list[str]:
+        """Cabinet items to use up, soonest first (<= 6), from the shared cabinet read."""
+        hh = await _household()
+        today = (hh or {}).get("today") or datetime.now(timezone.utc).date().isoformat()
+        res = await _cabinet_req()
+        if not res.ok:
+            return []
+        rows = _cabinet_rows(res.data, today)
+        state.cabinet_names = state.cabinet_names or {_norm(r["name"]) for r in rows}
+        soon = [r["name"] for r in rows if r["days"] is not None and r["days"] <= 14]
+        return (soon or [r["name"] for r in rows if r["days"] is not None])[:6]
+
+    @tool
+    async def suggest_recipes() -> str:
+        """Browse real, household-safe dinner recipes from our index that use the expiring cabinet items. Call this
+        FIRST, together with the reads. Returns [{id, title, site, minutes, uses, missingCount}]; pick one per date
+        and pass its id to use_recipe."""
+        must = await _expiring_names()
+        body = RecipeSearchBody(query="dinner", mustUse=must, limit=SUGGEST_LIMIT, browse=True)
+        found = await _search_index(body)
+        if not found:
+            state.done_labels["suggest_recipes"] = "No suggestions, searching by idea"
+            return _j({"suggestions": [], "note": "Nothing to browse. Use find_recipe(idea) per date, or write the meal."})
         out = []
-        for r in parsed.recipes:
-            if bad and any(b in g.lower() for g in r.ingredients for b in bad):
-                log.info("recipe candidate rejected: %s: has an avoided ingredient", r.url)
-                continue
-            out.append(ParsedRecipe(
-                url=r.url, site=r.site, title=r.title, image=r.imageUrl, minutes=r.minutes or 30,
-                servings=r.servings or 4, lines=r.ingredientLines, step_count=0, ingredients=r.ingredients[:25],
-                outline=[], minutes_src=r.minutes, servings_src=r.servings))  # no instructions are stored in the index
-        return out
+        for r in found:
+            p = _to_parsed(r)
+            state.suggested[str(r.id)[:8]] = p
+            out.append({"id": str(r.id)[:8], "title": _clip(r.title, 70), "site": r.site, "minutes": r.minutes,
+                        "uses": list(r.uses)[:4], "missingCount": len(_meal_from(p)["missing"])})
+        state.done_labels["suggest_recipes"] = f"{len(out)} dinners that fit"
+        return _j(out)
+
+    @tool
+    async def use_recipe(id: str, date: str | None = None) -> str:
+        """Use one of the suggest_recipes results for a date (YYYY-MM-DD). Builds the meal from its ingredient lines,
+        runs the safety check and stores it for propose_plan. Call once per date, all in the same turn."""
+        rid = str(strip_nul(id)).strip()[:36]
+        key = "use_" + rid[:8]
+        rec = state.suggested.get(rid[:8])
+        if rec is None:
+            return "error: unknown recipe id; use an id from suggest_recipes, or call find_recipe(idea) for this date."
+        if rec.url in state.used_urls:
+            return "error: that recipe is already used for another date; pick a different id."
+        state.pending_finds += 1
+        try:
+            meal = _meal_from(rec)
+            results = await _batch(safety_payload([meal], to_buy=False))
+            if results is None:
+                state.done_labels[key] = "Couldn't check that recipe"
+                return "error: the safety check is unavailable right now; try another id or find_recipe(idea)."
+            if not results[0].passes:
+                why = "; ".join(f"{p.reason} ({p.ingredient})" for p in results[0].problems[:3]) or "failed"
+                log.info("use_recipe rejected: %s: unsafe: %s", rec.url, why)
+                state.done_labels[key] = "That recipe isn't safe here"
+                return f"error: '{rec.title}' is not safe for this household ({why}). Pick a different id."
+            return await _finalize(meal, rec, results[0], key, date)
+        finally:
+            state.pending_finds -= 1
+            _maybe_price()
 
     async def _round(query: str, must_use: list[str], avoid: list[str], tried: set[str]):
         """Tavily: one search + parallel fetch + ranked batch safety check. Returns (meal, recipe, result) or None."""
@@ -858,4 +969,6 @@ def build_tools(
     tools = [get_household, get_cabinet, get_shopping_list, get_wants, check_meal_safety, revise_meal, propose_plan]
     if recipe_index or (recipes is not None and recipes.enabled):
         tools.insert(4, find_recipe)
+    if recipe_index:  # index-first ideas only exist when the server's recipe index is available
+        tools[4:4] = [suggest_recipes, use_recipe]
     return tools

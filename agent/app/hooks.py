@@ -22,6 +22,8 @@ RUNNING_LABELS = {
     "get_shopping_list": "Checking the list…",
     "get_wants": "Checking what everyone wants…",
     "check_meal_safety": "Safety check…",
+    "suggest_recipes": "Browsing dinner ideas…",
+    "use_recipe": "Picking a recipe…",
     "find_recipe": "Finding a recipe…",
     "revise_meal": "Fixing a meal…",
     "propose_plan": "Finishing the plan…",
@@ -32,6 +34,8 @@ DONE_LABELS = {
     "get_shopping_list": "Checked the list",
     "get_wants": "Checked what everyone wants",
     "check_meal_safety": "Safety check done",
+    "suggest_recipes": "Browsed dinner ideas",
+    "use_recipe": "Recipe picked",
     "find_recipe": "Recipe search done",
     "revise_meal": "Meal fixed",
     "propose_plan": "Plan ready",
@@ -81,7 +85,12 @@ class StepReporter(HookProvider):
 
     def _key(self, name: str, tool_use: Any) -> str:
         """Step id; parallel find_recipe calls each get their own row (keyed by the idea)."""
-        return step_key(self._idea(tool_use) or "dinner") if name == "find_recipe" else name
+        if name == "find_recipe":
+            return step_key(self._idea(tool_use) or "dinner")
+        if name == "use_recipe":  # one row per recipe id, matching the key use_recipe stores its label under
+            inp = tool_use.get("input") if isinstance(tool_use, dict) else None
+            return "use_" + (str(inp.get("id", ""))[:8] if isinstance(inp, dict) else "")
+        return name
 
     def _running_label(self, name: str, tool_use: Any) -> str:
         if name == "find_recipe":

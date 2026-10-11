@@ -31,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--domains", nargs="*", default=None, help="only these domains (default: the configured allowlist)")
     p.add_argument("--dry-run", action="store_true", help="crawl and parse, but send nothing and write no state")
     p.add_argument("--resume", action="store_true", help=f"skip URLs already done in {STATE_PATH.name}")
+    p.add_argument("--refresh", action="store_true",
+                   help="re-fetch and re-send URLs that are already indexed (ignores the resume skip), e.g. to add `course`")
     p.add_argument("--server", default=os.environ.get("SERVER_URL", "http://localhost:3000"),
                    help="server base URL (default $SERVER_URL or http://localhost:3000)")
     p.add_argument("--seed", type=int, default=0, help="shuffle seed for sampling URLs from the sitemaps")
@@ -40,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 async def run(args: argparse.Namespace, *, settings=None, limiter=None, state_path: Path = STATE_PATH) -> list[DomainStats]:
     settings = settings or get_settings()
     domains = args.domains or list(settings.recipe_domains)
-    state = StateFile(None if args.dry_run else state_path, resume=args.resume)
+    state = StateFile(None if args.dry_run else state_path, resume=args.resume or args.refresh, refresh=args.refresh)
     poster = None if args.dry_run else Poster(args.server, settings.agent_shared_secret)
     batcher = Batcher(poster, state)
     crawler = Crawler(settings, per_domain=args.per_domain, max_total=args.max_total, state=state, seed=args.seed,

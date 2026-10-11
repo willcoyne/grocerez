@@ -344,6 +344,10 @@ class IndexedRecipe(NoNul):
     ingredients: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]] = Field(
         min_length=1, max_length=40
     )
+    # The page's schema.org recipeCategory, lower-cased ("main course", "dinner", "side dish"); [] when not stated.
+    course: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]] = Field(
+        default_factory=list, max_length=8
+    )
 
 
 class RecipeIngestBody(NoNul):
@@ -356,6 +360,8 @@ class RecipeSearchBody(NoNul):
         default_factory=list, max_length=10
     )
     limit: int = Field(default=6, ge=1, le=10)
+    # Browse mode: safe main courses that use the expiring items, ranked by kitchen fit (the query is just "dinner").
+    browse: bool = False
 
 
 class SearchedRecipe(IndexedRecipe):
@@ -398,6 +404,7 @@ class RunState:
     draft_meals: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalized meals of the last check
     list_names: set[str] = field(default_factory=set)  # singular-normalized names already on the list
     used_urls: set[str] = field(default_factory=set)  # recipe pages already chosen this run
+    suggested: dict[str, Any] = field(default_factory=dict)  # short id -> ParsedRecipe from suggest_recipes
     pending_finds: int = 0  # find_recipe calls in flight (pricing waits until they finish)
     to_buy_ok: bool = False  # the "To buy" pseudo-meal passed the last safety check
     cabinet_names: set[str] = field(default_factory=set)  # normalized cabinet item names

@@ -58,12 +58,16 @@ async def probe_index(client: ServerClient, group_id: str) -> bool:
     return ok
 
 
-def load_planner_prompt(recipes_enabled: bool) -> str:
-    """One template, two variants: the find_recipe process only when web recipes are configured (TAVILY_API_KEY).
-    Without a key the model drafts all meals in one turn (no wasted find_recipe round trip)."""
+def load_planner_prompt(recipes_enabled: bool, suggest: bool = False) -> str:
+    """One template, three variants chosen in code:
+    - SUGGEST (the recipe index is available): suggest_recipes first, use_recipe per date, find_recipe only when
+      nothing fits, writing a meal yourself as the last resort;
+    - RECIPES (only TAVILY_API_KEY): the find_recipe(idea) process;
+    - OWN (neither): the model drafts all meals in one turn (no wasted find_recipe round trip)."""
     text = PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
-    drop, keep = ("OWN", "RECIPES") if recipes_enabled else ("RECIPES", "OWN")
-    text = re.sub(rf"<!-- {drop} -->.*?<!-- /{drop} -->\n?", "", text, flags=re.S)
+    keep = "SUGGEST" if suggest else "RECIPES" if recipes_enabled else "OWN"
+    for drop in {"SUGGEST", "RECIPES", "OWN"} - {keep}:
+        text = re.sub(rf"<!-- {drop} -->.*?<!-- /{drop} -->\n?", "", text, flags=re.S)
     return text.replace(f"<!-- {keep} -->\n", "").replace(f"<!-- /{keep} -->\n", "")
 
 
@@ -141,7 +145,7 @@ async def run(
         agent = Agent(
             model=model if model is not None else build_model(settings.agent_provider, settings),
             tools=tools,
-            system_prompt=load_planner_prompt(recipes.enabled or index_ok),
+            system_prompt=load_planner_prompt(recipes.enabled or index_ok, suggest=index_ok),
             callback_handler=None,
             hooks=[Budget(state, settings.agent_max_tool_calls), StepReporter(sink, state)],
         )
