@@ -25,6 +25,8 @@ from .schemas import (
     PlanDraft,
     PlanMissingItem,
     RunContext,
+    RecipeSearchBody,
+    RecipeSearchResponse,
     RunState,
     SafetyCheckBody,
     SafetyCheckResponse,
@@ -178,9 +180,14 @@ def build_tools(
     *,
     pricer: PriceService,
     recipes: RecipeService | None = None,
+    recipe_index: bool = False,
 ) -> list[Any]:
-    """Return the run's tool list. Everything closes over ctx/client/sink/state/pricer."""
+    """Return the run's tool list. Everything closes over ctx/client/sink/state/pricer.
+
+    find_recipe is offered only when it can work: the server's recipe index is available (`recipe_index`) or Tavily is
+    configured. Without either, the model never sees the tool (no wasted round trip)."""
     gid = ctx.group_id
+    steps_factory = recipes.steps_factory if recipes is not None else None
 
     async def _household() -> dict[str, Any] | None:
         if state.household is None:
@@ -516,29 +523,41 @@ def build_tools(
         return parsed.meals if len(parsed.meals) == len(payload) else None
 
     async def _find(idea: str, key: str, must_use: list[str], avoid: list[str]) -> str:
-        if recipes is None or not recipes.enabled:
-            state.done_labels[key] = "Writing this one myself"
-            return _j({"found": False, "note": NOTE})
         tried: set[str] = set()
-        terms = exclusion_terms(state.household)  # "dairy-free", "vegetarian": fewer candidates fail the safety check
-        core = must_use[0] if must_use else idea.split()[-1]
-        queries = [
-            " ".join([f"{idea} recipe" + (f" with {', '.join(must_use[:3])}" if must_use else ""), *terms]),
-            " ".join([f"{core} easy dinner recipe", *terms]),  # ONE simpler retry when nothing passes
-        ]
         winner = None
-        for attempt, query in enumerate(queries):
-            winner = await _round(query, must_use, avoid, tried)
-            if winner:
-                break
-            log.info("find_recipe %r: no safe recipe on attempt %d", idea, attempt + 1)
+        source = ""
+        # 1) our own recipe index (Akamai embeddings, allergen-prefiltered by the server), then the same safety check
+        if recipe_index:
+            cands = await _index_candidates(idea, must_use, avoid)
+            if cands:
+                winner = await _pick(cands, must_use, tried, "index")
+                if winner:
+                    source = "index"
+                else:
+                    log.info("find_recipe %r: no safe recipe in the %d index results", idea, len(cands))
+        # 2) fallback: live web search (Tavily), unchanged
+        if winner is None and recipes is not None and recipes.enabled:
+            terms = exclusion_terms(state.household)  # "dairy-free", "vegetarian": fewer candidates fail safety
+            core = must_use[0] if must_use else idea.split()[-1]
+            queries = [
+                " ".join([f"{idea} recipe" + (f" with {', '.join(must_use[:3])}" if must_use else ""), *terms]),
+                " ".join([f"{core} easy dinner recipe", *terms]),  # ONE simpler retry when nothing passes
+            ]
+            for attempt, query in enumerate(queries):
+                winner = await _round(query, must_use, avoid, tried)
+                if winner:
+                    source = "tavily"
+                    break
+                log.info("find_recipe %r: no safe recipe on attempt %d", idea, attempt + 1)
         if winner is None:
-            state.done_labels[key] = "No safe recipe found, writing it myself"
+            state.done_labels[key] = ("No safe recipe found, writing it myself" if (recipe_index or (recipes and recipes.enabled))
+                                      else "Writing this one myself")
             return _j({"found": False, "note": NOTE})
         meal, rec, res = winner
+        log.info("find_recipe %r: %s hit %s", idea, source, rec.url)
         # Real cooking guidance in the model's own words (outline = first ~10 words of each source step, never the
         # full text); re-checked because apply checks steps. Falls back to the generic steps on any problem.
-        steps = await write_steps(recipes.steps_factory, rec, meal["ingredients"])
+        steps = await write_steps(steps_factory, rec, meal["ingredients"])
         if steps:
             cand = normalize_meal({**meal, "steps": steps})
             chk = await _batch(safety_payload([cand], to_buy=False))
@@ -555,12 +574,46 @@ def build_tools(
         return _j({"found": True, "title": meal["title"], "site": rec.site, "uses": meal["uses"][:8],
                    "missing": meal["missing"]})
 
+    async def _index_candidates(idea: str, must_use: list[str], avoid: list[str]) -> list[ParsedRecipe] | None:
+        """Top matches from the server's recipe index, or None when it is unavailable / errors (-> Tavily fallback)."""
+        try:
+            body = RecipeSearchBody(query=idea[:200], mustUse=must_use[:10], limit=6)
+        except ValidationError:
+            return None
+        res = await client.post("recipe search", f"/groups/{gid}/agent/recipes/search", body.model_dump())
+        if not res.ok:
+            log.info("recipe index error: %s", res.error)
+            return None
+        try:
+            parsed = RecipeSearchResponse.model_validate(res.data)
+        except ValidationError:
+            log.info("recipe index returned an unexpected shape")
+            return None
+        if not parsed.available:
+            log.info("recipe index not available")
+            return None
+        bad = {a.lower() for a in avoid}
+        out = []
+        for r in parsed.recipes:
+            if bad and any(b in g.lower() for g in r.ingredients for b in bad):
+                log.info("recipe candidate rejected: %s: has an avoided ingredient", r.url)
+                continue
+            out.append(ParsedRecipe(
+                url=r.url, site=r.site, title=r.title, image=r.imageUrl, minutes=r.minutes or 30,
+                servings=r.servings or 4, lines=r.ingredientLines, step_count=0, ingredients=r.ingredients[:25],
+                outline=[], minutes_src=r.minutes, servings_src=r.servings))  # no instructions are stored in the index
+        return out
+
     async def _round(query: str, must_use: list[str], avoid: list[str], tried: set[str]):
-        """One search + parallel fetch + ranked batch safety check. Returns (meal, recipe, result) or None."""
+        """Tavily: one search + parallel fetch + ranked batch safety check. Returns (meal, recipe, result) or None."""
         cands, rejects = await recipes.candidates(query, avoid, state.used_urls | tried)
         for r in rejects:
             log.info("recipe candidate rejected: %s", r)
-        cands = [c for c in cands if _clip(c.title, 120) not in state.draft_meals]
+        return await _pick(cands, must_use, tried, "tavily")
+
+    async def _pick(cands: list[ParsedRecipe], must_use: list[str], tried: set[str], origin: str):
+        """Rank candidates, run ONE batched safety check, return the first passing (meal, recipe, result) or None."""
+        cands = [c for c in cands if _clip(c.title, 120) not in state.draft_meals and c.url not in state.used_urls]
         tried.update(c.url for c in cands)
         ranked = sorted(enumerate(cands), key=lambda t: (-_score(t[1], must_use), t[0]))
         meals = [_meal_from(c) for _, c in ranked]
@@ -706,6 +759,6 @@ def build_tools(
         return await _reject("error: couldn't submit the plan (server unavailable).")
 
     tools = [get_household, get_cabinet, get_shopping_list, get_wants, check_meal_safety, revise_meal, propose_plan]
-    if recipes is not None and recipes.enabled:  # without a Tavily key the model never sees find_recipe
+    if recipe_index or (recipes is not None and recipes.enabled):
         tools.insert(4, find_recipe)
     return tools

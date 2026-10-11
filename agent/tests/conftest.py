@@ -58,6 +58,16 @@ def safety_ok(request: httpx.Request) -> httpx.Response:
          "unknown": [i for i in m["ingredients"] if i == "za'atar"]} for m in meals]})
 
 
+@pytest.fixture(autouse=True)
+def _fresh_index_probe():
+    """The recipe-index availability probe is cached per process; every test starts without it."""
+    from app import runner
+
+    runner._INDEX_PROBE.clear()
+    yield
+    runner._INDEX_PROBE.clear()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(_env_file=None, agent_shared_secret=SECRET, akamai_inference_key="k")

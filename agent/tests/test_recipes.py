@@ -21,7 +21,7 @@ from app.recipes import (
 )
 from app.schemas import PlanMeal, PlanSource
 from app.tools import build_tools
-from tests.conftest import G, safety_ok
+from tests.conftest import G, GROUP_ID, TOKEN, safety_ok
 
 TAVILY = "https://api.tavily.com/search"
 ALLOWED = ["allrecipes.com", "seriouseats.com"]
@@ -793,6 +793,181 @@ async def test_check_meal_safety_does_not_redraft_when_three_cited_meals_are_sto
     out = json.loads(await t["check_meal_safety"]([{"title": "Mine", "ingredients": ["Eggs"], "steps": ["Fry."]}]))
     assert out["all_pass"] is True and "propose_plan" in out["note"]
     assert not route.called and "Mine" not in state.draft_meals
+
+
+# ─── index-first find_recipe (spec section 12) ───────────────────────────────
+
+SEARCH = f"{G}/agent/recipes/search"
+
+
+def indexed(title="Lemon Garlic Chicken", site="Serious Eats", lines=None, ingredients=None, **kw):
+    return {"id": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", "url": f"https://www.seriouseats.com/{title.lower().replace(' ', '-')}",
+            "site": site, "title": title, "imageUrl": "https://cdn.test/i.jpg", "minutes": 35, "servings": 4,
+            "ingredientLines": lines or ["1 lb boneless chicken breast", "3 cloves garlic, minced", "2 lemons"],
+            "ingredients": ingredients or ["Chicken Breast", "Garlic", "Lemons"], "distance": 0.2, "uses": ["Chicken Breast"], **kw}
+
+
+def index_tools(ctx, client, sink, state, settings, make_pricer, service=None, steps=STEPS_JSON):
+    state.cabinet_names = {"chicken breast", "garlic", "rice"}
+    return {t.tool_name: t for t in build_tools(ctx, client, sink, state, settings, pricer=make_pricer(),
+                                                recipes=service or mk_service(settings, steps), recipe_index=True)}
+
+
+@respx.mock
+async def test_index_hit_is_used_without_touching_tavily(ctx, client, sink, state, tavily_settings, make_pricer, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="agent")
+    search = respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [indexed()]}))
+    tavily = respx.post(TAVILY).mock(return_value=httpx.Response(500))
+    safety = respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    prompts = []
+
+    from tests.conftest import FakePriceAgent
+
+    class Spy(FakePriceAgent):
+        async def invoke_async(self, prompt):
+            prompts.append(prompt)
+            return await super().invoke_async(prompt)
+
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer,
+                    service=RecipeService(tavily_settings, steps_agent_factory=lambda: Spy([STEPS_JSON])))
+    out = json.loads(await t["find_recipe"]("lemon chicken", must_use=["Chicken Breast", "Spinach"]))
+    req = search.calls.last.request
+    assert req.headers["authorization"] == f"Bearer {TOKEN}"
+    assert json.loads(req.content) == {"query": "lemon chicken", "mustUse": ["Chicken Breast", "Spinach"], "limit": 6}
+    assert not tavily.called
+    assert set(out) == {"found", "title", "site", "uses", "missing"} and out["missing"] == ["Lemons"]
+    first = json.loads(safety.calls[0].request.content)["meals"][0]
+    assert first["ingredientLines"][0] == "1 lb boneless chicken breast" and first["steps"]  # lines + steps are checked
+    meal = state.draft_meals["Lemon Garlic Chicken"]
+    assert meal["source"]["site"] == "Serious Eats" and meal["minutes"] == 35 and meal["servings"] == 4
+    assert json.loads(prompts[0])["outline"] == []  # the index stores no instructions: steps come from title + ingredients
+    assert meal["steps"][0].startswith("Sear the chicken")
+    assert state.done_labels[step_key("lemon chicken")] == "Found: Lemon Garlic Chicken (Serious Eats)"
+    assert "find_recipe 'lemon chicken': index hit" in caplog.text
+
+
+def tavily_fallback_world(safety=safety_ok):
+    mock_search("https://www.allrecipes.com/lemon-chicken")
+    mock_page("https://www.allrecipes.com/lemon-chicken", recipe_ld("Web Lemon Chicken", [
+        "1 lb chicken breast", "3 cloves garlic", "2 lemons"], site="Allrecipes"))
+    return respx.post(f"{G}/agent/safety-check").mock(side_effect=safety)
+
+
+@respx.mock
+async def test_index_unavailable_falls_back_to_tavily(ctx, client, sink, state, tavily_settings, make_pricer, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="agent")
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": False, "recipes": []}))
+    tavily_fallback_world()
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    out = json.loads(await t["find_recipe"]("lemon chicken"))
+    assert out["found"] is True and out["title"] == "Web Lemon Chicken"
+    assert "tavily hit" in caplog.text and "recipe index not available" in caplog.text
+
+
+@respx.mock
+async def test_index_results_all_unsafe_fall_back_to_tavily(ctx, client, sink, state, tavily_settings, make_pricer):
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [
+        indexed("Peanut Chicken"), indexed("Peanut Noodles", lines=["1 cup peanut butter"], ingredients=["Peanut Butter"])]}))
+
+    def safety(request):
+        meals = json.loads(request.content)["meals"]
+        return httpx.Response(200, json={"meals": [
+            {"title": m["title"], "unknown": [], "passes": "Peanut" not in m["title"],
+             "problems": [{"ingredient": "Peanut Butter", "reason": "contains peanuts", "members": ["Carson"]}]
+             if "Peanut" in m["title"] else []} for m in meals]})
+
+    tavily_fallback_world(safety)
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    out = json.loads(await t["find_recipe"]("chicken"))
+    assert out["found"] is True and out["title"] == "Web Lemon Chicken"
+
+
+@pytest.mark.parametrize("reply", [
+    httpx.Response(500), httpx.Response(404), httpx.Response(200, json={"nonsense": True}),
+    httpx.Response(200, content=b"not json"),
+])
+@respx.mock
+async def test_index_error_falls_back_to_tavily(ctx, client, sink, state, tavily_settings, make_pricer, reply):
+    respx.post(SEARCH).mock(return_value=reply)
+    tavily_fallback_world()
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    assert json.loads(await t["find_recipe"]("lemon chicken"))["title"] == "Web Lemon Chicken"
+
+
+@respx.mock
+async def test_index_only_mode_without_tavily_key_falls_back_to_model_written_meal(
+    ctx, client, sink, state, settings, make_pricer
+):
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": []}))
+    t = index_tools(ctx, client, sink, state, settings, make_pricer)  # find_recipe registered because the index exists
+    assert "find_recipe" in t
+    out = json.loads(await t["find_recipe"]("lemon chicken"))
+    assert out["found"] is False and "Write the meal yourself" in out["note"]
+
+
+@respx.mock
+async def test_index_hit_already_used_this_run_is_not_picked_twice(ctx, client, sink, state, tavily_settings, make_pricer):
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": [
+        indexed("Lemon Garlic Chicken"), indexed("Garlic Rice Bowl", lines=["1 cup rice", "3 cloves garlic", "1 lime"],
+                                                 ingredients=["Rice", "Garlic", "Lime"])]}))
+    respx.post(f"{G}/agent/safety-check").mock(side_effect=safety_ok)
+    t = index_tools(ctx, client, sink, state, tavily_settings, make_pricer)
+    first = json.loads(await t["find_recipe"]("chicken dinner"))
+    second = json.loads(await t["find_recipe"]("another dinner"))
+    assert first["title"] == "Lemon Garlic Chicken" and second["title"] == "Garlic Rice Bowl"
+
+
+@respx.mock
+async def test_index_probe_is_cached_and_decides_tool_registration(client):
+    from app.runner import probe_index
+
+    route = respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": []}))
+    assert await probe_index(client, GROUP_ID) is True
+    assert await probe_index(client, GROUP_ID) is True
+    assert route.call_count == 1  # cached for 30 s
+    from app import runner
+
+    runner._INDEX_PROBE.clear()
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": False, "recipes": []}))
+    assert await probe_index(client, GROUP_ID) is False
+    runner._INDEX_PROBE.clear()
+    respx.post(SEARCH).mock(return_value=httpx.Response(503))
+    assert await probe_index(client, GROUP_ID) is False
+
+
+@respx.mock
+async def test_runner_offers_find_recipe_when_only_the_index_exists(ctx, settings, monkeypatch):
+    """No Tavily key, but the index is up: the tool is registered and the recipe prompt is used."""
+    from app import runner as runner_mod
+
+    seen = {}
+
+    class Scripted:
+        def __init__(self, model=None, tools=None, system_prompt=None, **kw):
+            seen["tools"] = {t.tool_name for t in tools}
+            seen["prompt"] = system_prompt
+
+        def cancel(self):
+            pass
+
+        async def invoke_async(self, prompt):
+            return object()
+
+    monkeypatch.setattr(runner_mod, "Agent", Scripted)
+    from tests.conftest import EVENTS
+
+    respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": True, "recipes": []}))
+    await runner_mod.run(ctx, settings, model=object(), retry_delay_s=0)
+    assert "find_recipe" in seen["tools"] and "find_recipe(idea" in seen["prompt"]
+    runner_mod._INDEX_PROBE.clear()
+    respx.post(SEARCH).mock(return_value=httpx.Response(200, json={"available": False, "recipes": []}))
+    await runner_mod.run(ctx, settings, model=object(), retry_delay_s=0)
+    assert "find_recipe" not in seen["tools"] and "find_recipe" not in seen["prompt"]
 
 
 def test_plan_source_contract_requires_https():

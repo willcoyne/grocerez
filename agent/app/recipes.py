@@ -218,6 +218,8 @@ class ParsedRecipe:
     step_count: int
     ingredients: list[str] = field(default_factory=list)  # cleaned generic names (<= 25)
     outline: list[str] = field(default_factory=list)  # first ~10 words of each source step (never the full text)
+    minutes_src: int | None = None  # as published (None when the page gives none; `minutes` then defaults to 30)
+    servings_src: int | None = None
 
 
 _ROUNDUP = re.compile(r"^\s*\d+\s|\b(?:recipes|ideas|roundup|collection)\s*$|\b\d+\s+(?:best|easy|healthy|quick)\b", re.I)
@@ -388,6 +390,8 @@ def parse_recipe_html(page: str, url: str) -> ParsedRecipe | None:
             step_count=count_steps(node.get("recipeInstructions")),
             ingredients=generic[:25],
             outline=extract_outline(node.get("recipeInstructions")),
+            minutes_src=max(1, min(1440, total)) if total else None,
+            servings_src=max(1, min(50, parse_yield(node.get("recipeYield")) or 0)) if parse_yield(node.get("recipeYield")) else None,
         )
     return None
 
@@ -443,42 +447,49 @@ class RecipeService:
                 urls.append(u)
         return urls
 
-    async def fetch_html_ex(self, url: str) -> tuple[str | None, str]:
+    async def fetch_raw(
+        self, url: str, *, max_bytes: int = MAX_BYTES, html_only: bool = True, accept: str = "text/html"
+    ) -> tuple[bytes | None, str, str]:
         """GET with manual redirects (each hop re-checked against the allowlist), size cap and timeout.
-        Returns (html, "") or (None, reason) where reason is e.g. "http 403", "oversize", "not allowlisted"."""
+        Returns (body, "", encoding) or (None, reason, "") where reason is e.g. "http 403", "oversize"."""
 
-        async def go() -> tuple[str | None, str]:
+        async def go() -> tuple[bytes | None, str, str]:
             current = url
             for _ in range(MAX_REDIRECTS + 1):
                 if not url_allowed(current, self._allowed):
                     log.warning("blocked fetch of a non-allowlisted url")
-                    return None, "not allowlisted"
-                async with self._http.stream("GET", current, headers={"User-Agent": UA, "Accept": "text/html"},
+                    return None, "not allowlisted", ""
+                async with self._http.stream("GET", current, headers={"User-Agent": UA, "Accept": accept},
                                              timeout=FETCH_TIMEOUT_S) as resp:
                     if resp.status_code in (301, 302, 303, 307, 308):
                         loc = resp.headers.get("location")
                         if not loc:
-                            return None, "redirect without location"
+                            return None, "redirect without location", ""
                         current = urljoin(current, loc)
                         continue
                     if resp.status_code != 200:
-                        return None, f"http {resp.status_code}"
-                    if "html" not in resp.headers.get("content-type", "html").lower():
-                        return None, "not html"
+                        return None, f"http {resp.status_code}", ""
+                    if html_only and "html" not in resp.headers.get("content-type", "html").lower():
+                        return None, "not html", ""
                     buf = bytearray()
                     async for chunk in resp.aiter_bytes():
                         buf.extend(chunk)
-                        if len(buf) > MAX_BYTES:
+                        if len(buf) > max_bytes:
                             log.warning("page over the size cap")
-                            return None, "oversize"
-                    return buf.decode(resp.encoding or "utf-8", errors="replace"), ""
-            return None, "too many redirects"
+                            return None, "oversize", ""
+                    return bytes(buf), "", resp.encoding or "utf-8"
+            return None, "too many redirects", ""
 
         try:
             return await asyncio.wait_for(go(), FETCH_DEADLINE_S)
         except Exception as e:
             log.warning("fetch failed: %s", type(e).__name__)
-            return None, f"fetch failed ({type(e).__name__})"
+            return None, f"fetch failed ({type(e).__name__})", ""
+
+    async def fetch_html_ex(self, url: str) -> tuple[str | None, str]:
+        """Page HTML as text, or (None, reason)."""
+        body, reason, enc = await self.fetch_raw(url)
+        return (body.decode(enc, errors="replace"), "") if body is not None else (None, reason)
 
     async def fetch_html(self, url: str) -> str | None:
         return (await self.fetch_html_ex(url))[0]
