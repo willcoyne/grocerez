@@ -35,6 +35,13 @@
 
 ## Done when
 
-- [ ] Phone A creates a group and invites B's email; B signs in, sees the invite, accepts; A sees B in the member list without refreshing
-- [ ] Signing in with an account that wasn't invited shows no invite
-- [ ] Revoking a pending invite removes it from B's invites screen
+- [ ] Phone A creates a group and invites B's email; B signs in, sees the invite, accepts; A sees B in the member list without refreshing — **needs device check** (socket `group:changed` → invalidation is unit-tested)
+- [ ] Signing in with an account that wasn't invited shows no invite — server-side rule; the app shows whatever `GET /me/invites` returns. **Needs device check**
+- [ ] Revoking a pending invite removes it from B's invites screen — `invites:changed` → refetch of `["me","invites"]` is unit-tested; **needs device check**
+
+## Status (2026-10-10)
+
+Built: NoGroup, Create, Invite sheet (`/invite`, Share message without codes), my invites (`/invites`, also `grocerez://invites`),
+invite banner on the tabs (refetch on foreground), header group switcher, Group tab (members, pending invites, rename/leave/delete),
+socket room join per active group. Jest: group switching + stale saved id fallback, 409 ALREADY_MEMBER message, accept → active group.
+Member allergen chips need a backend field (see DECISIONS "Needs backend change").

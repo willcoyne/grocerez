@@ -1,36 +1,36 @@
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
+import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
-// Small key/value store: SecureStore on device, localStorage on web. Failures read as "nothing stored".
-
+/**
+ * Small key/value store: expo-secure-store on phones (Keychain / Keystore), localStorage on the web build
+ * (secure-store has no web implementation; the web build is only for demos).
+ */
 export const storageKeys = {
-  token: 'grocerez.session.token',
-  activeGroupId: 'grocerez.activeGroupId',
+  token: "grocerez.token",
+  user: "grocerez.user",
+  activeGroupId: "grocerez.activeGroupId",
+  notificationsAsked: "grocerez.notificationsAsked",
 } as const;
 
-export async function getItem(key: string): Promise<string | null> {
-  try {
-    if (Platform.OS === 'web') return globalThis.localStorage?.getItem(key) ?? null;
-    return (await SecureStore.getItemAsync(key)) ?? null;
-  } catch {
-    return null;
-  }
-}
+const web = Platform.OS === "web";
 
-export async function setItem(key: string, value: string): Promise<void> {
-  try {
-    if (Platform.OS === 'web') globalThis.localStorage?.setItem(key, value);
-    else await SecureStore.setItemAsync(key, value);
-  } catch {
-    // Not fatal: the session just won't survive a restart.
-  }
-}
-
-export async function deleteItem(key: string): Promise<void> {
-  try {
-    if (Platform.OS === 'web') globalThis.localStorage?.removeItem(key);
-    else await SecureStore.deleteItemAsync(key);
-  } catch {
-    // ignore
-  }
-}
+export const storage = {
+  async get(key: string): Promise<string | null> {
+    if (web) return globalThis.localStorage?.getItem(key) ?? null;
+    return SecureStore.getItemAsync(key);
+  },
+  async set(key: string, value: string): Promise<void> {
+    if (web) {
+      globalThis.localStorage?.setItem(key, value);
+      return;
+    }
+    await SecureStore.setItemAsync(key, value);
+  },
+  async remove(key: string): Promise<void> {
+    if (web) {
+      globalThis.localStorage?.removeItem(key);
+      return;
+    }
+    await SecureStore.deleteItemAsync(key);
+  },
+};

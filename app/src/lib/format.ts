@@ -1,40 +1,53 @@
-import type { Member } from '@contracts/models';
+import type { CabinetItem } from "@contracts/cabinet";
+import { differenceInCalendarDays, format, formatDistanceToNowStrict, parseISO } from "date-fns";
 
-/** "tree_nuts" → "Tree nuts", "dairy" → "Dairy". */
-export function humanize(value: string): string {
-  const s = value.replace(/_/g, ' ');
+/** "tree_nuts" → "Tree nuts", "one_time" → "One time". */
+export function labelize(value: string): string {
+  const s = value.replace(/_/g, " ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Lowercase label for allergens inside sentences: "tree_nuts" → "tree nuts". */
-export function allergenLabel(value: string): string {
-  return value.replace(/_/g, ' ');
+/** "2h ago" style relative time for invites, check-offs, etc. */
+export function timeAgo(iso: string, now = new Date()): string {
+  const d = parseISO(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  if (Math.abs(now.getTime() - d.getTime()) < 60_000) return "just now";
+  return `${formatDistanceToNowStrict(d)} ago`;
 }
 
-/** "you" for the current user, otherwise the member's display name. */
-export function nameFor(userId: string, meId: string | undefined, members: Pick<Member, 'id' | 'displayName'>[]): string {
-  if (userId === meId) return 'you';
-  return members.find((m) => m.id === userId)?.displayName ?? 'someone';
+/** 349 → "$3.49" */
+export function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
-/** Joins user IDs as "you, Carson, Maya". */
-export function namesFor(userIds: string[], meId: string | undefined, members: Pick<Member, 'id' | 'displayName'>[]): string {
-  return userIds.map((id) => nameFor(id, meId, members)).join(', ');
+/** 3400, 4100 → "$34–$41" (whole dollars for totals). */
+export function formatCentsRange(low: number, high: number, wholeDollars = false): string {
+  const f = (c: number) => (wholeDollars ? `$${Math.round(c / 100)}` : formatCents(c));
+  return low === high ? f(low) : `${f(low)}–${f(high)}`;
 }
 
-/** "1 item" / "3 items". */
-export function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
+/** Parse a calendar date "YYYY-MM-DD" as a local date (not UTC midnight). */
+export function parseCalendarDate(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
-/** Stable small hash for avatar colors. */
-export function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
+export function toCalendarDate(date: Date): string {
+  return format(date, "yyyy-MM-dd");
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export function isEmail(value: string): boolean {
-  return EMAIL_RE.test(value.trim());
+/** Days until a "YYYY-MM-DD" date (negative = expired). Display only; the server decides what "expiring" means. */
+export function daysUntil(ymd: string, now = new Date()): number {
+  return differenceInCalendarDays(parseCalendarDate(ymd), now);
+}
+
+/** "Oct 14" */
+export function shortDate(ymd: string): string {
+  return format(parseCalendarDate(ymd), "MMM d");
+}
+
+/** "Expires Oct 14 (estimated)" / "(you set this)". */
+export function expirationText(row: Pick<CabinetItem, "expiresAt" | "expirationSource">): string {
+  if (!row.expiresAt) return "No expiration date";
+  return `Expires ${shortDate(row.expiresAt)} (${row.expirationSource === "manual" ? "you set this" : "estimated"})`;
 }

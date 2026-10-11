@@ -1,19 +1,39 @@
-import { QueryClient } from '@tanstack/react-query';
+import NetInfo from "@react-native-community/netinfo";
+import { focusManager, onlineManager, QueryClient } from "@tanstack/react-query";
+import { AppState, Platform } from "react-native";
 
-import { ApiError } from './client';
+import { ApiError, isRetryable } from "./client";
 
-// Client errors (4xx) won't succeed on retry; network and server errors might.
-const retryable = (error: unknown) => !(error instanceof ApiError && error.status >= 400 && error.status < 500);
-
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: (count, error) => count < 2 && retryable(error),
+/**
+ * Server-state cache. staleTime 30s, queries retry twice, mutations retry 3 times so check-offs
+ * survive bad store signal (mutations pause while offline and resume when the phone is back online).
+ */
+export function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        retry: (count, error) => count < 2 && isRetryable(error),
+      },
+      mutations: {
+        retry: (count, error) => count < 3 && isRetryable(error),
+      },
     },
-    mutations: {
-      // Check-offs need to survive bad signal inside the store.
-      retry: (count, error) => count < 3 && retryable(error),
-    },
-  },
-});
+  });
+}
+
+/** Wire TanStack's online/focus managers to React Native (NetInfo + AppState). Call once at startup. */
+export function setupReactQueryNative() {
+  if (Platform.OS === "web") return () => {};
+  onlineManager.setEventListener((setOnline) =>
+    NetInfo.addEventListener((state) => {
+      setOnline(state.isConnected !== false);
+    }),
+  );
+  const sub = AppState.addEventListener("change", (status) => {
+    focusManager.setFocused(status === "active");
+  });
+  return () => sub.remove();
+}
+
+export const isNotFound = (e: unknown) => e instanceof ApiError && e.status === 404;

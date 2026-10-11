@@ -2,25 +2,14 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    "types": ["jest"],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@/assets/*": [
-        "./assets/*"
-      ],
-      "@contracts/*": [
-        "./src/contracts/*"
-      ]
-    },
-    "types": [
-      "jest"
-    ]
+      "@/*": ["./src/*"],
+      "@/assets/*": ["./assets/*"],
+      "@contracts/*": ["../server/src/contracts/*"],
+      "zod": ["./node_modules/zod"]
+    }
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "exclude": ["node_modules", "dist"]
 }

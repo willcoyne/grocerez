@@ -28,5 +28,11 @@
 
 ## Done when
 
-- [x] Typing "cherios" offers Cheerios; picking it adds it to my staples — verified in mock mode (`me` + `loop.e2e` tests)
-- [x] Adding a staple that's not in the cabinet makes it show up on the List tab for everyone — verified in mock mode (engine tests); live update across phones needs the backend
+- [x] Typing "cherios" offers Cheerios; picking it adds it to my staples (Jest: search → "Did you mean Cheerios?" → alias POST → picked item; against the server's `search_items()` **needs live check**)
+- [ ] Adding a staple that's not in the cabinet makes it show up on the List tab for everyone — app invalidates `shopping-list` after each write and listens to `shopping-list:changed`; **needs device check** with two phones
+
+## Status (2026-10-10)
+
+Built: `ItemPicker` (`src/components/ItemPicker.tsx`, 250 ms debounce, exact/suggested/none, category picker, "quick add many" mode),
+Me tab (profile with ZIP + avatar upload, My list with Staples/This week, edit/delete, In cabinet/On list tags, Dietary chips),
+Group tab "Everyone's wants". Optimistic add/delete with rollback (Jest-tested rollback).

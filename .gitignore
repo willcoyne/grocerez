@@ -1,0 +1,3 @@
+# Agent worktrees (local only)
+.claude/worktrees/
+.DS_Store

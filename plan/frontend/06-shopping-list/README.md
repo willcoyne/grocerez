@@ -25,7 +25,12 @@
 
 ## Done when
 
-- [ ] Two phones in the same group see each other's check-offs within a second
-- [ ] Airplane mode → check an item → back online → the check-off syncs
-- [ ] Finish trip empties the checked rows and they appear in the cabinet with expiration pills
-  — rows move to the cabinet as In stock (verified in mock, `loop.e2e`); expiration pills are out of the MVP (DESIGN.md §10). The two-phone and airplane-mode checks need the backend and a device.
+- [ ] Two phones in the same group see each other's check-offs within a second — socket `shopping-list:changed` → invalidate (unit-tested), 5 s polling when the socket is down; **needs device check**
+- [ ] Airplane mode → check an item → back online → the check-off syncs — NetInfo-driven `onlineManager` pauses the mutation and resumes it; optimistic toggle + rollback-on-failure Jest-tested; **needs device check**
+- [ ] Finish trip empties the checked rows and they appear in the cabinet with expiration pills — Jest: button disabled while in flight, success toast, list/cabinet invalidated, expiration-check opened; **needs live check**
+
+## Status (2026-10-10)
+
+List tab: aisle-ordered sections (server order), checked rows at the bottom struck through with "✓ by …", `wantedBy`, allergen badges
+("⚠ Milk — User 3"), syncing dot per row (`useMutationState`), pull-to-refresh, "+" manual add via ItemPicker, manual rows show
+"added by …" and can be deleted, scan icon per row → scanner `match-list-item`, sticky Finish trip, AI price chip → Prices modal.

@@ -1,57 +1,132 @@
-import { config, isMockApi } from '@/config';
+import type { ErrorBody } from "@contracts/common";
 
-import { ApiError } from './errors';
-import { mockRequest } from './mock/handler';
+import { config } from "@/config";
 
-export { ApiError };
+/** Thrown for every non-2xx response (and for network failures, with status 0). */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details?: unknown;
 
-type AuthHandlers = {
-  getToken: () => string | null;
-  onUnauthorized: () => void;
-};
-
-let auth: AuthHandlers = { getToken: () => null, onUnauthorized: () => {} };
-
-/** Called by AuthProvider so the client can read the JWT and clear the session on 401. */
-export function setAuthHandlers(handlers: AuthHandlers) {
-  auth = handlers;
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
-export async function api<T>(path: string, opts: { method?: Method; body?: unknown } = {}): Promise<T> {
-  if (isMockApi()) {
-    try {
-      return (await mockRequest(opts.method ?? 'GET', path, opts.body, auth.getToken())) as T;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) auth.onUnauthorized();
-      throw e;
-    }
-  }
+export interface ApiOptions {
+  method?: Method;
+  body?: unknown;
+  query?: Record<string, string | number | boolean | undefined | null>;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
 
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
-  const token = auth.getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+/**
+ * The session bridge: AuthContext registers how to read the current JWT and what to do on a 401.
+ * Keeping it here (instead of passing the token to every hook) keeps screens free of auth plumbing.
+ */
+const session: { getToken: () => string | null; onUnauthorized: () => void } = {
+  getToken: () => null,
+  onUnauthorized: () => {},
+};
+
+export function configureApiSession(handlers: Partial<typeof session>) {
+  Object.assign(session, handlers);
+}
+
+function buildUrl(path: string, query?: ApiOptions["query"]) {
+  const url = `${config.apiUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  if (!query) return url;
+  const params = Object.entries(query)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  return params.length ? `${url}?${params.join("&")}` : url;
+}
+
+/**
+ * All server calls go through here: base URL, Bearer token, JSON body, and error parsing.
+ * `{error:{code,message}}` bodies become a thrown ApiError. A 401 clears the session.
+ */
+export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
+  const { method = "GET", body, query, headers = {}, signal } = opts;
+  const token = session.getToken();
+  const finalHeaders: Record<string, string> = { Accept: "application/json", ...headers };
+  if (body !== undefined) finalHeaders["Content-Type"] = "application/json";
+  if (token) finalHeaders.Authorization = `Bearer ${token}`;
 
   let res: Response;
   try {
-    res = await fetch(`${config.apiUrl}${path}`, {
-      method: opts.method ?? 'GET',
-      headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    res = await fetch(buildUrl(path, query), {
+      method,
+      headers: finalHeaders,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', "Can't reach the server. Check your connection.");
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
   }
 
-  if (res.status === 401) auth.onUnauthorized();
   if (res.status === 204) return undefined as T;
 
-  const data: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const err = (data as { error?: { code?: string; message?: string } } | null)?.error;
-    throw new ApiError(res.status, err?.code ?? 'UNKNOWN', err?.message ?? `Request failed (${res.status})`);
+  const text = await res.text();
+  let json: unknown = undefined;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
   }
-  return data as T;
+
+  if (!res.ok) {
+    const err = (json as Partial<ErrorBody> | undefined)?.error;
+    const apiError = new ApiError(
+      res.status,
+      err?.code ?? `HTTP_${res.status}`,
+      err?.message ?? `Request failed (${res.status})`,
+      err?.details,
+    );
+    if (res.status === 401 && token) session.onUnauthorized();
+    throw apiError;
+  }
+  return json as T;
+}
+
+/** Errors worth retrying: network failures and 5xx except "not configured" (retrying won't help). */
+export function isRetryable(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  if (error.status === 0) return true;
+  if (error.code === "NOT_CONFIGURED") return false;
+  return error.status >= 500 || error.status === 408;
+}
+
+/** A short, human message for an error, used by toasts and error states. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case "RATE_LIMITED":
+        return "Too many requests. Please wait a bit and try again.";
+      case "NOT_CONFIGURED":
+        return "This feature isn't set up on the server yet.";
+      case "AI_UNAVAILABLE":
+      case "AI_BAD_OUTPUT":
+        return "The AI helper is unavailable right now. The rest of the app keeps working.";
+      case "PRODUCT_ITEM_MISMATCH":
+        return "That product doesn't match this list item.";
+      case "AI_REFUSED":
+        return "The AI helper couldn't answer that request.";
+      default:
+        if (error.status === 429) return "Too many requests. Please wait a bit and try again.";
+        return error.message;
+    }
+  }
+  if (error instanceof Error) return error.message;
+  return "Something went wrong.";
 }

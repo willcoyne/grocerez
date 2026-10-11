@@ -23,6 +23,6 @@
 
 ## Done when
 
-- [ ] The production app role can't drop tables
-- [ ] A grep for `$queryRawUnsafe` returns nothing
-- [ ] A restore from backup has been tested once
+- [x] The production app role can't drop tables *(verified on the local container with `server/prisma/sql/app-role.sql`. DROP/ALTER/TRUNCATE/CREATE/CREATE EXTENSION and reading `_prisma_migrations` are all denied. The same script still has to be run against production.)*
+- [x] A grep for `$queryRawUnsafe` returns nothing *(also `$executeRawUnsafe`)*
+- [ ] A restore from backup has been tested once *(local only so far: `pg_dump -Fc` restored into a scratch database with identical row counts, 11 migrations, and working `normalize_item_name()` / `search_items()`. Production backups are **not** turned on and no production restore has been tested, because no production database exists yet. Do this at deploy time (backend/12).)*

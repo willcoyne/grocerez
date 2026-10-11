@@ -29,5 +29,5 @@
 
 ## Done when
 
-- [ ] Entering "cherios" leads to "Did you mean Cheerios?", and confirming it stores an alias
-- [ ] Adding or removing a preference updates the group's shopping list right away
+- [x] Entering "cherios" leads to "Did you mean Cheerios?", and confirming it stores an alias
+- [x] Adding or removing a preference updates the group's shopping list right away

@@ -1,79 +1,83 @@
-import type { Group } from '@contracts/models';
-import { useQuery } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { Group } from "@contracts/groups";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { api } from '@/api/client';
-import { qk } from '@/api/keys';
+import { useGroups } from "@/api/hooks/groups";
+import { useAuth } from "./AuthContext";
+import { storage, storageKeys } from "./storage";
 
-import { useAuth } from './AuthContext';
-import { getItem, setItem, storageKeys } from './storage';
-
-/**
- * useActiveGroup(): {
- *   groups: Group[] | undefined      // GET /groups (undefined while loading or signed out)
- *   groupsStatus: 'pending' | 'error' | 'success'
- *   refetchGroups(): void
- *   activeGroupId: string | null     // stored choice if still valid, otherwise the first group
- *   activeGroup: Group | null
- *   setActiveGroupId(id: string): void
- * }
- * useActiveGroupId(): string | null  — shorthand used by every group-scoped hook.
- */
-type ActiveGroupState = {
-  groups: Group[] | undefined;
-  groupsStatus: 'pending' | 'error' | 'success';
-  refetchGroups: () => void;
+export interface ActiveGroupValue {
+  /** null while loading or when the user has no group. */
   activeGroupId: string | null;
   activeGroup: Group | null;
+  groups: Group[];
+  groupsLoading: boolean;
+  groupsError: unknown;
+  refetchGroups: () => void;
   setActiveGroupId: (id: string) => void;
-};
+}
 
-const ActiveGroupContext = createContext<ActiveGroupState | null>(null);
+const ActiveGroupContext = createContext<ActiveGroupValue | null>(null);
 
-export function ActiveGroupProvider({ children }: { children: React.ReactNode }) {
-  const { token } = useAuth();
-  const [chosenId, setChosenId] = useState<string | null>(null);
+/**
+ * The household the screens show. Saved in secure storage. If the saved id is no longer one of
+ * my groups (left, removed, deleted), it falls back to the first group.
+ */
+export function ActiveGroupProvider({ children }: { children: ReactNode }) {
+  const { status, user } = useAuth();
+  const signedIn = status === "signedIn";
+  const groupsQuery = useGroups(signedIn);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
-  const groupsQuery = useQuery({
-    queryKey: qk.groups(),
-    queryFn: () => api<Group[]>('/groups'),
-    enabled: !!token,
-  });
-
-  // A stale choice (e.g. from a previous session) is harmless: it falls back to the first group below.
   useEffect(() => {
-    if (!token) return;
-    getItem(storageKeys.activeGroupId).then((id) => id && setChosenId((cur) => cur ?? id));
-  }, [token]);
+    if (!user) return;
+    let cancelled = false;
+    void storage.get(storageKeys.activeGroupId).then((id) => {
+      if (!cancelled) setSavedId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
+  const activeGroup = useMemo(
+    () => groups.find((g) => g.id === savedId) ?? groups[0] ?? null,
+    [groups, savedId],
+  );
 
   const setActiveGroupId = useCallback((id: string) => {
-    setChosenId(id);
-    void setItem(storageKeys.activeGroupId, id);
+    setSavedId(id);
+    void storage.set(storageKeys.activeGroupId, id);
   }, []);
 
-  const groups = groupsQuery.data;
-  const activeGroup = groups?.find((g) => g.id === chosenId) ?? groups?.[0] ?? null;
+  const { refetch } = groupsQuery;
+  const refetchGroups = useCallback(() => void refetch(), [refetch]);
 
-  const value = useMemo<ActiveGroupState>(
+  const value = useMemo<ActiveGroupValue>(
     () => ({
-      groups,
-      groupsStatus: groupsQuery.status,
-      refetchGroups: () => void groupsQuery.refetch(),
       activeGroupId: activeGroup?.id ?? null,
       activeGroup,
+      groups,
+      groupsLoading: signedIn && groupsQuery.isPending,
+      groupsError: groupsQuery.error,
+      refetchGroups,
       setActiveGroupId,
     }),
-    [groups, groupsQuery, activeGroup, setActiveGroupId],
+    [activeGroup, groups, signedIn, groupsQuery.isPending, groupsQuery.error, refetchGroups, setActiveGroupId],
   );
   return <ActiveGroupContext.Provider value={value}>{children}</ActiveGroupContext.Provider>;
 }
 
-export function useActiveGroup(): ActiveGroupState {
+export function useActiveGroup(): ActiveGroupValue {
   const ctx = useContext(ActiveGroupContext);
-  if (!ctx) throw new Error('useActiveGroup must be used inside ActiveGroupProvider');
+  if (!ctx) throw new Error("useActiveGroup must be used inside <ActiveGroupProvider>");
   return ctx;
 }
 
-export function useActiveGroupId(): string | null {
-  return useActiveGroup().activeGroupId;
+/** For screens that only render inside the tabs (a group always exists there). */
+export function useRequiredGroupId(): string {
+  const { activeGroupId } = useActiveGroup();
+  return activeGroupId ?? "";
 }
+
+export const ActiveGroupContextForTests = ActiveGroupContext;

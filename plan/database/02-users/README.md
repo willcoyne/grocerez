@@ -28,6 +28,6 @@
 
 ## Done when
 
-- [ ] Inserting a user with a duplicate `google_sub` fails
-- [ ] Deleting a user cascades their diets and allergens
-- [ ] Prisma Client exposes `user.allergens` and `user.diets`
+- [x] Inserting a user with a duplicate `google_sub` fails
+- [x] Deleting a user cascades their diets and allergens
+- [x] Prisma Client exposes `user.allergens` and `user.diets`

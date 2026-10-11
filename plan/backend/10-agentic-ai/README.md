@@ -45,6 +45,6 @@ Set math, allergens, and expiration stay deterministic.
 
 ## Done when
 
-- [ ] Recipes only use allowed ingredients for the group's combined diets and allergens, and favor expiring items
-- [ ] "Add missing to list" adds catalog items to the shopping list
+- [x] Recipes only use allowed ingredients for the group's combined diets and allergens, and favor expiring items
+- [x] "Add missing to list" adds catalog items to the shopping list
 - [ ] Price estimate for the demo list returns in under 30 seconds, and a second call is served from the cache

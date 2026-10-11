@@ -27,6 +27,6 @@
 
 ## Done when
 
-- [ ] `npm run db:up && npm run db:migrate` works on a fresh clone
-- [ ] `SELECT levenshtein('recieve','receive'), similarity('cheerio','cheerios');` returns `2` and a value above 0.5
-- [ ] Migrations are committed; `.env` is git-ignored
+- [x] `npm run db:up && npm run db:migrate` works on a fresh clone
+- [x] `SELECT levenshtein('recieve','receive'), similarity('cheerio','cheerios');` returns `2` and a value above 0.5
+- [x] Migrations are committed; `.env` is git-ignored

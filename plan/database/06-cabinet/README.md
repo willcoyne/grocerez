@@ -33,6 +33,6 @@
 
 ## Done when
 
-- [ ] Setting an item to `running_low` removes it from the "have" query
-- [ ] Deleting the row (ran out) also removes it from "have"
-- [ ] The "expiring in the next 3 days" query uses the index
+- [x] Setting an item to `running_low` removes it from the "have" query
+- [x] Deleting the row (ran out) also removes it from "have"
+- [x] The "expiring in the next 3 days" query uses the index

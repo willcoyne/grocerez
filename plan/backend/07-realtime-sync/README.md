@@ -22,5 +22,5 @@
 
 ## Done when
 
-- [ ] Checking an item on phone A updates phone B in under 1 second
-- [ ] A user who isn't in the group can't join its room
+- [x] Checking an item on phone A updates phone B in under 1 second
+- [x] A user who isn't in the group can't join its room

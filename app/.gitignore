@@ -42,5 +42,5 @@ example
 /ios
 /android
 
-# env (keep .env.example)
+# env (EXPO_PUBLIC_* only; see .env.example)
 .env

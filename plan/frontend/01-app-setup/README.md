@@ -35,7 +35,13 @@
 
 ## Done when
 
-- [ ] The app launches on a phone and shows `/api/health` OK from the laptop's server
-  — **needs device check** (and a running server; `server/` doesn't exist yet). Web export renders the health screen.
-- [ ] Teammates can run the app from a fresh clone using the instructions in `app/README.md`
-  — instructions written; **needs a teammate to try it**. Dev build not built yet (no CocoaPods / Android SDK on this machine).
+- [ ] The app launches on a phone and shows `/api/health` OK from the laptop's server — **needs device check**
+  (the sign-in screen's `HealthBadge` shows "Server OK · <url>")
+- [x] Teammates can run the app from a fresh clone using the instructions in `app/README.md`
+
+## Status (2026-10-10)
+
+Built in `app/` (Expo SDK 57). Verified without a phone: `npx tsc --noEmit`, `npx expo lint`, Jest (API client: base URL, Bearer token,
+ApiError parsing, 401 → sign out, retry rules; socket event → query invalidation), and `npx expo export --platform web`
+(which also proves the `@contracts/*` import works in Metro). Step 10 (dev client build with `expo run:ios/android`) **needs device check**.
+See `plan/frontend/DECISIONS.md` for the routes folder (`app/src/app`), the contracts import, and port 3000.

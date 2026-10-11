@@ -35,5 +35,5 @@
 
 ## Done when
 
-- [ ] The union query returns each item once with every member who wants it
-- [ ] The duplicate (group, user, item) insert is rejected
+- [x] The union query returns each item once with every member who wants it
+- [x] The duplicate (group, user, item) insert is rejected

@@ -1,0 +1,437 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgcrypto, pg_trgm, fuzzystrmatch]
+}
+
+// ─── 02 Users, diets & allergens ───────────────────────────────────────────────
+
+/// 9 major U.S. allergens + gluten.
+enum Allergen {
+  milk
+  eggs
+  fish
+  shellfish
+  tree_nuts
+  peanuts
+  wheat
+  soy
+  sesame
+  gluten
+
+  @@map("allergen")
+}
+
+model User {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Google's stable user ID (`sub` claim). Never key on email.
+  googleSub   String   @unique @map("google_sub")
+  /// Google-verified email, lower-cased and trimmed (CHECK enforced).
+  email       String   @unique
+  displayName String   @map("display_name")
+  avatarUrl   String?  @map("avatar_url")
+  /// S3 key of an uploaded avatar (backend/11). Shown instead of the Google picture when set.
+  avatarS3Key String?  @map("avatar_s3_key")
+  zipCode     String?  @map("zip_code")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  allergens     UserAllergen[]
+  diets         UserDiet[]
+  groupsCreated Group[]            @relation("GroupCreatedBy")
+  memberships   GroupMember[]
+  invitesSent   GroupInvite[]      @relation("InviteInvitedBy")
+  itemsCreated  Item[]
+  preferences   Preference[]
+  cabinetItems  CabinetItem[]
+  listChecked   ShoppingListItem[] @relation("ListCheckedBy")
+  listAdded     ShoppingListItem[] @relation("ListAddedBy")
+
+  @@map("users")
+}
+
+model UserAllergen {
+  userId   String   @map("user_id") @db.Uuid
+  allergen Allergen
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, allergen])
+  @@map("user_allergens")
+}
+
+/// `diet` is CHECK-constrained to: vegetarian, vegan, pescatarian, keto, halal, kosher, low_sodium, dairy_free, gluten_free.
+model UserDiet {
+  userId String @map("user_id") @db.Uuid
+  diet   String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, diet])
+  @@map("user_diets")
+}
+
+// ─── 03 Groups, members & email invites ────────────────────────────────────────
+
+enum GroupRole {
+  owner
+  member
+
+  @@map("group_role")
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  declined
+  revoked
+
+  @@map("invite_status")
+}
+
+model Group {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  /// Nullable so deleting the creator's account doesn't delete or block the household.
+  createdBy String?  @map("created_by") @db.Uuid
+  /// IANA time zone of the household (CHECK: is_valid_time_zone). "Today" and expiry estimates use it (DB-08).
+  timeZone  String   @default("America/Chicago") @map("time_zone")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator       User?              @relation("GroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  members       GroupMember[]
+  invites       GroupInvite[]
+  preferences   Preference[]
+  cabinetItems  CabinetItem[]
+  listItems     ShoppingListItem[]
+  recallMatches RecallMatch[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  String    @map("group_id") @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  role     GroupRole @default(member)
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferences Preference[]
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+/// One row per (group, email). Re-inviting sets the row back to `pending` (upsert), so the table doubles as history.
+/// Matching rule: an invite belongs to a user when `group_invites.email = users.email` (both lower-cased + trimmed, CHECK enforced).
+model GroupInvite {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId     String       @map("group_id") @db.Uuid
+  email       String
+  invitedBy   String?      @map("invited_by") @db.Uuid
+  status      InviteStatus @default(pending)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Set on accept / decline / revoke; NULL while pending (CHECK enforced).
+  respondedAt DateTime?    @map("responded_at") @db.Timestamptz(6)
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter User? @relation("InviteInvitedBy", fields: [invitedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, email])
+  @@index([email, status])
+  @@map("group_invites")
+}
+
+// ─── 04 Item catalog & fuzzy matching ──────────────────────────────────────────
+
+/// Global catalog of generic grocery items (shared by all groups).
+/// `normalized_name` must equal `normalize_item_name(name)` (CHECK enforced) and is GIN-trigram indexed.
+/// `category` is CHECK-constrained to: produce, dairy, meat, seafood, bakery, pantry, frozen, snacks, beverages, household, other.
+model Item {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  normalizedName   String     @unique @map("normalized_name")
+  category         String?
+  defaultAllergens Allergen[] @default([]) @map("default_allergens")
+  shelfLifeDays    Int?       @map("shelf_life_days")
+  /// NULL = seeded.
+  createdBy        String?    @map("created_by") @db.Uuid
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator        User?              @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  aliases        ItemAlias[]
+  preferences    Preference[]
+  cabinetItems   CabinetItem[]
+  listItems      ShoppingListItem[]
+  products       Product[]
+  priceEstimates PriceEstimate[]
+
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm")
+  @@map("items")
+}
+
+/// Typed text a user confirmed as meaning `item_id`, already normalized (CHECK enforced). Next search is an exact match.
+model ItemAlias {
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId          String @map("item_id") @db.Uuid
+  aliasNormalized String @unique @map("alias_normalized")
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([aliasNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "item_aliases_trgm")
+  @@map("item_aliases")
+}
+
+// ─── 05 Preferences ────────────────────────────────────────────────────────────
+
+enum Recurrence {
+  /// Always keep in stock; comes back on the list every time it runs out.
+  staple
+  /// Wanted this week only; deleted from preferences when bought.
+  one_time
+
+  @@map("recurrence")
+}
+
+/// One member's "want" for a group. The group's preference set is the union of all rows for the group.
+/// (group_id, user_id) references group_members, so leaving/being removed from a group deletes that member's preferences.
+model Preference {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId      String     @map("group_id") @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  itemId       String     @map("item_id") @db.Uuid
+  quantityText String?    @map("quantity_text")
+  recurrence   Recurrence @default(staple)
+  note         String?
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group  Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  member GroupMember @relation(fields: [groupId, userId], references: [groupId, userId], onDelete: Cascade)
+  item   Item        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, userId, itemId])
+  @@index([groupId, itemId])
+  @@index([userId])
+  @@map("preferences")
+}
+
+// ─── 06 Cabinet ────────────────────────────────────────────────────────────────
+
+/// "Ran out" is not a status: running out deletes the cabinet row.
+enum StockStatus {
+  in_stock
+  running_low
+
+  @@map("stock_status")
+}
+
+enum ExpirationSource {
+  manual
+  estimated
+
+  @@map("expiration_source")
+}
+
+/// The group's shared "what we have" set. One row per (group, item); buying again updates the row.
+/// "Have" set = rows with status = 'in_stock'. `location` is CHECK-constrained to fridge, freezer, pantry, other.
+/// `expires_at` and `expiration_source` are both set or both NULL (CHECK enforced).
+model CabinetItem {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String            @map("group_id") @db.Uuid
+  itemId           String            @map("item_id") @db.Uuid
+  /// Set when bought by scanning a SmartLabel / barcode.
+  productId        String?           @map("product_id") @db.Uuid
+  status           StockStatus       @default(in_stock)
+  quantityText     String?           @map("quantity_text")
+  location         String?
+  purchasedAt      DateTime?         @map("purchased_at") @db.Timestamptz(6)
+  expiresAt        DateTime?         @map("expires_at") @db.Date
+  expirationSource ExpirationSource? @map("expiration_source")
+  /// S3 key of a user-uploaded item photo (backend/11).
+  photoS3Key       String?           @map("photo_s3_key")
+  /// Nullable so the row survives the adder deleting their account.
+  addedBy          String?           @map("added_by") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group   Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item    Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  adder   User?    @relation(fields: [addedBy], references: [id], onDelete: SetNull)
+
+  recallMatches RecallMatch[]
+
+  @@unique([groupId, itemId])
+  /// Target of recall_matches' composite FK (keeps a match's group equal to its cabinet item's group).
+  @@unique([id, groupId])
+  @@index([groupId, expiresAt])
+  @@index([productId])
+  @@map("cabinet_items")
+}
+
+// ─── 07 Shopping list ──────────────────────────────────────────────────────────
+
+enum ListReason {
+  /// Added by generation (preferences − cabinet).
+  preference
+  /// Someone tapped "we're out of X" / "add to list".
+  manual
+
+  @@map("list_reason")
+}
+
+/// The group's one active list (the rows for a group ARE the list). Maintained by generate_shopping_list(group_id).
+/// `checked_at` is set iff `checked`; unchecking clears `checked_by`/`checked_at` (trigger + CHECK).
+/// `allergen_flags` is a JSON array of {userId, displayName, allergen}.
+model ShoppingListItem {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId          String     @map("group_id") @db.Uuid
+  itemId           String     @map("item_id") @db.Uuid
+  reason           ListReason
+  /// Member IDs from the preference union.
+  wantedBy         String[]   @default([]) @map("wanted_by") @db.Uuid
+  quantityText     String?    @map("quantity_text")
+  allergenFlags    Json       @default("[]") @map("allergen_flags")
+  checked          Boolean    @default(false)
+  checkedBy        String?    @map("checked_by") @db.Uuid
+  checkedAt        DateTime?  @map("checked_at") @db.Timestamptz(6)
+  /// SmartLabel / barcode scanned while checking off.
+  scannedProductId String?    @map("scanned_product_id") @db.Uuid
+  addedBy          String?    @map("added_by") @db.Uuid
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  group          Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  checker        User?    @relation("ListCheckedBy", fields: [checkedBy], references: [id], onDelete: SetNull)
+  scannedProduct Product? @relation(fields: [scannedProductId], references: [id], onDelete: SetNull)
+  adder          User?    @relation("ListAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, itemId])
+  @@index([groupId, checked])
+  @@index([scannedProductId])
+  @@map("shopping_list_items")
+}
+
+// ─── 08 Product data cache (SmartLabel / barcode) ──────────────────────────────
+
+enum ProductSource {
+  smartlabel
+  openfoodfacts
+  manual
+
+  @@map("product_source")
+}
+
+/// Branded product info, cached globally the first time anyone scans it. Refresh when `fetched_at` is older than 30 days.
+/// CHECK: gtin or smartlabel_url is set, unless source = 'manual'. gtin is a GTIN-14 with a valid check digit.
+model Product {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Generic catalog item this product belongs to ("Honey Nut Cheerios" box → Cheerios).
+  itemId             String        @map("item_id") @db.Uuid
+  /// GTIN-14 (8/12/13-digit codes are left-padded by a trigger; CHECK: 14 digits + valid check digit).
+  gtin               String?       @unique
+  /// URL encoded in the SmartLabel QR code.
+  smartlabelUrl      String?       @unique @map("smartlabel_url")
+  brand              String?
+  name               String
+  servingSize        String?       @map("serving_size")
+  caloriesPerServing Decimal?      @map("calories_per_serving")
+  /// {fat_g, sat_fat_g, sodium_mg, carbs_g, sugar_g, protein_g, ...}
+  nutrition          Json?
+  ingredients        String?
+  /// "Contains".
+  allergens          Allergen[]    @default([])
+  /// "May contain / processed in a facility with".
+  mayContain         Allergen[]    @default([]) @map("may_contain")
+  /// e.g. Nutri-Score letter.
+  healthScore        String?       @map("health_score")
+  imageS3Key         String?       @map("image_s3_key")
+  source             ProductSource
+  /// Original scraped / API payload, for debugging.
+  raw                Json?
+  fetchedAt          DateTime      @map("fetched_at") @db.Timestamptz(6)
+
+  item         Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  cabinetItems CabinetItem[]
+  listItems    ShoppingListItem[]
+
+  @@index([itemId])
+  @@map("products")
+}
+
+// ─── 09 Recalls & price cache ──────────────────────────────────────────────────
+
+/// Global food recalls, imported daily from openFDA (food enforcement). Re-import upserts on external_id.
+model Recall {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// 'openfda'
+  source             String
+  /// openFDA recall_number.
+  externalId         String    @unique @map("external_id")
+  productDescription String    @map("product_description")
+  reason             String?
+  /// Class I / II / III
+  classification     String?
+  firm               String?
+  /// States / nationwide.
+  distribution       String?
+  reportDate         DateTime? @map("report_date") @db.Date
+  /// Ongoing / Terminated
+  status             String?
+  raw                Json?
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  matches RecallMatch[]
+
+  @@index([productDescription(ops: raw("gin_trgm_ops"))], type: Gin, map: "recalls_product_description_trgm")
+  @@map("recalls")
+}
+
+/// A recall that fuzzy-matches a group's cabinet item. A suggestion for a person to check, never applied automatically.
+/// Alerts show rows with dismissed_at IS NULL (partial index). score is 0..1.
+model RecallMatch {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recallId      String    @map("recall_id") @db.Uuid
+  groupId       String    @map("group_id") @db.Uuid
+  cabinetItemId String    @map("cabinet_item_id") @db.Uuid
+  score         Float     @db.Real
+  dismissedAt   DateTime? @map("dismissed_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  recall      Recall      @relation(fields: [recallId], references: [id], onDelete: Cascade)
+  group       Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  cabinetItem CabinetItem @relation(fields: [cabinetItemId, groupId], references: [id, groupId], onDelete: Cascade)
+
+  @@unique([recallId, cabinetItemId])
+  @@index([cabinetItemId])
+  @@map("recall_matches")
+}
+
+/// Cache for the agentic price lookup, one row per (item, zip code). Rows older than 24 hours are stale.
+model PriceEstimate {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId       String   @map("item_id") @db.Uuid
+  zipCode      String   @map("zip_code")
+  lowCents     Int      @map("low_cents")
+  highCents    Int      @map("high_cents")
+  typicalCents Int?     @map("typical_cents")
+  unit         String?
+  sources      Json?
+  model        String?
+  fetchedAt    DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, zipCode])
+  @@map("price_estimates")
+}

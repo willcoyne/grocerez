@@ -1,0 +1,242 @@
+# Database Decisions
+
+Choices made while implementing `plan/database/` where the plan was unclear, outdated, or had to be adapted.
+Format: date · folder · what the plan said · what was done · why.
+
+## Notes for the backend builder
+
+- **`server/` was created by the database builder** with only what the database needs: `package.json`
+  (`type: module`), `tsconfig.json` (`strict`, `NodeNext`), `docker-compose.yml`, `.env.example`, `.gitignore`,
+  `prisma.config.ts`, `prisma/`. When doing `backend/01-server-setup`, **add to** these files instead of re-running `npm init`.
+  Express, zod, etc. are not installed yet.
+- **Prisma 7 client import path:** the client is generated to `server/generated/prisma` (git-ignored, run `npm run db:generate`).
+  Import it with `import { PrismaClient } from "../generated/prisma/client.js"` (adjust the relative path), not from `@prisma/client`.
+- **Prisma 7 needs a driver adapter:** `new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })`
+  with `import { PrismaPg } from "@prisma/adapter-pg"`. See `server/prisma/seed.ts` for a working example.
+- **Normalization fixture:** `server/prisma/fixtures/normalize-cases.json` lists inputs and the exact output of the SQL
+  `normalize_item_name()`. `lib/normalize.ts` must produce the same output for every case; load it in a vitest test.
+
+## Decisions
+
+### 2026-10-10 · 01 · Prisma version and config
+- **Plan said:** `npm i -D prisma`, `npx prisma init`, set `previewFeatures = ["postgresqlExtensions"]` + `extensions` on the datasource.
+- **Did:** pinned `prisma`, `@prisma/client`, `@prisma/adapter-pg` to exactly **7.10.0** (latest stable; npm's `latest` tag currently
+  points at an 8.0 release candidate, which was avoided). Prisma 7 moved the connection URL out of `schema.prisma` into
+  `server/prisma.config.ts` (`datasource.url = process.env.DATABASE_URL`, loaded with `dotenv/config`) and uses the new
+  `prisma-client` generator with `output = "../generated/prisma"`. `postgresqlExtensions` **is still a preview feature in 7.10**
+  (validation fails without it), so it is set on the generator block and `extensions = [pgcrypto, pg_trgm, fuzzystrmatch]` on the datasource.
+- **Why:** follow the installed version's actual requirements; a release candidate is not a safe base for a hackathon demo.
+
+### 2026-10-10 · 01 · Generated client and scripts
+- **Plan said:** `db:migrate` → `prisma migrate dev`, `db:reset` → `prisma migrate reset` (re-runs the seed).
+- **Did:** Prisma 7's `migrate dev` no longer runs `prisma generate`, so a `db:generate` script was added. `db:up` uses
+  `docker compose up -d --wait` so the following migrate doesn't race the container start. TypeScript is pinned to 7.0.2 (current stable).
+- **Why:** keep the "one command" promise true on Prisma 7.
+
+### 2026-10-10 · 01 · Port
+- Host port 5432 was free, so the container uses the planned `5432` and `DATABASE_URL` is unchanged.
+  If a teammate already runs Postgres locally, change the left side of `ports:` in `docker-compose.yml` (e.g. `"5433:5432"`) and the port in `.env`.
+
+### 2026-10-10 · 02 · Email CHECK on users
+- **Plan said:** `users.email` is "lower-cased" (no constraint listed).
+- **Did:** added `CHECK (email = lower(btrim(email)))` on `users`, same rule as `group_invites`. The backend must
+  `trim().toLowerCase()` Google's email before writing it.
+- **Why:** invite matching (03) is `group_invites.email = users.email`; both sides must be normalized the same way or matching silently fails.
+
+### 2026-10-10 · 02 · `src/db.ts`
+- **Did:** added `server/src/db.ts` (the PrismaClient singleton named in `backend/01`) because the Prisma 7 client needs the
+  `@prisma/adapter-pg` driver adapter and the seed/checks needed one. The backend builder can keep or move it.
+
+### 2026-10-10 · 03 · `groups.created_by` on user delete
+- **Plan said:** `created_by uuid FK → users` (no `ON DELETE`).
+- **Did:** nullable, `ON DELETE SET NULL`.
+- **Why:** `DELETE /me` (11) must succeed and the household must survive; ownership lives in `group_members.role`, not `created_by`.
+
+### 2026-10-10 · 03 · Extra invite CHECKs
+- **Did:** `CHECK (email = lower(btrim(email)) AND email <> '')` (plan: `email = lower(email)`, plus "trimmed" in the notes), and
+  `CHECK ((status = 'pending') = (responded_at IS NULL))`. Also `groups.name` can't be blank.
+- **Backend impact:** re-inviting must upsert with `ON CONFLICT (group_id, email) DO UPDATE SET status='pending', responded_at=NULL`;
+  accept/decline/revoke must set `responded_at = now()` in the same update.
+
+### 2026-10-10 · 04 · Exact normalization rules
+- **Plan said:** lowercase → trim → collapse whitespace → strip punctuation except `&` → drop trailing plural `s`/`es` with a small exceptions list.
+- **Did (precise rules, see the SQL comment and `server/prisma/fixtures/normalize-cases.json`, 55 cases):**
+  accents are folded with a fixed `translate()` table (`jalapeño` → `jalapeno`); apostrophes are **deleted** (`Lay's` → `lays`);
+  every other non-`[a-z0-9& ]` character becomes a **space** (`half-and-half` → `half and half`); then collapse + trim.
+  Only the **last word** is de-pluralized: `es` is dropped only after `ch|sh|x|z|ss|o` (`tomatoes` → `tomato`, `glasses` → `glass`,
+  but `grapes` → `grape`, `cheeses` → `cheese`); otherwise one `s` is dropped if the word is longer than 3 and doesn't end in `ss`/`us`.
+  No `ies` → `y` rule (`raspberries` → `raspberrie`), because it breaks `cookies` → `cooky`; trigram search covers the gap.
+  The function is idempotent (checked for every fixture case).
+- **Why:** "drop es" on every word would turn `grapes` into `grap`; keeping the rule tiny makes the TS port trivial to keep identical.
+
+### 2026-10-10 · 04 · Constraints tie stored names to the SQL function
+- **Did:** `CHECK (items.normalized_name = normalize_item_name(name))` and `CHECK (item_aliases.alias_normalized = normalize_item_name(alias_normalized))`,
+  plus non-empty and ≤ 200 chars (levenshtein() errors past 255). `category` is CHECK-constrained to the 11 listed values,
+  `default_allergens` is `NOT NULL DEFAULT '{}'`, `shelf_life_days > 0` when set.
+- **Backend impact:** if `lib/normalize.ts` ever drifts from SQL, inserts fail loudly instead of creating duplicate items.
+  The backend may also skip TS normalization on insert and write `normalize_item_name(${name})` in a tagged `$queryRaw`.
+
+### 2026-10-10 · 04 · `search_items(q, max_results = 5)` SQL function
+- **Plan said:** "Matching query (wrapped by the backend's `GET /items/search`)".
+- **Did:** implemented the query as a `STABLE` SQL function returning
+  `(match, item_id, name, normalized_name, category, default_allergens text[], shelf_life_days, similarity, distance)`.
+  It normalizes `q` itself, checks exact name/alias first, then uses `%` (GIN-indexable, threshold pinned to 0.3 via the
+  function's `SET` clause) plus an explicit `similarity > 0.3`, takes the best hit per item across name and aliases, and labels
+  every row `suggested` or `none` from the best candidate. Zero rows = `none` with no candidates.
+  Backend call: ``prisma.$queryRaw`SELECT * FROM search_items(${q})` ``.
+- **Why:** one tested implementation of the matching rule; the backend can't accidentally build it with string concatenation.
+
+### 2026-10-10 · 04 · GIN indexes and the 20 ms check
+- **Did:** the two `gin_trgm_ops` indexes are declared in `schema.prisma` (`@@index(..., type: Gin)`) so Prisma doesn't see them as drift.
+- **Measured:** on the seeded 213-item catalog the planner correctly prefers a seq scan (3 pages); `search_items('cherios')` runs in ~1.3 ms.
+  With `enable_seqscan = off` the plan is `Bitmap Index Scan on items_name_trgm` / `item_aliases_trgm`. With 50,000 extra rows
+  (inserted, `VACUUM ANALYZE`d, then deleted) the planner chooses `Bitmap Index Scan on items_name_trgm` on its own
+  (0.04 ms) and `search_items` takes 0.9 ms.
+
+### 2026-10-10 · 04 · Catalog file and seed registration
+- **Did:** `server/prisma/seed/items.json` (213 items) is created here (04 step 6) and loaded by `prisma/seed.ts`, which upserts on
+  `normalized_name` using the SQL function. Prisma 7 reads the seed command from `prisma.config.ts` → `migrations.seed`
+  (the `package.json` `"prisma": {"seed": ...}` key from the plan is no longer used).
+- `npm run db:check:normalize` checks the SQL function against the fixture.
+
+### 2026-10-10 · 05 · Preferences reference the membership row
+- **Plan said:** step 4, "When a member leaves the group, delete their preferences in that group (backend transaction, not a cascade,
+  because the user row still exists)."
+- **Did:** added a composite FK `preferences (group_id, user_id) → group_members (group_id, user_id) ON DELETE CASCADE`
+  (in addition to the plain FKs to `groups` and `users`). Deleting the **membership** row cascades that member's preferences in
+  that group only; the user row is untouched. It also makes it impossible to store a preference for a non-member.
+- **Backend impact:** none required. The leave/remove transaction can still run its explicit `deleteMany` (it will find nothing),
+  but it must still regenerate the shopping list afterwards. Insert members before their preferences.
+- **Why:** "constraints carry the rules": a preference from someone outside the group should be an impossible state.
+
+### 2026-10-10 · 05 · `preferences.item_id` on item delete
+- **Did:** `ON DELETE RESTRICT` (catalog items in use can't be deleted). Same for `cabinet_items`, `shopping_list_items` (06, 07).
+  Added an index on `preferences(user_id)` so user-delete cascades don't seq-scan.
+
+### 2026-10-10 · 06 · Cabinet details
+- **`product_id`:** 06 comes before `products` (08), so the column is created here without a FK; migration `products` (08) adds
+  `cabinet_items.product_id → products ON DELETE SET NULL`.
+- **`added_by`:** nullable, `ON DELETE SET NULL` (plan didn't say). The cabinet row belongs to the group, not the adder.
+- **CHECKs added:** `location IN ('fridge','freezer','pantry','other')`; `expires_at` and `expiration_source` are both set or both NULL.
+- **"Expiring in the next 3 days" query** (uses `cabinet_items_group_id_expires_at_idx`, verified with 200k rows):
+  `SELECT ... FROM cabinet_items WHERE group_id = $1 AND expires_at <= current_date + 3 ORDER BY expires_at` (includes already-expired rows).
+
+### 2026-10-10 · 07 · Check-off stamping is enforced in the database
+- **Did:** CHECKs `checked = (checked_at IS NOT NULL)` and `checked OR checked_by IS NULL`, plus a `BEFORE INSERT OR UPDATE`
+  trigger: checking a row stamps `checked_at = now()` (if not given); unchecking clears `checked_by` and `checked_at`.
+  The backend only sets `checked` and `checked_by` (`PATCH .../shopping-list/:id`). `allergen_flags` must be a JSON array (CHECK).
+- `scanned_product_id` gets its FK to `products` (`ON DELETE SET NULL`) in migration `products` (08). `checked_by`/`added_by` are `ON DELETE SET NULL`.
+
+### 2026-10-10 · 07 · `generate_shopping_list(group_id)` SQL function (offered to the backend)
+- **Plan said:** the backend's `service.generate(groupId)` (backend/06) computes and upserts the list; the database stores it.
+- **Did:** to prove "running generation twice changes nothing", the generation is implemented as SQL functions:
+  `needed_items(group)` (union − in-stock cabinet, with `wanted_by` and combined `quantity_text`),
+  `allergen_flags_for(group, allergens[])` (`[{userId, displayName, allergen}]` for every member, ordered deterministically),
+  `item_allergens_for(group, item)` (07: `items.default_allergens`; 08 replaces it to prefer a linked product), and
+  `generate_shopping_list(group) → integer` (rows changed). It follows backend/06 steps 1.2–1.5: upserts needed items without
+  touching `checked`, deletes unchecked `preference` rows no longer needed, keeps `manual` and checked rows (refreshing their
+  `wanted_by` and flags), only writes rows whose values actually changed, and takes a per-group advisory lock.
+  An existing `manual` row that becomes needed keeps `reason = 'manual'` and its own `quantity_text`.
+- **Backend impact (recommended, not required):** `service.generate` can be
+  ``await tx.$executeRaw`SELECT generate_shopping_list(${groupId}::uuid)` `` followed by reading the rows and emitting
+  `shopping-list:changed`. If the backend writes its own TS version instead, it must produce the same rows (the seed check in 10 uses this function).
+- Prisma scalar lists are created nullable, so a follow-up migration `shopping_list_wanted_by_not_null` sets `wanted_by NOT NULL`
+  (the `shopping_list` migration was already applied when this was noticed).
+
+### 2026-10-10 · 08 · Products
+- **Did:** `item_id` is required, `ON DELETE RESTRICT`; `cabinet_items.product_id` and `shopping_list_items.scanned_product_id`
+  get their FKs here (`ON DELETE SET NULL`). Extra CHECKs: `gtin ~ '^[0-9]{8,14}$'`, `calories_per_serving >= 0`;
+  `allergens` / `may_contain` are `NOT NULL DEFAULT '{}'`. Index on `products(item_id)`.
+- **Linked product (plan step 3 / backend/06 step 1.3):** `item_allergens_for(group, item)` is replaced to return
+  `allergens ∪ may_contain` of the list row's `scanned_product_id`, else the group's `cabinet_items.product_id` for that item,
+  else `items.default_allergens`. Scanning is a cache upsert: `prisma.product.upsert({ where: { gtin } ... })` (or `smartlabelUrl`).
+
+### 2026-10-10 · 09 · Recalls and price cache
+- **Did:**
+  - `recall_matches (cabinet_item_id, group_id) → cabinet_items (id, group_id) ON DELETE CASCADE` (composite FK, backed by a new
+    `UNIQUE (id, group_id)` on `cabinet_items`), so a match can never point at another group's cabinet item.
+  - Partial index `recall_matches_active_idx ON recall_matches (group_id) WHERE dismissed_at IS NULL` for the alerts query
+    (`... WHERE group_id = $1 AND dismissed_at IS NULL`). Dismiss = `UPDATE ... SET dismissed_at = now()`.
+  - CHECKs: `score` in 0..1; `recalls.source IN ('openfda','demo')` (`demo` marks the seeded offline recall in 10);
+    `price_estimates`: `0 <= low_cents <= high_cents`, `typical_cents` between them, `zip_code ~ '^[0-9]{5}$'`.
+  - `recalls.created_at` added (not in the plan) for "new since" queries. `price_estimates.fetched_at` defaults to `now()`
+    and `item_id` cascades on item delete (it's a cache).
+  - openFDA import must upsert: `ON CONFLICT (external_id) DO UPDATE` (or `prisma.recall.upsert({ where: { externalId } })`).
+- **Tooling note:** `prisma migrate dev` refuses to create a migration that adds a unique constraint in a non-interactive shell.
+  This migration was generated with `npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
+  into a new timestamped folder, then applied with `npx prisma migrate dev`.
+
+### 2026-10-10 · 10 · Seed details
+- **Registration:** the seed command is in `prisma.config.ts` → `migrations.seed = "tsx prisma/seed.ts"` (Prisma 7), not `package.json`.
+- **`db:reset`:** Prisma 7's `migrate reset` no longer runs the seed (its `--skip-seed` flag is gone), so the script is
+  `prisma migrate reset --force && prisma db seed`.
+- **Idempotency:** users upsert by `google_sub`, items by `normalized_name`, the group by a fixed id
+  (`00000000-0000-4000-8000-000000000001`), the recall by `external_id`, the invite by `(group_id, email)`. The demo group's preferences,
+  cabinet and list are reset to the documented state on each run (delete + insert inside one transaction), so re-seeding also
+  undoes anything clicked during a rehearsal. Seeded users have fixed ids `...0101` to `...0104` and emails `seed-user-N@grocerez.test`.
+- **Staples (step 5):** User 1 wants Milk (1 gal) and Peanut Butter; User 2 wants Bread (1 loaf). Badges: Milk → User 3 (milk),
+  Peanut Butter → User 4 (peanuts). Bread has no badge because no seeded user is allergic to wheat or gluten.
+- **Demo recall (step 6):** `source = 'demo'`, `external_id = 'DEMO-0001'`, a Cheerios description; the match score is
+  `word_similarity(item normalized_name, lower(description))` (0.88). The reason text says it's a seeded demo, not a real recall.
+- **Pending invite (step 7):** goes to the placeholder **`teammate@example.com`**. **Swap it before the demo**: run
+  `DEMO_INVITE_EMAIL=<teammate's real Google email> npm run db:seed` (or edit the constant in `seed.ts`).
+- **Step 9, `POST /dev/login-as/:userId`:** is an Express route, so it's left to the backend builder (no server code exists yet).
+  Use the fixed seeded user ids above. The route must be disabled when `NODE_ENV=production`.
+- **Check query:** `server/prisma/seed/check-demo-list.sql` (`npm run db:check:demo`) regenerates the list inside a rolled-back
+  transaction, prints it in aisle order with allergen badges, and prints `PASS` if the list equals (union − in-stock cabinet) and
+  its board items are exactly Lay's, Oreos, Tostitos.
+
+### 2026-10-10 · 11 · Security
+- **App role:** `server/prisma/sql/app-role.sql` (idempotent, run as the migration owner; `npm run db:app-role` locally) creates
+  `grocerez_app` (LOGIN only, `statement_timeout = 15s`) with `SELECT/INSERT/UPDATE/DELETE` on all tables, `EXECUTE` on
+  functions, no `CREATE` on `public`, no access to `_prisma_migrations`, plus default privileges for future migrations.
+  Local dev password is `grocerez_app`. Production passes `-v app_password=...`.
+- **Two URLs:** `prisma.config.ts` uses `MIGRATE_DATABASE_URL ?? DATABASE_URL`, so production can set `DATABASE_URL` to `grocerez_app`
+  (runtime, via `src/db.ts`) and `MIGRATE_DATABASE_URL` to the owner (migrate deploy, seed).
+- **Owner handoff (step 5) is a trigger:** migration `owner_handoff` adds an `AFTER DELETE` trigger on `group_members`. If the deleted
+  row was the last `owner`, the longest-standing remaining member (earliest `joined_at`, then `user_id`) becomes owner. This covers
+  `DELETE /me` (user cascade), leave, and remove-member. If nobody remains, the group is left for the backend to delete.
+- **Not executed (documented only):** production SSL (`?sslmode=require` in `.env.example`), enabling host backups, and a production
+  restore test. A local `pg_dump -Fc` → `pg_restore` into a scratch database was tested. Group scoping (step 3) and
+  "never log tokens or emails" (step 5) are backend rules. Row-level security (stretch) was not done.
+
+### 2026-10-10 · 01 (follow-up) · Compose project name
+- **Did:** added `name: grocerez` to `server/docker-compose.yml`. Without it the compose project (and the volume) is named after the
+  folder, `server`, which collides with any other repo that has a `server/` folder. The volume is now `grocerez_pgdata`.
+  Anyone who ran the database before this commit has an orphaned `server_pgdata` volume. Re-run migrate + seed, then
+  `docker volume rm server_pgdata` when it's no longer needed.
+
+### 2026-10-10 · break-test fixes (test-reports/database.md)
+- **DB-04 · product links:** triggers (not composite FKs) make `cabinet_items.product_id` / `shopping_list_items.scanned_product_id`
+  belong to the row's `item_id` (SQLSTATE 23503), and a linked product can't change item. A composite FK would need
+  `ON DELETE SET NULL (product_id)`, which Prisma's schema can't express (an FK it doesn't know is drift).
+  Backend: `PATCH .../shopping-list/:id` with a product of another item → `409 PRODUCT_ITEM_MISMATCH`.
+- **DB-01 / DB-09 · owner handoff:** `lock_group_list(group)` (the advisory lock `generate_shopping_list` and the backend's `lockGroup`
+  use) + `group_ensure_owner(group)` (lock, then promote the longest-standing member in a retry loop). The immediate trigger only locks
+  when no other owner is visible; DEFERRED constraint triggers re-check at commit when an owner row was deleted or demoted.
+  Demoting the last owner raises 23514. Lock order everywhere: advisory lock → rows.
+- **DB-02 · list lock:** a BEFORE ROW trigger on `shopping_list_items` takes the group's advisory lock for every write, so a
+  transaction that touches list rows already holds the lock when it regenerates. Compatible with the backend's `lockGroup` (same key,
+  re-entrant).
+- **DB-03 · departed members:** AFTER DELETE on `group_members` regenerates the group's list when the departed user still appears
+  in `wanted_by` or `allergen_flags` (no lock or work otherwise).
+- **DB-05 / DB-11 · search labels:** only row 1 can be `suggested`; queries ≤ 6 chars also need similarity ≥ 0.5 or a pure
+  insert/delete edit (`bred` → Bread, not `batter` → Butter); whole-word containment ranks first (`pea` → Frozen Peas);
+  single-word anagrams within 2 edits are added as candidates (`mlik` → Milk). Backend contract unchanged.
+- **DB-06 / DB-14 · normalization v2:** NFKC, ICU-root lower-case (`COLLATE "und-x-icu"`, matches JS `toLowerCase`), accent strip
+  (U+0300–036F), folds ß/æ/œ/þ/ø/đ/ð/ł/ı/ħ/ŧ, keep Unicode letters and decimal digits, one space around `&`. Existing names were
+  re-normalized (`M&M's` is now `m & ms`). TS port and fixture updated; 20,000 random Unicode strings agreed between SQL and TS.
+  Known limitation: combining marks outside U+0300–036F (e.g. Thai/Devanagari vowel signs) become spaces in both versions.
+- **DB-07 · GTIN-14:** stored GTINs are 14 digits with a valid GS1 check digit (CHECK); a trigger left-pads 8/12/13-digit input.
+  The migration dropped invalid codes and merged duplicates. Backend `normalizeGtin` validates the check digit and expands UPC-E
+  (8 digits, number system 0/1, valid as UPC-E) to UPC-A before padding; other 8-digit codes are EAN-8.
+- **DB-08 · time zone:** `groups.time_zone text NOT NULL DEFAULT 'America/Chicago'`, `CHECK (is_valid_time_zone(time_zone))`
+  (IANA names only), `group_today(group)`. Backend uses the group's zone for alerts, recipes, cabinet estimates, finish trip and the seed.
+  **Frontend:** `Group.timeZone` is a new response field; `POST /groups` and `PATCH /groups/:groupId` accept `timeZone`
+  (PATCH now accepts `name` and/or `timeZone`).
+- **Skipped (scope cut):** DB-10, DB-12, DB-13, DB-15, DB-16, DB-17.
+
+## Needs team sign-off
+
+None. No API contract change was needed. The SQL helpers (`search_items`, `generate_shopping_list`) are offered to the backend,
+not required by the contract.

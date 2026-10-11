@@ -30,6 +30,6 @@
 
 ## Done when
 
-- [ ] Scanning a real SmartLabel QR (e.g. a General Mills cereal box) returns calories + allergens
-- [ ] Scanning a plain UPC barcode returns data from Open Food Facts
-- [ ] Scanning it a second time is served from the cache
+- [x] Scanning a real SmartLabel QR (e.g. a General Mills cereal box) returns calories + allergens
+- [x] Scanning a plain UPC barcode returns data from Open Food Facts
+- [x] Scanning it a second time is served from the cache

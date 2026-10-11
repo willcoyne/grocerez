@@ -1,81 +1,101 @@
-import { BricolageGrotesque_800ExtraBold } from '@expo-google-fonts/bricolage-grotesque';
-import { Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold } from '@expo-google-fonts/manrope';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { QueryClientProvider } from "@tanstack/react-query";
+import { SplashScreen, Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useEffect, useState } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { queryClient } from '@/api/queryClient';
-import { ToastProvider } from '@/components/ui';
-import { RealtimeSync } from '@/realtime/useRealtime';
-import { ActiveGroupProvider, useActiveGroup } from '@/state/ActiveGroupContext';
-import { AuthProvider, useAuth } from '@/state/AuthContext';
-import { color } from '@/theme';
+import { makeQueryClient, setupReactQueryNative } from "@/api/queryClient";
+import { ErrorState, LoadingState } from "@/components/States";
+import { ToastProvider } from "@/components/Toast";
+import { SocketProvider } from "@/realtime/SocketProvider";
+import { ActiveGroupProvider, useActiveGroup } from "@/state/ActiveGroupContext";
+import { AuthProvider, useAuth } from "@/state/AuthContext";
+import { colors } from "@/theme";
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
-/**
- * Route guard (DESIGN.md §1): no token → (auth). Token but no groups → (onboarding)/household.
- * Otherwise → (tabs)/list. `invite` is reachable whenever signed in (onboarding and the Household tab).
- */
-function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
-  const { loading, token } = useAuth();
-  const { groups, groupsStatus } = useActiveGroup();
-  const signedIn = !!token;
-  const ready = fontsReady && !loading && (!signedIn || groupsStatus !== 'pending');
-  const hasGroup = (groups?.length ?? 0) > 0;
-
-  useEffect(() => {
-    if (ready) void SplashScreen.hideAsync().catch(() => {});
-  }, [ready]);
-
-  if (!ready) return null;
+export default function RootLayout() {
+  const [queryClient] = useState(makeQueryClient);
+  useEffect(() => setupReactQueryNative(), []);
 
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: color.bg } }}>
-      <Stack.Screen name="index" />
-      <Stack.Protected guard={!signedIn}>
-        <Stack.Screen name="(auth)" />
-      </Stack.Protected>
-      <Stack.Protected guard={signedIn && !hasGroup}>
-        <Stack.Screen name="(onboarding)" />
-      </Stack.Protected>
-      <Stack.Protected guard={signedIn && hasGroup}>
-        <Stack.Screen name="(tabs)" />
-      </Stack.Protected>
-      <Stack.Protected guard={signedIn}>
-        <Stack.Screen name="invite" />
-      </Stack.Protected>
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ActiveGroupProvider>
+              <SocketProvider>
+                <ToastProvider>
+                  <StatusBar style="dark" />
+                  <RootNavigator />
+                </ToastProvider>
+              </SocketProvider>
+            </ActiveGroupProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
-export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    BricolageGrotesque_800ExtraBold,
-    Manrope_500Medium,
-    Manrope_600SemiBold,
-    Manrope_700Bold,
-    Manrope_800ExtraBold,
-  });
+/**
+ * Route guard (plan 02 step 4):
+ * no token → sign-in · brand-new account → onboarding · signed in without a group → no-group · otherwise → tabs.
+ */
+export function RootNavigator() {
+  const { status, needsOnboarding } = useAuth();
+  const { groups, groupsLoading, groupsError, refetchGroups } = useActiveGroup();
+  const signedIn = status === "signedIn";
+  const booting = status === "loading" || (signedIn && groupsLoading);
+
+  useEffect(() => {
+    if (!booting) void SplashScreen.hideAsync().catch(() => {});
+  }, [booting]);
+
+  if (booting) return <LoadingState message="Opening GrocerEZ…" />;
+  if (signedIn && groupsError && groups.length === 0) {
+    return <ErrorState error={groupsError} onRetry={refetchGroups} title="Couldn't load your households" />;
+  }
+
+  const hasGroup = groups.length > 0;
+  const inApp = signedIn && !needsOnboarding && hasGroup;
 
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ActiveGroupProvider>
-            <ToastProvider>
-              <StatusBar style="dark" />
-              <RealtimeSync />
-              {/* A font failure falls back to system fonts rather than blocking the app. */}
-              <RootNavigator fontsReady={fontsLoaded || !!fontError} />
-            </ToastProvider>
-          </ActiveGroupProvider>
-        </AuthProvider>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <Stack
+      screenOptions={{
+        headerTintColor: colors.primary,
+        contentStyle: { backgroundColor: colors.background },
+        headerBackButtonDisplayMode: "minimal",
+      }}
+    >
+      <Stack.Protected guard={!signedIn}>
+        <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={signedIn && needsOnboarding}>
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={signedIn && !needsOnboarding && !hasGroup}>
+        <Stack.Screen name="no-group" options={{ title: "GrocerEZ" }} />
+      </Stack.Protected>
+
+      <Stack.Protected guard={inApp}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="scanner" options={{ presentation: "fullScreenModal", title: "Scan" }} />
+        <Stack.Screen name="item-detail/[id]" options={{ presentation: "modal", title: "Item" }} />
+        <Stack.Screen name="expiration-check" options={{ presentation: "modal", title: "Expiration dates" }} />
+        <Stack.Screen name="recipes" options={{ presentation: "modal", title: "What can we cook?" }} />
+        <Stack.Screen name="prices" options={{ presentation: "modal", title: "Price estimate" }} />
+      </Stack.Protected>
+
+      {/* Available whenever signed in (used from onboarding / no-group too). */}
+      <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="create-group" options={{ presentation: "modal", title: "Create a household" }} />
+        <Stack.Screen name="invites" options={{ presentation: "modal", title: "My invites" }} />
+        <Stack.Screen name="invite" options={{ presentation: "modal", title: "Invite by email" }} />
+      </Stack.Protected>
+    </Stack>
   );
 }
