@@ -58,15 +58,14 @@ describe("01 server setup", () => {
     expect(() => loadConfig(env)).toThrow(/JWT_SECRET: missing/);
   });
 
-  it("production starts without optional external-service secrets (features answer 503 instead)", () => {
+  it("production requires the external-service secrets", () => {
     const env = {
       NODE_ENV: "production",
       DATABASE_URL: "postgresql://x",
       JWT_SECRET: "x".repeat(32),
       GOOGLE_CLIENT_IDS: "a",
     } as NodeJS.ProcessEnv;
-    expect(loadConfig(env).ANTHROPIC_API_KEY).toBeUndefined();
-    expect(() => loadConfig({ ...env, JWT_SECRET: "short" })).toThrow(/JWT_SECRET/);
+    expect(() => loadConfig(env)).toThrow(/ANTHROPIC_API_KEY: missing/);
     const ok = loadConfig({ ...env, NODE_ENV: "development" });
     expect(ok.GOOGLE_CLIENT_IDS).toEqual(["a"]);
     expect(ok.PORT).toBe(3000);

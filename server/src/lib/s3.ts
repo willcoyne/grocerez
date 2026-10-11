@@ -12,8 +12,6 @@ function getClient(): S3Client {
   if (!s3Configured()) throw notConfigured("File storage (S3)");
   client ??= new S3Client({
     region: config.AWS_REGION,
-    // Linode (Akamai Cloud) Object Storage is S3-compatible: S3_ENDPOINT=https://<region>.linodeobjects.com.
-    ...(config.S3_ENDPOINT ? { endpoint: config.S3_ENDPOINT } : {}),
     credentials: { accessKeyId: config.AWS_ACCESS_KEY_ID!, secretAccessKey: config.AWS_SECRET_ACCESS_KEY! },
   });
   return client;
