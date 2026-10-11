@@ -1,3 +1,8 @@
 # Agent worktrees (local only)
 .claude/worktrees/
 .DS_Store
+
+# Agent service secrets
+agent/.env
+agent/.venv/
+outputs/
