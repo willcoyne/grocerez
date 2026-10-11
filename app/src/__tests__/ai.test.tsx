@@ -73,21 +73,25 @@ describe("Recipes", () => {
 });
 
 describe("Prices", () => {
-  it("renders the total range and per-item rows labeled as AI estimates", async () => {
+  it("renders the total, per-item prices, and which ones come from BLS regional data vs AI estimates", async () => {
     const res: PricesResponse = {
       zipCode: "64105",
       items: [
-        { itemId: "a", name: "Cheerios", lowCents: 350, highCents: 499, typicalCents: 399, unit: null, sources: [], estimate: true, cached: false, fetchedAt: new Date().toISOString() },
+        { itemId: "a", name: "Cheerios", lowCents: 350, highCents: 499, typicalCents: 399, unit: null, sources: [], basis: "ai_estimate", estimate: true, cached: false, fetchedAt: new Date().toISOString() },
+        { itemId: "b", name: "Milk", lowCents: 299, highCents: 459, typicalCents: 349, unit: "1 gal", sources: ["https://data.bls.gov/timeseries/APU0200709112"], basis: "regional_average", estimate: true, cached: false, fetchedAt: new Date().toISOString() },
       ],
       missingItemIds: [],
-      totalLowCents: 3400,
-      totalHighCents: 4100,
+      totalLowCents: 649,
+      totalHighCents: 958,
     };
     apiMock.mockImplementation(apiRoutes({ ...base, [`POST /groups/${g}/shopping-list/prices`]: () => res }));
     await renderWithProviders(<PricesScreen />);
-    await screen.findByText("$34–$41");
-    expect(screen.getByText(/Cheerios · \$3\.50–\$4\.99/)).toBeTruthy();
-    expect(screen.getByText("AI estimate from web search")).toBeTruthy();
+    await screen.findByText("About $7.48");
+    expect(screen.getByText(/Range \$6–\$10 · 2 items priced, 1 from BLS regional data/)).toBeTruthy();
+    expect(screen.getByText(/Cheerios · ~\$3\.99/)).toBeTruthy();
+    expect(screen.getByText("Usually $3.50–$4.99")).toBeTruthy();
+    expect(screen.getByText("BLS regional average")).toBeTruthy();
+    expect(screen.getByText("Source: BLS average price series APU0200709112")).toBeTruthy();
   });
 
   it("asks for a ZIP code first when the profile has none", async () => {

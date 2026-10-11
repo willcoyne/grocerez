@@ -28,7 +28,7 @@ import {
 } from "@/components/ui";
 import { ListRow } from "@/features/list/ListRow";
 import { confirm } from "@/lib/confirm";
-import { formatCentsRange, plural } from "@/lib/format";
+import { formatCents, formatCentsRange, plural } from "@/lib/format";
 import { toSections } from "@/lib/listSections";
 import { maybeAskNotificationPermission } from "@/notifications/expirations";
 import { useSocketConnected } from "@/realtime/SocketProvider";
@@ -78,6 +78,11 @@ export default function ListScreen() {
   const sections = useMemo(() => toSections(list.data ?? []), [list.data]);
   // Read-only view of the cached estimate (fetched from the Prices modal).
   const prices = usePrices(groupId, { enabled: false }).data;
+  /** itemId → "~$3.49" for the rows (from the last estimate). */
+  const priceById = useMemo(
+    () => new Map((prices?.items ?? []).map((p) => [p.itemId, `~${formatCents(p.typicalCents ?? Math.round((p.lowCents + p.highCents) / 2))}`])),
+    [prices],
+  );
   const onError = (e: unknown) => toast(errorMessage(e), { tone: "error" });
 
   const rows = list.data ?? [];
@@ -161,6 +166,7 @@ export default function ListScreen() {
             names={names}
             runningLow={lowItemIds.has(row.itemId)}
             syncing={syncingIds.has(row.id)}
+            priceText={priceById.get(row.itemId)}
             onToggle={(r) => check.mutate({ id: r.id, checked: !r.checked }, { onError })}
             onScan={(r) => router.push(`/scanner?mode=match-list-item&listItemId=${r.id}`)}
             onDelete={(r) => del.mutate(r.id, { onError })}
