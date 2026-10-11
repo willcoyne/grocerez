@@ -73,6 +73,8 @@ async def start_run(
         zip_code=body.zipCode,
         prompt=body.prompt,
         budget_cents=body.budgetCents,
+        dates=tuple(body.dates),
+        already_planned=tuple((a.date, a.title) for a in body.alreadyPlanned),
     )
     background.add_task(_guarded, ctx, settings)
     return {"accepted": True}

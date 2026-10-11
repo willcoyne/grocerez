@@ -384,7 +384,7 @@ async def test_no_tavily_key_falls_back_without_any_network(ctx, client, sink, s
     assert not route.called
     # ...and the prompt takes the draft-all-meals-in-one-turn path
     own = load_planner_prompt(False)
-    assert "find_recipe" not in own and "ALL 3 meals as FULL meals" in own
+    assert "find_recipe" not in own and "ALL the meals as FULL meals" in own
     assert "<!--" not in own and "Then:" in own and "propose_plan" in own
 
 
@@ -394,7 +394,7 @@ def test_key_set_registers_find_recipe_and_uses_the_recipe_prompt(ctx, client, s
     t = find_tools(ctx, client, sink, state, tavily_settings, make_pricer, mk_service(tavily_settings))
     assert "find_recipe" in t
     rec = load_planner_prompt(True)
-    assert "find_recipe(idea" in rec and "ALL 3 meals as FULL meals" not in rec and "<!--" not in rec
+    assert "find_recipe(idea" in rec and "ALL the meals as FULL meals" not in rec and "<!--" not in rec
     assert "propose_plan" in rec and "Then:" in rec
 
 

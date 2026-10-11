@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from pydantic import ValidationError
 from strands import tool
@@ -137,6 +137,37 @@ def assign_days(meals: list[dict[str, Any]], today: str | None) -> None:
                 break
 
 
+def weekday_of(d: str) -> str:
+    """'2026-10-12' -> 'Mon'."""
+    return _WEEKDAYS[date.fromisoformat(d).weekday()]
+
+
+def assign_dates(
+    meals: list[dict[str, Any]], dates: list[str], urgency: Callable[[dict[str, Any]], float] = lambda m: 0.0
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """One dinner per requested date. Keeps a meal's own date when it is a requested date nobody else has taken; the
+    rest (missing, invalid, duplicate, or not requested) get the free dates, the most urgent (soonest-expiring) meal on
+    the earliest free date. Returns (meals sorted by date; extras beyond len(dates) dropped, dates left without a
+    meal). `day` is derived from the date."""
+    wanted = set(dates)
+    taken: dict[str, dict[str, Any]] = {}
+    rest: list[dict[str, Any]] = []
+    for m in meals:
+        d = m.get("date")
+        if d in wanted and d not in taken:
+            taken[d] = dict(m)
+        else:
+            rest.append(dict(m))
+    free = [d for d in dates if d not in taken]
+    for m, d in zip(sorted(rest, key=urgency), free):  # sorted() is stable: ties keep the model's order
+        m["date"] = d
+        taken[d] = m
+    out = [taken[d] for d in dates if d in taken]
+    for m in out:
+        m["day"] = weekday_of(m["date"])
+    return out, [d for d in dates if d not in taken]
+
+
 def _lines(m: dict[str, Any]) -> list[str]:
     """A sourced meal's ingredient lines (<= 40, <= 200 chars each), sent so the agent checks what apply checks."""
     return [str(x)[:200] for x in m.get("ingredientLines") or [] if str(x).strip()][:40]
@@ -188,6 +219,25 @@ def build_tools(
     configured. Without either, the model never sees the tool (no wasted round trip)."""
     gid = ctx.group_id
     steps_factory = recipes.steps_factory if recipes is not None else None
+    target = len(ctx.dates) or MAX_MEALS  # meals to plan: one per requested date, or 3 for older servers
+
+    def _urgency(m: dict[str, Any]) -> float:
+        """Days until the soonest-expiring cabinet item a meal uses (smaller = more urgent = earlier date)."""
+        best = 999.0
+        for u in m.get("uses") or []:
+            for name, days in state.expiry_days.items():
+                if have_item(u, {name}):
+                    best = min(best, days)
+        return best
+
+    def _claim_date(requested: Any) -> str | None:
+        """Date for a freshly found meal: the one the model asked for if it is free, else the earliest free date."""
+        if not ctx.dates:
+            return None
+        taken = {m.get("date") for m in state.draft_meals.values()}
+        if requested in ctx.dates and requested not in taken:
+            return str(requested)
+        return next((d for d in ctx.dates if d not in taken), None)
 
     async def _household() -> dict[str, Any] | None:
         if state.household is None:
@@ -260,6 +310,7 @@ def build_tools(
         rows.sort(key=lambda r: (r["days"] is None, r["days"] or 0))
         rows = rows[:MAX_CABINET]
         state.cabinet_names = {_norm(r["name"]) for r in rows}
+        state.expiry_days = {_norm(r["name"]): r["days"] for r in rows if r["days"] is not None}
         blocked_keys = await _blocked([r["name"] for r in rows])
         blocked = [r["name"] for r in rows if _norm(r["name"]) in blocked_keys]
         rows = [r for r in rows if _norm(r["name"]) not in blocked_keys]
@@ -351,8 +402,8 @@ def build_tools(
         if not state.draft_meals or state.pending_finds > 0:
             return  # wait until every parallel find_recipe has landed so the final name set is priced once
         if all((r := state.safety_by_title.get(t)) is not None and r.passes for t in state.draft_meals):
-            # Only the meals that will ship (propose_plan caps at MAX_MEALS), so the priced set matches the final one.
-            kept = list(state.draft_meals.values())[:MAX_MEALS]
+            # Only the meals that will ship (propose_plan caps at `target`), so the priced set matches the final one.
+            kept = list(state.draft_meals.values())[:target]
             pricer.start(_unique(n for m in kept for n in m["missing"]))
 
     def _invalidate() -> None:
@@ -368,9 +419,11 @@ def build_tools(
         new = [normalize_meal(m) for m in strip_nul(meals) if isinstance(m, dict)]
         # Meals already found with find_recipe (cited) stay in the plan; the model only adds its own fallback meals.
         kept = [m for t, m in state.draft_meals.items() if m.get("source") and t not in {n["title"] for n in new}]
-        if len(kept) >= MAX_MEALS:  # everything is already found and checked: don't redraft it
+        if len(kept) >= target:  # everything is already found and checked: don't redraft it
             return _j({"all_pass": True, "note": f"{len(kept)} cited meals are already stored; call propose_plan now"})
-        norm = [*kept, *new][:MAX_MEALS]
+        norm = [*kept, *new][:target]
+        if ctx.dates:  # one dinner per requested date, the soonest-expiring meal on the earliest date
+            norm, _ = assign_dates(norm, list(ctx.dates), _urgency)
         real, extra, err = await _check(norm) if norm else ([], [], "error: no meals given")
         if err:
             _invalidate()  # unknown state: propose_plan must be preceded by a fresh check
@@ -387,6 +440,13 @@ def build_tools(
             bad = [p.ingredient for r in failed for p in r.problems][:2]
             label += f" · {len(failed)} failed: {', '.join(bad)}, fixing…" if bad else f" · {len(failed)} failed, fixing…"
         state.done_labels["check_meal_safety"] = _clip(label, 200)
+        for i, r in enumerate(real):  # the Week sheet fills a day as soon as its meal is known and safe
+            m = norm[i]
+            if r.passes and m["title"] not in state.previewed:
+                state.previewed.add(m["title"])
+                await sink.step(f"meal_{m.get('date') or i}", _clip(f"Planned: {m['title']}", 200), "done",
+                                preview={"date": m.get("date"), "title": _clip(m["title"], 120),
+                                         "site": (m.get("source") or {}).get("site")})
         if not failed:
             _maybe_price()
             unknown = sorted({u for r in real for u in r.unknown})
@@ -522,7 +582,7 @@ def build_tools(
             return None
         return parsed.meals if len(parsed.meals) == len(payload) else None
 
-    async def _find(idea: str, key: str, must_use: list[str], avoid: list[str]) -> str:
+    async def _find(idea: str, key: str, must_use: list[str], avoid: list[str], date_req: Any = None) -> str:
         tried: set[str] = set()
         winner = None
         source = ""
@@ -566,10 +626,16 @@ def build_tools(
             else:
                 why = "; ".join(f"{p.reason} ({p.ingredient})" for p in (chk[0].problems if chk else [])[:3]) or "no result"
                 log.info("model-written steps rejected (%s); using generic steps", why)
+        meal = {**meal, "date": _claim_date(date_req)}
+        if meal["date"]:
+            meal["day"] = weekday_of(meal["date"])
         state.draft_meals[meal["title"]] = meal
         state.safety_by_title[meal["title"]] = SafetyMealOut(title=meal["title"], passes=True, problems=[], unknown=res.unknown)
         state.used_urls.add(rec.url)
         state.done_labels[key] = _clip(f"Found: {rec.title} ({rec.site})", 200)
+        # The "done" event of this very step carries the preview, so the Week sheet fills the day at no extra cost.
+        state.done_previews[key] = {"date": meal["date"], "title": _clip(meal["title"], 120), "site": _clip(rec.site, 80)}
+        state.previewed.add(meal["title"])
         # Minimal result (tokens): the full meal, steps and lines stay in run state for propose_plan.
         return _j({"found": True, "title": meal["title"], "site": rec.site, "uses": meal["uses"][:8],
                    "missing": meal["missing"]})
@@ -630,15 +696,17 @@ def build_tools(
         return winner
 
     @tool
-    async def find_recipe(idea: str, must_use: list[str] | None = None, avoid: list[str] | None = None) -> str:
+    async def find_recipe(
+        idea: str, must_use: list[str] | None = None, avoid: list[str] | None = None, date: str | None = None
+    ) -> str:
         """Find a real, cited web recipe for one meal idea (prefers recipes using the must_use cabinet items, skips
-        ones with avoid items). A safe match is stored for propose_plan; do not re-send it. Call once per idea,
-        all ideas in the same turn."""
+        ones with avoid items) for the given YYYY-MM-DD date. A safe match is stored for propose_plan; do not re-send
+        it. Call once per idea, all ideas in the same turn."""
         idea = " ".join(str(strip_nul(idea)).split())[:120] or "dinner"
         state.pending_finds += 1
         try:
             return await _find(idea, step_key(idea), _strs(strip_nul(must_use or []))[:5],
-                               _strs(strip_nul(avoid or []))[:10])
+                               _strs(strip_nul(avoid or []))[:10], date)
         finally:
             state.pending_finds -= 1
             _maybe_price()
@@ -693,7 +761,17 @@ def build_tools(
             meals[-1] = normalize_meal({**last, "ingredients": [*last["ingredients"], *add],
                                         "missing": [*last["missing"], *add]})
         summary = str(plan.get("summary") or "")[:400]
-        if len(meals) > MAX_MEALS:
+        if ctx.dates:
+            # Exactly one dinner per requested date. Mislabelled dates (missing, duplicate, not requested) are fixed
+            # locally; too few meals is rejected; extra meals are dropped.
+            dict_meals = [m for m in meals if isinstance(m, dict)]
+            fixed, missing_dates = assign_dates(dict_meals, list(ctx.dates), _urgency)
+            if missing_dates:
+                return await _reject(
+                    f"error: plan exactly one dinner per requested date ({', '.join(ctx.dates)}); no meal for "
+                    f"{', '.join(missing_dates)}. Write the missing meal(s) with check_meal_safety, then propose again.")
+            meals = fixed
+        elif len(meals) > MAX_MEALS:
             note = f" Capped at {MAX_MEALS} meals."
             meals, summary = meals[:MAX_MEALS], summary[: 400 - len(note)].rstrip() + note
         try:
@@ -718,7 +796,13 @@ def build_tools(
                     "add_missing: [4 to 6 fresh ingredient names NOT in the cabinet or on the list].")
 
         norm_meals = [m.model_dump() for m in draft.meals]
-        assign_days(norm_meals, (state.household or {}).get("today"))
+        if ctx.dates:
+            for m in norm_meals:
+                m["day"] = weekday_of(m["date"])  # `day` always agrees with `date`
+        else:
+            for m in norm_meals:
+                m["date"] = None  # no calendar dates were requested (older server): days only
+            assign_days(norm_meals, (state.household or {}).get("today"))
         real, extra, err = await _check(norm_meals)
         if err:
             fatal = state.fatal_status is not None

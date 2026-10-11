@@ -125,7 +125,8 @@ class StepReporter(HookProvider):
             if name == "propose_plan" and not self._sink.terminal_sent and label == DONE_LABELS[name]:
                 # No label recorded means the proposal was not accepted.
                 label = "Fixing the plan…"
-            await self._sink.step(key, label, "failed" if failed else "done", detail)
+            await self._sink.step(key, label, "failed" if failed else "done", detail,
+                                  preview=None if failed else state.done_previews.pop(key, None))
             if name == "get_wants" and not self._drafting and not state.safety_by_title:
                 self._drafting = True
                 await self._sink.step(DRAFT_ID, "Drafting meals…", "running")
