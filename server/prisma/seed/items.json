@@ -186,6 +186,18 @@
   "shelf_life_days": 7
  },
  {
+  "name": "Basil",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
+  "name": "Parsley",
+  "category": "produce",
+  "default_allergens": [],
+  "shelf_life_days": 7
+ },
+ {
   "name": "Ginger",
   "category": "produce",
   "default_allergens": [],
