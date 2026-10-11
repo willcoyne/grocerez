@@ -61,7 +61,6 @@ export default function GroupScreen() {
         <Card>
           <EveryonesWants groupId={group.id} />
         </Card>
-        <Button title="✨ What can we cook? (quick recipes)" variant="ghost" compact onPress={() => router.push("/recipes")} />
 
         <SectionHeader title="Settings" />
         <GroupSettings groupId={group.id} name={group.name} isOwner={group.role === "owner"} />

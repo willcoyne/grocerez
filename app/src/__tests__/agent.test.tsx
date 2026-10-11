@@ -2,6 +2,7 @@ import type { AgentRun, AgentRunSummary, ApplyAgentRunResponse } from "@contract
 import type { ShoppingListItem } from "@contracts/shoppingList";
 import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import * as WebBrowser from "expo-web-browser";
 
 import demoRunJson from "../../../server/test/fixtures/agent/demo-run.json";
 import { api, ApiError } from "@/api/client";
@@ -9,10 +10,12 @@ import { keys } from "@/api/keys";
 import ListScreen from "@/app/(tabs)/index";
 import GroupScreen from "@/app/(tabs)/group";
 import AgentScreen, { DEFAULT_PROMPT, replayDelays } from "@/app/agent";
+import { AgentMealCard } from "@/components/AgentMealCard";
 import { handleSocketEvent } from "@/realtime/SocketProvider";
 import { apiRoutes, renderWithProviders, testGroup } from "@/test-utils";
 
 jest.mock("@/api/client", () => ({ ...jest.requireActual("@/api/client"), api: jest.fn() }));
+jest.mock("expo-web-browser", () => ({ openBrowserAsync: jest.fn(async () => ({ type: "opened" })) }));
 jest.mock("@/lib/confirm", () => ({ confirm: jest.fn(async () => true) }));
 jest.mock("@/notifications/expirations", () => ({ maybeAskNotificationPermission: jest.fn() }));
 const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn() };
@@ -99,7 +102,7 @@ describe("Pantry Agent sheet", () => {
     await settle(queryClient);
   });
 
-  it("503 NOT_CONFIGURED on start goes straight to quick recipes", async () => {
+  it("503 NOT_CONFIGURED on start says the planner isn't set up (no retry, no navigation)", async () => {
     apiMock.mockImplementation(
       apiRoutes({
         [`POST /groups/${g}/agent/runs`]: () => {
@@ -109,7 +112,11 @@ describe("Pantry Agent sheet", () => {
     );
     await renderWithProviders(<AgentScreen />);
     await fireEvent.press(screen.getByLabelText("Run the planning agent"));
-    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith("/recipes"));
+    expect(await screen.findByText("The meal planner isn't set up on this server")).toBeTruthy();
+    expect(screen.queryByText("Try again")).toBeNull();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText("Close"));
+    expect(mockRouter.back).toHaveBeenCalled();
   });
 
   it("AGENT_UNAVAILABLE on start shows the failed state with retry", async () => {
@@ -126,7 +133,7 @@ describe("Pantry Agent sheet", () => {
     expect(screen.getByText("Try again")).toBeTruthy();
   });
 
-  it("a failed run shows its message, Try again starts a new run, and quick recipes is offered", async () => {
+  it("a failed run shows its message, Try again starts a new run, and Close dismisses", async () => {
     const failed: AgentRun = { ...clone(), status: "failed", plan: null, error: "Took too long" };
     apiMock.mockImplementation(
       apiRoutes({
@@ -141,8 +148,9 @@ describe("Pantry Agent sheet", () => {
     await fireEvent.press(screen.getByText("Try again"));
     await waitFor(() => expect(apiMock.mock.calls.filter(([p, o]) => p === `/groups/${g}/agent/runs` && o?.method === "POST")).toHaveLength(2));
 
-    await fireEvent.press(await screen.findByText("Use quick recipes instead"));
-    expect(mockRouter.replace).toHaveBeenCalledWith("/recipes");
+    await fireEvent.press(await screen.findByText("Close"));
+    expect(mockRouter.back).toHaveBeenCalled();
+    expect(screen.queryByText("Use quick recipes instead")).toBeNull();
     await settle(queryClient);
   });
 
@@ -220,7 +228,7 @@ describe("Recorded-run replay", () => {
 });
 
 describe("Group tab entry point", () => {
-  it("'Plan our week' opens the agent; long-press opens the replay (dev build); quick recipes stays as a link", async () => {
+  it("'Plan our week' opens the agent; long-press opens the replay (dev build); the old recipes link is gone", async () => {
     apiMock.mockImplementation(
       apiRoutes({
         [`GET /groups/${g}`]: () => ({ ...testGroup, members: [] }),
@@ -232,8 +240,8 @@ describe("Group tab entry point", () => {
     expect(mockRouter.push).toHaveBeenCalledWith("/agent");
     await fireEvent(screen.getByLabelText("✨ Plan our week"), "longPress");
     expect(mockRouter.push).toHaveBeenCalledWith("/agent?replay=1");
-    await fireEvent.press(screen.getByText("✨ What can we cook? (quick recipes)"));
-    expect(mockRouter.push).toHaveBeenCalledWith("/recipes");
+    expect(screen.queryByText(/What can we cook/)).toBeNull();
+    expect(mockRouter.push).not.toHaveBeenCalledWith("/recipes");
   });
 });
 
@@ -268,5 +276,63 @@ describe("Shopping list ✨ note chip", () => {
     expect(await screen.findByText("✨ for Lemon garlic chicken with spinach rice")).toBeTruthy();
     expect(screen.getByLabelText("AI note: for Lemon garlic chicken with spinach rice")).toBeTruthy();
     expect(screen.getAllByLabelText(/^AI note:/)).toHaveLength(1);
+  });
+});
+
+describe("Meal cards (cited web recipes, spec §11)", () => {
+  const meals = clone().plan!.meals;
+  const pass = (title: string) => ({ title, passes: true, unknown: [] });
+
+  it("a sourced meal shows the photo, ingredient lines (5 then 'Show all'), our steps, and a citation that opens the page", async () => {
+    const meal = meals[0];
+    await renderWithProviders(<AgentMealCard meal={meal} safety={pass(meal.title)} />);
+    expect(screen.getByTestId("agent-meal-photo")).toBeTruthy();
+    expect(screen.getByLabelText(`Photo of ${meal.source!.title}`)).toBeTruthy();
+    expect(screen.getByText("Mon · 35 min · serves 4")).toBeTruthy();
+    expect(screen.queryByText("✨ AI-created recipe")).toBeNull();
+
+    // Ingredient lines with quantities: 5 shown, the 6th behind "Show all 6".
+    expect(screen.getByText("• 1.5 lb chicken breast")).toBeTruthy();
+    expect(screen.getByText("• 1 lemon, juiced")).toBeTruthy();
+    expect(screen.queryByText("• 2 tbsp olive oil")).toBeNull();
+    await fireEvent.press(screen.getByText("Show all 6"));
+    expect(screen.getByText("• 2 tbsp olive oil")).toBeTruthy();
+
+    // Our own short steps, not the site's.
+    expect(screen.getByText("1. Cook the rice.")).toBeTruthy();
+
+    const link = screen.getByLabelText("Open the full recipe on Example Kitchen");
+    expect(link.props.accessibilityRole).toBe("link");
+    expect(screen.getByText("Recipe from Example Kitchen ↗")).toBeTruthy();
+    await fireEvent.press(link);
+    expect(WebBrowser.openBrowserAsync).toHaveBeenCalledWith(meal.source!.url);
+  });
+
+  it("a sourced meal without an image shows no photo, and the site's own title when it differs", async () => {
+    const meal = meals[1];
+    await renderWithProviders(<AgentMealCard meal={meal} safety={pass(meal.title)} />);
+    expect(screen.queryByTestId("agent-meal-photo")).toBeNull();
+    expect(screen.getByText("“Black Bean Spinach Quesadillas”")).toBeTruthy();
+    expect(screen.getByText("Recipe from Example Kitchen ↗")).toBeTruthy();
+    expect(screen.getByText("• 8 flour tortillas")).toBeTruthy();
+  });
+
+  it("five or fewer ingredient lines show without a 'Show all' button", async () => {
+    const meal = { ...meals[1], ingredientLines: meals[1].ingredientLines.slice(0, 5) };
+    await renderWithProviders(<AgentMealCard meal={meal} safety={pass(meal.title)} />);
+    expect(screen.getByText("• 1/2 cup salsa")).toBeTruthy();
+    expect(screen.queryByText(/Show all/)).toBeNull();
+  });
+
+  it("an unsourced meal is labeled AI-created and shows the generic ingredients, with no citation", async () => {
+    const meal = meals[2];
+    expect(meal.source).toBeNull();
+    await renderWithProviders(<AgentMealCard meal={meal} safety={pass(meal.title)} />);
+    expect(screen.getByText("✨ AI-created recipe")).toBeTruthy();
+    expect(screen.getByLabelText("AI-created recipe, generated by AI")).toBeTruthy();
+    expect(screen.getByText(`Ingredients: ${meal.ingredients.join(", ")}`)).toBeTruthy();
+    expect(screen.queryByText(/^• /)).toBeNull();
+    expect(screen.queryByText(/Recipe from/)).toBeNull();
+    expect(screen.queryByTestId("agent-meal-photo")).toBeNull();
   });
 });
