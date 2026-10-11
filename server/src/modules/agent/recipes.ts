@@ -1,3 +1,4 @@
+import { config } from "../../config.js";
 import type { RecipeSearchBody, RecipeSearchResponse } from "../../contracts/agent.js";
 import type { IndexedRecipe } from "../../contracts/agent.js";
 import type { Allergen } from "../../contracts/dietary.js";
@@ -10,8 +11,48 @@ import { agentRepo } from "./repo.js";
 import { recipeRepo, type EmbedTodo } from "./recipeRepo.js";
 import { catalogMatch } from "./safety.js";
 
-/** Ranking boost per mustUse item a recipe uses (cosine distance units). */
+/**
+ * Kitchen-fit ranking (cosine distance units; lower score = better):
+ *   score = distance − 0.03·(mustUse items used) − 0.10·(cabinet coverage) + 0.01·max(0, missing − 4)
+ * coverage = share of a recipe's ingredients the household already has; missing = how many it doesn't.
+ */
 export const MUST_USE_BOOST = 0.03;
+export const COVERAGE_BOOST = 0.1;
+export const MISSING_PENALTY = 0.01;
+const MISSING_FREE = 4;
+/** SQL candidate pool = limit × this, so the re-ranking has room. */
+const CANDIDATE_POOL = 6;
+/** Always in a kitchen: neither "covered" nor "missing". */
+const STAPLES = new Set(["salt", "pepper", "black pepper", "kosher salt", "sea salt", "water", "ice", "cooking spray"]);
+
+type Ranked<R> = { r: R; uses: string[]; coverage: number; missing: number; score: number };
+
+/**
+ * Re-ranks search candidates by how well they fit this kitchen. Names match whole-word in either direction
+ * (normalized, as listWriter/safety do): "Boneless Chicken Breast" ⊇ "chicken breast", "Chicken" ⊆ "chicken breast".
+ */
+export function rankByKitchenFit<R extends { distance: number; ingredients: string[] }>(
+  rows: R[],
+  mustUse: string[],
+  cabinet: string[],
+): Ranked<R>[] {
+  const pad = (s: string) => ` ${normalize(s)} `;
+  const cab = [...new Set(cabinet.map(pad))].filter((c) => c.trim());
+  const wants = mustUse.map((name) => ({ name, key: pad(name) })).filter((u) => u.key.trim());
+  const matches = (a: string, b: string) => a.includes(b) || b.includes(a);
+  return rows
+    .map((r) => {
+      const names = [...new Set(r.ingredients.map(pad))].filter((n) => n.trim() && !STAPLES.has(n.trim()));
+      const have = names.filter((n) => cab.some((c) => matches(n, c))).length;
+      const coverage = names.length ? have / names.length : 0;
+      const missing = names.length - have;
+      const uses = wants.filter((u) => names.some((n) => n.includes(u.key))).map((u) => u.name);
+      const score =
+        r.distance - MUST_USE_BOOST * uses.length - COVERAGE_BOOST * coverage + MISSING_PENALTY * Math.max(0, missing - MISSING_FREE);
+      return { r, uses, coverage, missing, score };
+    })
+    .sort((a, b) => a.score - b.score);
+}
 /** Catalog lookups in flight at once during ingest (each is one search_items query). */
 const LOOKUP_CONCURRENCY = 8;
 
@@ -95,8 +136,9 @@ export const recipeIndex = {
 
   /**
    * POST /groups/:gid/agent/recipes/search. One SQL query: nearest by cosine distance, excluding any recipe whose
-   * precomputed allergens overlap a member's allergens (limit×4 candidates). Then, in TS, drop recipes whose text
-   * conflicts with a member's diet (conflicts() per member, as in safety.ts), boost mustUse matches, take `limit`.
+   * precomputed allergens overlap a member's allergens and any non-dinner title (config.RECIPE_NON_DINNER_TITLE),
+   * limit×6 candidates. Then, in TS, drop recipes whose text conflicts with a member's diet (conflicts() per member,
+   * as in safety.ts), re-rank by kitchen fit (rankByKitchenFit: mustUse, cabinet coverage, missing count), take `limit`.
    * available=false (→ the agent falls back to Tavily) when Akamai isn't configured/reachable or nothing is embedded.
    */
   async search(groupId: string, body: RecipeSearchBody): Promise<RecipeSearchResponse> {
@@ -116,23 +158,18 @@ export const recipeIndex = {
     if (!vector) return unavailable;
 
     const excluded = [...new Set(members.flatMap((m) => m.allergens))];
-    const rows = await recipeRepo.nearest(vector, model, excluded, body.limit * 4);
+    const [rows, cabinet] = await Promise.all([
+      recipeRepo.nearest(vector, model, excluded, body.limit * CANDIDATE_POOL, config.RECIPE_NON_DINNER_TITLE),
+      recipeRepo.cabinetNames(groupId),
+    ]);
     if (rows.length === 0) return { recipes: [], available: await recipeRepo.hasEmbedded(model) };
 
     const dieters = members.filter((m) => m.diets.length > 0);
-    const mustUse = body.mustUse.map((name) => ({ name, key: normalize(name) })).filter((u) => u.key);
-    const ranked = rows
-      .filter((r) => {
-        const text = [r.title, ...r.ingredientLines, ...r.ingredients].join("\n");
-        return dieters.every((m) => conflicts(text, m.diets, []).length === 0);
-      })
-      .map((r) => {
-        const names = r.ingredients.map((i) => ` ${normalize(i)} `);
-        const uses = mustUse.filter((u) => names.some((n) => n.includes(` ${u.key} `))).map((u) => u.name);
-        return { r, uses, score: r.distance - MUST_USE_BOOST * uses.length };
-      })
-      .sort((a, b) => a.score - b.score)
-      .slice(0, body.limit);
+    const safe = rows.filter((r) => {
+      const text = [r.title, ...r.ingredientLines, ...r.ingredients].join("\n");
+      return dieters.every((m) => conflicts(text, m.diets, []).length === 0);
+    });
+    const ranked = rankByKitchenFit(safe, body.mustUse, cabinet).slice(0, body.limit);
 
     return {
       available: true,

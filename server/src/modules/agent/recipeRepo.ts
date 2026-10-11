@@ -61,6 +61,10 @@ export const recipeRepo = {
       FROM unnest(${rows.map((x) => x.id)}::uuid[], ${rows.map((x) => toVectorLiteral(x.vector))}::text[]) AS v(id, e)
       WHERE r.id = v.id`,
 
+  /** Names of what's in the household's cabinet (in stock or running low): the kitchen-fit ranking. */
+  cabinetNames: async (groupId: string) =>
+    (await prisma.cabinetItem.findMany({ where: { groupId }, select: { item: { select: { name: true } } } })).map((c) => c.item.name),
+
   hasEmbedded: async (model: string) =>
     (await prisma.$queryRaw<{ ok: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM recipes WHERE embedding_model = ${model}) AS ok`)[0].ok,
@@ -70,7 +74,14 @@ export const recipeRepo = {
    * 1024-d (production): the partial HNSW index on (embedding::vector(1024)), with pgvector iterative scans so the
    * allergen filter can't starve the result (relaxed order; callers re-rank anyway). Other dimensions: exact scan.
    */
-  nearest: async (vector: number[], model: string, excluded: Allergen[], take: number): Promise<RecipeRow[]> => {
+  nearest: async (
+    vector: number[],
+    model: string,
+    excluded: Allergen[],
+    take: number,
+    /** config.RECIPE_NON_DINNER_TITLE: filtered in SQL so sauces/desserts don't use up the candidate pool. */
+    nonDinnerTitle: string,
+  ): Promise<RecipeRow[]> => {
     const v = toVectorLiteral(vector);
     if (vector.length === INDEXED_DIMS) {
       const [, , rows] = await prisma.$transaction([
@@ -82,7 +93,7 @@ export const recipeRepo = {
                  (embedding::vector(1024) <=> ${v}::vector(1024))::float8 AS distance
           FROM recipes
           WHERE vector_dims(embedding) = 1024 AND embedding_model = ${model}
-            AND NOT (allergens && ${excluded}::allergen[])
+            AND NOT (allergens && ${excluded}::allergen[]) AND title !~* ${nonDinnerTitle}
           ORDER BY embedding::vector(1024) <=> ${v}::vector(1024)
           LIMIT ${take}::int`,
       ]);
@@ -94,7 +105,7 @@ export const recipeRepo = {
              (embedding <=> ${v}::vector)::float8 AS distance
       FROM recipes
       WHERE embedding_model = ${model} AND vector_dims(embedding) = ${vector.length}::int
-        AND NOT (allergens && ${excluded}::allergen[])
+        AND NOT (allergens && ${excluded}::allergen[]) AND title !~* ${nonDinnerTitle}
       ORDER BY embedding <=> ${v}::vector
       LIMIT ${take}::int`;
   },
