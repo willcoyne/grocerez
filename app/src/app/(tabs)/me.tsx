@@ -1,5 +1,6 @@
 import type { Dietary } from "@contracts/dietary";
 import { Image } from "expo-image";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 
@@ -19,6 +20,7 @@ import { size, space } from "@/theme";
 export default function MeScreen() {
   const { activeGroupId } = useActiveGroup();
   const { signOut } = useAuth();
+  const router = useRouter();
   return (
     <View style={styles.screen} testID="tab-me">
       <TabHeader title="My preferences" />
@@ -29,6 +31,8 @@ export default function MeScreen() {
         <DietarySection />
         <SectionLabel style={styles.gapTop}>Profile</SectionLabel>
         <Profile />
+        <SectionLabel style={styles.gapTop}>About</SectionLabel>
+        <Button label="How the Pantry Agent works" variant="secondary" fullWidth onPress={() => router.push("/agent-flow")} />
         <Button label="Sign out" variant="secondary" fullWidth onPress={() => void signOut()} />
       </ScrollView>
     </View>

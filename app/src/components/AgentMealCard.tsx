@@ -1,11 +1,12 @@
 import type { AgentPlan, PlanMeal } from "@contracts/agent";
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
+import { ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
-import { AiLabel, Button, Card } from "@/components/ui";
-import { colors, fontSize, radius, spacing, TAP_TARGET } from "@/theme";
+import { AiLabel, AppText, Button, Card, StatusChip, type ChipTone } from "@/components/ui";
+import { color, pressedOpacity, size, space } from "@/theme";
 
 type MealSafety = AgentPlan["safety"]["perMeal"][number];
 type MealSource = NonNullable<PlanMeal["source"]>;
@@ -13,51 +14,92 @@ type MealSource = NonNullable<PlanMeal["source"]>;
 /** How many source ingredient lines show before "Show all N". */
 export const INGREDIENT_PREVIEW = 5;
 
-/** The safety line, from the server's check (the app never decides safety itself). Symbol + words, not color alone. */
-export function safetyText(safety: MealSafety | undefined): { text: string; ok: boolean } {
-  if (!safety) return { text: "⚠ Not safety-checked", ok: false };
-  if (!safety.passes) return { text: "⚠ Didn't pass the household safety check", ok: false };
-  const unknown = safety.unknown.length ? ` · couldn't verify: ${safety.unknown.join(", ")}` : "";
-  return { text: `✓ Safe for everyone${unknown}`, ok: true };
+/** The safety status, from the server's check (the app never decides safety itself). Text + icon, never color alone. */
+export function safetyStatus(safety: MealSafety | undefined): { label: string; tone: ChipTone; unknown: string[] } {
+  if (!safety) return { label: "Not safety-checked", tone: "neutral", unknown: [] };
+  if (!safety.passes) return { label: "Didn't pass the safety check", tone: "danger", unknown: [] };
+  return { label: "Safe for everyone", tone: "ok", unknown: safety.unknown };
 }
 
+const SAFETY_ICON = { ok: ShieldCheck, danger: ShieldAlert, neutral: ShieldQuestion, warn: ShieldQuestion } as const;
+
 /**
- * One proposed dinner. With a `source` (a real web recipe, spec §11): photo, the recipe's ingredient lines, our short
- * steps, and a citation linking to the original. Without one: labeled "AI-created recipe" with the generic ingredients.
- * Split into small parts (MealPhoto, IngredientLines, Steps, Citation) so the design pass can restyle each.
+ * One proposed dinner, built to scan: the photo leads, then title, time and servings, and where the recipe comes from
+ * (a cited web recipe, spec §11, or "AI-created recipe"). Then the household safety chip, what it uses and what to buy,
+ * and collapsible ingredients and steps (closed by default to keep cards short).
  */
-export function AgentMealCard({ meal, safety }: { meal: PlanMeal; safety: MealSafety | undefined }) {
-  const s = safetyText(safety);
+export function AgentMealCard({
+  meal,
+  safety,
+  style,
+}: {
+  meal: PlanMeal;
+  safety: MealSafety | undefined;
+  /** Outer layout only (width, margins); the card makes no assumptions about where it sits (list, calendar cell). */
+  style?: StyleProp<ViewStyle>;
+}) {
   const source = meal.source;
+  const s = safetyStatus(safety);
   const meta = [meal.day, `${meal.minutes} min`, `serves ${meal.servings}`].filter(Boolean).join(" · ");
-  const uses = meal.uses.length ? `uses: ${meal.uses.join(", ")}` : "uses: nothing from the cabinet";
-  const missing = meal.missing.length ? `missing: ${meal.missing.join(", ")}` : "nothing to buy";
   const showSourceTitle = !!source && source.title.trim().toLowerCase() !== meal.title.trim().toLowerCase();
 
   return (
-    <Card>
+    <Card style={[styles.card, style]}>
       {source?.imageUrl ? <MealPhoto uri={source.imageUrl} title={source.title} /> : null}
-      <Text style={styles.title} accessibilityRole="header">
-        {meal.title}
-      </Text>
-      {showSourceTitle ? <Text style={styles.muted}>“{source.title}”</Text> : null}
-      {source ? null : <AiLabel text="AI-created recipe" />}
-      <Text style={styles.muted}>{meta}</Text>
-      <Text style={styles.body}>
-        {uses} · {missing}
-      </Text>
-      <Text style={[styles.safety, s.ok ? styles.safe : styles.unsafe]}>{s.text}</Text>
+      <View style={styles.body}>
+        <View style={styles.head}>
+          <AppText variant="bodyL" weight="heavy" accessibilityRole="header">
+            {meal.title}
+          </AppText>
+          {showSourceTitle ? (
+            <AppText variant="caption" color="muted">
+              {`“${source.title}”`}
+            </AppText>
+          ) : null}
+          <AppText variant="caption" weight="semi" color="ink2">
+            {meta}
+          </AppText>
+        </View>
+        {source ? <Citation source={source} /> : <AiLabel text="AI-created recipe" />}
 
-      {source && meal.ingredientLines.length ? (
-        <IngredientLines lines={meal.ingredientLines} />
-      ) : (
-        <Text style={styles.body}>
-          <Text style={styles.label}>Ingredients: </Text>
-          {meal.ingredients.join(", ")}
-        </Text>
-      )}
-      <Steps steps={meal.steps} />
-      {source ? <Citation source={source} /> : null}
+        <View style={styles.safety}>
+          <StatusChip
+            label={s.label}
+            tone={s.tone}
+            icon={SAFETY_ICON[s.tone]}
+            accessibilityLabel={`Household safety check: ${s.label}`}
+          />
+          {s.unknown.length ? (
+            <AppText variant="caption" color="muted">{`Couldn't verify: ${s.unknown.join(", ")}`}</AppText>
+          ) : null}
+        </View>
+
+        <View style={styles.uses}>
+          <AppText variant="caption" color="ink2">
+            <AppText variant="caption" weight="bold" color="ink2">
+              From your cabinet:{" "}
+            </AppText>
+            {meal.uses.length ? meal.uses.join(", ") : "nothing"}
+          </AppText>
+          <AppText variant="caption" color="ink2">
+            <AppText variant="caption" weight="bold" color="ink2">
+              To buy:{" "}
+            </AppText>
+            {meal.missing.length ? meal.missing.join(", ") : "nothing"}
+          </AppText>
+        </View>
+
+        <Collapsible title="Ingredients" count={source && meal.ingredientLines.length ? meal.ingredientLines.length : meal.ingredients.length} mealTitle={meal.title}>
+          {source && meal.ingredientLines.length ? (
+            <IngredientLines lines={meal.ingredientLines} />
+          ) : (
+            <AppText variant="bodyS">{meal.ingredients.join(", ")}</AppText>
+          )}
+        </Collapsible>
+        <Collapsible title="Steps" count={meal.steps.length} mealTitle={meal.title}>
+          <Steps steps={meal.steps} />
+        </Collapsible>
+      </View>
     </Card>
   );
 }
@@ -75,20 +117,40 @@ function MealPhoto({ uri, title }: { uri: string; title: string }) {
   );
 }
 
+/** A section that starts closed: "Ingredients · 6" with a chevron. */
+function Collapsible({ title, count, mealTitle, children }: { title: string; count: number; mealTitle: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronUp : ChevronDown;
+  return (
+    <View style={styles.section}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${open ? "Hide" : "Show"} ${title.toLowerCase()} for ${mealTitle}`}
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(!open)}
+        style={({ pressed }) => [styles.sectionHead, pressed && { opacity: pressedOpacity }]}
+      >
+        <AppText variant="bodyS" weight="bold" style={styles.flex}>
+          {`${title} · ${count}`}
+        </AppText>
+        <Chevron size={18} color={color.ink2} />
+      </Pressable>
+      {open ? <View style={styles.sectionBody}>{children}</View> : null}
+    </View>
+  );
+}
+
 /** The source's lines with quantities: first 5, then "Show all N". */
 function IngredientLines({ lines }: { lines: string[] }) {
   const [all, setAll] = useState(false);
   const visible = all ? lines : lines.slice(0, INGREDIENT_PREVIEW);
   return (
-    <View style={styles.gap}>
-      <Text style={styles.label}>Ingredients</Text>
+    <View style={styles.lines}>
       {visible.map((line, i) => (
-        <Text key={i} style={styles.body}>
-          • {line}
-        </Text>
+        <AppText key={i} variant="bodyS">{`• ${line}`}</AppText>
       ))}
       {lines.length > INGREDIENT_PREVIEW ? (
-        <Button title={all ? "Show fewer" : `Show all ${lines.length}`} variant="ghost" compact onPress={() => setAll(!all)} />
+        <Button label={all ? "Show fewer" : `Show all ${lines.length}`} variant="ghost" size="sm" onPress={() => setAll(!all)} style={styles.left} />
       ) : null}
     </View>
   );
@@ -97,12 +159,9 @@ function IngredientLines({ lines }: { lines: string[] }) {
 /** Our own short steps (model-written, ≤ 6); the site's full method stays on the site. */
 function Steps({ steps }: { steps: string[] }) {
   return (
-    <View style={styles.gap}>
-      <Text style={styles.label}>Steps</Text>
+    <View style={styles.lines}>
       {steps.map((step, i) => (
-        <Text key={i} style={styles.body}>
-          {i + 1}. {step}
-        </Text>
+        <AppText key={i} variant="bodyS">{`${i + 1}. ${step}`}</AppText>
       ))}
     </View>
   );
@@ -114,24 +173,26 @@ function Citation({ source }: { source: MealSource }) {
       accessibilityRole="link"
       accessibilityLabel={`Open the full recipe on ${source.site}`}
       onPress={() => void WebBrowser.openBrowserAsync(source.url)}
-      style={({ pressed }) => [styles.citation, pressed && styles.pressed]}
+      hitSlop={{ top: 6, bottom: 6 }}
+      style={({ pressed }) => [styles.citation, pressed && { opacity: pressedOpacity }]}
     >
-      <Text style={styles.link}>Recipe from {source.site} ↗</Text>
+      <AppText variant="bodyS" weight="bold" color="primary">{`Recipe from ${source.site} ↗`}</AppText>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  photo: { width: "100%", aspectRatio: 16 / 9, borderRadius: radius.md, backgroundColor: colors.border },
-  title: { fontSize: fontSize.lg, fontWeight: "800", color: colors.text },
-  label: { fontSize: fontSize.sm, fontWeight: "700", color: colors.text },
-  body: { fontSize: fontSize.md, color: colors.text },
-  muted: { fontSize: fontSize.sm, color: colors.textMuted },
-  safety: { fontSize: fontSize.sm, fontWeight: "600" },
-  safe: { color: colors.success },
-  unsafe: { color: colors.danger },
-  gap: { gap: spacing.xs },
-  citation: { minHeight: TAP_TARGET, justifyContent: "center", alignSelf: "flex-start" },
-  link: { fontSize: fontSize.md, fontWeight: "700", color: colors.primary, textDecorationLine: "underline" },
-  pressed: { opacity: 0.7 },
+  card: { padding: 0, overflow: "hidden" },
+  photo: { width: "100%", aspectRatio: 16 / 9, backgroundColor: color.segment },
+  body: { padding: space.md, gap: space.md },
+  head: { gap: 2 },
+  citation: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: size.hit, alignSelf: "flex-start" },
+  safety: { gap: space.xs },
+  uses: { gap: 2 },
+  section: { borderTopWidth: 1, borderTopColor: color.border },
+  sectionHead: { flexDirection: "row", alignItems: "center", minHeight: size.hit, gap: space.sm },
+  sectionBody: { paddingBottom: space.sm },
+  lines: { gap: space.xs },
+  left: { alignSelf: "flex-start", paddingHorizontal: 0 },
+  flex: { flex: 1 },
 });

@@ -332,8 +332,10 @@ describe("plan shape edge cases", () => {
     const dupKey = err.mock.calls.some((c) => String(c[0]).includes("same key"));
     err.mockRestore();
     expect(dupKey).toBe(false);
-    // The second card's safety line comes from perMeal[1], not the first match by title.
-    expect(screen.getByText("✓ Safe for everyone · couldn't verify: za'atar")).toBeTruthy();
+    // The second card's safety line comes from perMeal[1], not the first match by title: both cards render a status,
+    // and the "couldn't verify" note (only perMeal[1] has one) appears exactly once.
+    expect(screen.getAllByText("Safe for everyone")).toHaveLength(2);
+    expect(screen.getAllByText("Couldn't verify: za'atar")).toHaveLength(1);
     await settle(queryClient);
   });
 });
