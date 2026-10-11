@@ -76,6 +76,27 @@ async def test_drafting_closed_by_whatever_tool_starts_next(sink, state):
 
 
 @respx.mock
+async def test_parallel_find_recipe_calls_get_separate_rows_with_found_labels(sink, state):
+    from app.recipes import step_key
+
+    route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
+    rep = StepReporter(sink, state)
+    a, b = {"idea": "lemon chicken"}, {"idea": "spinach pasta"}
+    await rep.before(before("find_recipe", a))
+    await rep.before(before("find_recipe", b))
+    state.done_labels[step_key("lemon chicken")] = "Found: Lemon Garlic Chicken (Serious Eats)"
+    state.done_labels[step_key("spinach pasta")] = "No safe recipe found, writing it myself"
+    await rep.after(after("find_recipe", a))
+    await rep.after(after("find_recipe", b))
+    await sink.flush()
+    steps = [e["payload"] for e in sent(route)]
+    ids = {s["id"] for s in steps}
+    assert ids == {step_key("lemon chicken"), step_key("spinach pasta")}
+    assert steps[0]["label"] == "Finding a recipe: lemon chicken…"
+    assert "Found: Lemon Garlic Chicken (Serious Eats)" in [s["label"] for s in steps]
+
+
+@respx.mock
 async def test_failed_tool_marks_step_failed(sink, state):
     route = respx.post(EVENTS).mock(return_value=httpx.Response(204))
     rep = StepReporter(sink, state)

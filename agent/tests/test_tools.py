@@ -173,7 +173,7 @@ def test_normalize_meal_enforces_missing_subset_and_derives_uses():
 def test_safety_payload_has_steps_union_ingredients_and_to_buy():
     a, b = normalize_meal(MEAL_A), normalize_meal(MEAL_B)
     payload = safety_payload([a, b])
-    assert payload[0] == {"title": "Rice bowl", "steps": ["Cook rice.", "Add lemon."],
+    assert payload[0] == {"title": "Rice bowl", "steps": ["Cook rice.", "Add lemon."], "ingredientLines": [],
                           "ingredients": ["Rice", "Lemons"]}
     assert payload[-1] == {"title": "To buy", "ingredients": ["Lemons", "Cilantro"]}
     assert len(payload) == 3

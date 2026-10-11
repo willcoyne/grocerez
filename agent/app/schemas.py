@@ -60,6 +60,15 @@ S500 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max
 # ─── Plan ────────────────────────────────────────────────────────────────────
 
 
+class PlanSource(BaseModel):
+    """The web recipe a meal comes from (cited; we show our own short steps and link out)."""
+
+    url: str = Field(max_length=2000, pattern=r"^https://")
+    site: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    imageUrl: str | None = Field(max_length=2000, pattern=r"^https://")
+
+
 class PlanMeal(BaseModel):
     title: S120
     day: Weekday | None
@@ -69,6 +78,11 @@ class PlanMeal(BaseModel):
     uses: list[S120] = Field(max_length=15)
     missing: list[S120] = Field(max_length=15)
     steps: list[S500] = Field(min_length=1, max_length=6)
+    source: PlanSource | None = None
+    # The source's ingredient lines with quantities, for display. Empty when there is no source.
+    ingredientLines: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=40
+    )
 
 
 class PlanMissingItem(BaseModel):
@@ -188,6 +202,10 @@ class SafetyMealIn(BaseModel):
     ingredients: list[S120] = Field(min_length=1, max_length=25)
     # Apply also checks the title and steps for allergen/diet keywords, so the agent sends them too.
     steps: list[S500] = Field(default_factory=list, max_length=6)
+    # A sourced meal's raw ingredient lines: keyword-scanned only (never "unknown"), like apply does.
+    ingredientLines: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=40
+    )
 
 
 class SafetyCheckBody(BaseModel):
@@ -308,6 +326,9 @@ class RunState:
     failed_tools: set[str] = field(default_factory=set)
     safety_by_title: dict[str, SafetyMealOut] = field(default_factory=dict)
     draft_meals: dict[str, dict[str, Any]] = field(default_factory=dict)  # normalized meals of the last check
+    list_names: set[str] = field(default_factory=set)  # singular-normalized names already on the list
+    used_urls: set[str] = field(default_factory=set)  # recipe pages already chosen this run
+    pending_finds: int = 0  # find_recipe calls in flight (pricing waits until they finish)
     to_buy_ok: bool = False  # the "To buy" pseudo-meal passed the last safety check
     cabinet_names: set[str] = field(default_factory=set)  # normalized cabinet item names
     fatal_status: int | None = None  # 401/403 from the server: stop the run
