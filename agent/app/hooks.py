@@ -21,7 +21,7 @@ RUNNING_LABELS = {
     "get_shopping_list": "Checking the list…",
     "get_wants": "Checking what everyone wants…",
     "check_meal_safety": "Safety check…",
-    "estimate_prices": "Pricing missing items…",
+    "revise_meal": "Fixing a meal…",
     "propose_plan": "Finishing the plan…",
 }
 DONE_LABELS = {
@@ -30,7 +30,7 @@ DONE_LABELS = {
     "get_shopping_list": "Checked the list",
     "get_wants": "Checked what everyone wants",
     "check_meal_safety": "Safety check done",
-    "estimate_prices": "Priced the missing items",
+    "revise_meal": "Meal fixed",
     "propose_plan": "Plan ready",
 }
 DRAFT_ID = "drafting"
@@ -72,11 +72,6 @@ class StepReporter(HookProvider):
         return str(tool_use.get("name", "")) if isinstance(tool_use, dict) else ""
 
     def _running_label(self, name: str, tool_use: Any) -> str:
-        inp = tool_use.get("input") if isinstance(tool_use, dict) else None
-        if isinstance(inp, dict) and name == "estimate_prices":
-            items = inp.get("items")
-            if isinstance(items, list) and items:
-                return f"Pricing {len(items)} missing items…"
         return RUNNING_LABELS.get(name, f"Running {name}…")
 
     async def _finish_drafting(self, tool_use: Any) -> None:
